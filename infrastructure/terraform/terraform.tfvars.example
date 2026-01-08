@@ -1,0 +1,36 @@
+# AEC Agent - Terraform Variables Example
+# Copy to terraform.tfvars and customize
+
+# Project Configuration
+project_name = "aec-agent"
+environment  = "development"
+aws_region   = "us-east-1"
+
+# VPC Configuration
+vpc_cidr = "10.0.0.0/16"
+az_count = 2
+
+# Instance Configuration
+# g4dn.4xlarge: 16 vCPU, 64GB RAM, NVIDIA T4 GPU
+instance_type      = "g4dn.4xlarge"
+instance_count     = 13    # For 50 users at 4 users/instance
+users_per_instance = 4
+root_volume_size   = 200   # GB
+
+# SSH/RDP Key Pair (must exist in AWS)
+key_pair_name = "your-key-pair-name"
+
+# Security - CIDR blocks allowed to RDP
+# IMPORTANT: Restrict to your office/VPN IP ranges
+allowed_rdp_cidrs = [
+  "10.0.0.0/8",      # Example: Private network
+  "192.168.1.0/24",  # Example: Office network
+  # Add your IP: "YOUR.PUBLIC.IP/32"
+]
+
+# Logging
+cloudwatch_log_group = "/aec-agent/application"
+log_retention_days   = 30
+
+# Alerting (optional)
+# alarm_sns_topic_arn = "arn:aws:sns:us-east-1:123456789012:alerts"
