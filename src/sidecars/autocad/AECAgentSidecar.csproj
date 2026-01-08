@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net48</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <OutputType>Library</OutputType>
+    <RootNamespace>AECAgent.AutoCAD</RootNamespace>
+    <AssemblyName>AECAgentSidecar</AssemblyName>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <!-- Set to true if AutoCAD is installed locally, false to use NuGet packages for dev -->
+    <UseLocalAutoCAD>false</UseLocalAutoCAD>
+  </PropertyGroup>
+
+  <!-- AutoCAD path for local installation -->
+  <PropertyGroup>
+    <AutoCADPath Condition="'$(AutoCADPath)' == ''">C:\Program Files\Autodesk\AutoCAD 2024</AutoCADPath>
+  </PropertyGroup>
+
+  <!-- Option 1: Use local AutoCAD installation (for building on machines with AutoCAD) -->
+  <ItemGroup Condition="'$(UseLocalAutoCAD)' == 'true'">
+    <Reference Include="accoremgd">
+      <HintPath>$(AutoCADPath)\accoremgd.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="acdbmgd">
+      <HintPath>$(AutoCADPath)\acdbmgd.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+    <Reference Include="acmgd">
+      <HintPath>$(AutoCADPath)\acmgd.dll</HintPath>
+      <Private>False</Private>
+    </Reference>
+  </ItemGroup>
+
+  <!-- Option 2: Use NuGet packages for development (IntelliSense, no AutoCAD needed) -->
+  <ItemGroup Condition="'$(UseLocalAutoCAD)' != 'true'">
+    <PackageReference Include="AutoCAD.NET" Version="24.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
+  </ItemGroup>
+
+</Project>
