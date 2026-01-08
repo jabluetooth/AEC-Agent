@@ -1,0 +1,35 @@
+# AEC Agent - Production Dependencies
+# Python 3.9+ required, 3.11 recommended
+
+# MCP Framework
+fastmcp>=0.1.0
+
+# HTTP Client with async support
+httpx>=0.27.0
+
+# Chatbot Frontend
+chainlit>=1.0.0
+
+# Retry logic with exponential backoff
+tenacity>=8.2.0
+
+# Environment configuration
+python-dotenv>=1.0.0
+
+# Async SQLite for caching
+aiosqlite>=0.19.0
+
+# Data validation
+pydantic>=2.0.0
+pydantic-settings>=2.0.0
+
+# AWS SDK for CloudWatch metrics
+boto3>=1.34.0
+
+# Logging
+structlog>=24.1.0
+
+# Server framework (for SSE transport)
+uvicorn>=0.27.0
+starlette>=0.36.0
+sse-starlette>=1.8.0
