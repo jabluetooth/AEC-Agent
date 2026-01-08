@@ -63,4 +63,5 @@ poetry.lock
 # Windows
 Thumbs.db
 
-*./implementation_phases/
+# Ignore implementation phases folder
+implementation_phases/
