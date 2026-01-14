@@ -35,6 +35,8 @@ dependencies = [
     "uvicorn>=0.27.0",
     "starlette>=0.36.0",
     "sse-starlette>=1.8.0",
+    "openai>=1.0.0",
+    "anthropic>=0.18.0",
 ]
 
 [project.optional-dependencies]
@@ -52,6 +54,7 @@ dev = [
 [project.scripts]
 aec-agent = "aec_agent.cli:main"
 aec-check-compat = "aec_agent.utils.version_checker:main"
+aec-launch = "aec_agent.launcher:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

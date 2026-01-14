@@ -48,10 +48,11 @@ async def lifespan(app):
         await cache_manager.close()
 
 
-# Create MCP server with lifespan
+# Create MCP server with lifespan and port configuration
 mcp = FastMCP(
     "AEC Agent",
-    lifespan=lifespan
+    lifespan=lifespan,
+    port=settings.mcp_server_port,
 )
 
 

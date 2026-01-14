@@ -14,6 +14,43 @@ from aec_agent.config.settings import get_settings
 from aec_agent.utils.version_checker import VersionChecker
 
 
+def cmd_launch(args: argparse.Namespace) -> int:
+    """Launch the full AEC Agent system (MCP server + Chainlit UI)."""
+    from aec_agent.launcher import launch
+    return launch()
+
+
+def cmd_server(args: argparse.Namespace) -> int:
+    """Run only the MCP server."""
+    from aec_agent.server import main as server_main
+    try:
+        server_main()
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
+def cmd_ui(args: argparse.Namespace) -> int:
+    """Run only the Chainlit UI (assumes MCP server is running)."""
+    import subprocess
+    from pathlib import Path
+
+    settings = get_settings()
+    frontend_app = Path(__file__).parent / "frontend" / "app.py"
+
+    print(f"Starting Chainlit UI on port {settings.chainlit_port}...")
+
+    result = subprocess.run(
+        [
+            sys.executable, "-m", "chainlit", "run",
+            str(frontend_app),
+            "--port", str(settings.chainlit_port),
+            "--host", "127.0.0.1",
+        ],
+    )
+    return result.returncode
+
+
 def cmd_check(args: argparse.Namespace) -> int:
     """Run compatibility checks."""
     checker = VersionChecker()
@@ -209,6 +246,27 @@ def main(argv: Optional[list[str]] = None) -> int:
         help="Initialize AEC Agent environment"
     )
     init_parser.set_defaults(func=cmd_init)
+
+    # Launch command (full system)
+    launch_parser = subparsers.add_parser(
+        "launch",
+        help="Launch full AEC Agent system (MCP server + Chainlit UI)"
+    )
+    launch_parser.set_defaults(func=cmd_launch)
+
+    # Server command (MCP server only)
+    server_parser = subparsers.add_parser(
+        "server",
+        help="Run only the MCP server"
+    )
+    server_parser.set_defaults(func=cmd_server)
+
+    # UI command (Chainlit only)
+    ui_parser = subparsers.add_parser(
+        "ui",
+        help="Run only the Chainlit UI (requires MCP server to be running)"
+    )
+    ui_parser.set_defaults(func=cmd_ui)
 
     # Parse arguments
     args = parser.parse_args(argv)

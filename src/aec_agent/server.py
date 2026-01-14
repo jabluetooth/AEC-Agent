@@ -31,9 +31,15 @@ def main():
         port=settings.mcp_server_port,
     )
 
-    # Run with SSE transport for RDP compatibility
-    # FastMCP.run() handles uvicorn internally
-    mcp.run(transport="sse")
+    try:
+        # Run with SSE transport for RDP compatibility
+        # FastMCP.run() handles uvicorn internally
+        # Port is configured in mcp/server.py during FastMCP instantiation
+        mcp.run(transport="sse")
+    except KeyboardInterrupt:
+        logger.info("Server stopped by user")
+    except SystemExit:
+        pass
 
 
 if __name__ == "__main__":
