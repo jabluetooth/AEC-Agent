@@ -1,0 +1,14 @@
+{
+    "name": "AECAgent",
+    "description": "AI-powered Revit automation sidecar for MCP",
+    "author": "AEC Team",
+    "version": "0.1.0",
+    "type": "extension",
+    "engine": {
+        "version": "2.8.0",
+        "clean": true
+    },
+    "routes": {
+        "enabled": true
+    }
+}
