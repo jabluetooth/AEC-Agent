@@ -31,6 +31,7 @@ class LLMProvider(str, Enum):
     OPENAI = "openai"
     ANTHROPIC = "anthropic"
     AZURE_OPENAI = "azure_openai"
+    HUGGINGFACE = "huggingface"
 
 
 class Settings(BaseSettings):
@@ -88,6 +89,16 @@ class Settings(BaseSettings):
         description="Azure OpenAI deployment name"
     )
 
+    huggingface_api_key: Optional[str] = Field(
+        default=None,
+        description="Hugging Face API key"
+    )
+
+    huggingface_model: str = Field(
+        default="meta-llama/Llama-3.1-8B-Instruct",
+        description="Hugging Face model to use"
+    )
+
     # ==========================================================================
     # Port Configuration
     # ==========================================================================
@@ -115,29 +126,6 @@ class Settings(BaseSettings):
         ge=1024,
         le=65535,
         description="MCP server SSE port"
-    )
-
-    # ==========================================================================
-    # AWS Configuration
-    # ==========================================================================
-    aws_region: str = Field(
-        default="us-east-1",
-        description="AWS region"
-    )
-
-    aws_access_key_id: Optional[str] = Field(
-        default=None,
-        description="AWS access key ID"
-    )
-
-    aws_secret_access_key: Optional[str] = Field(
-        default=None,
-        description="AWS secret access key"
-    )
-
-    cloudwatch_log_group: str = Field(
-        default="/aec-agent/application",
-        description="CloudWatch log group name"
     )
 
     # ==========================================================================
@@ -266,6 +254,10 @@ class Settings(BaseSettings):
             if not self.azure_openai_api_key:
                 raise ValueError("AZURE_OPENAI_API_KEY is required")
             return self.azure_openai_api_key
+        elif self.llm_provider == LLMProvider.HUGGINGFACE:
+            if not self.huggingface_api_key:
+                raise ValueError("HUGGINGFACE_API_KEY is required")
+            return self.huggingface_api_key
         else:
             raise ValueError(f"Unknown LLM provider: {self.llm_provider}")
 

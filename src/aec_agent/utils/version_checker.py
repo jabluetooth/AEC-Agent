@@ -540,7 +540,7 @@ class VersionChecker:
         return 0
 
 
-def main():
+def main(argv=None):
     """CLI entry point for version checker."""
     import argparse
 
@@ -558,7 +558,7 @@ def main():
         help="Treat warnings as failures"
     )
 
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     checker = VersionChecker()
     results = checker.run_all_checks()

@@ -63,5 +63,8 @@ poetry.lock
 # Windows
 Thumbs.db
 
-# Ignore implementation phases folder
-implementation_phases/
+.claude/
+
+*.md
+
+CLAUDE.md

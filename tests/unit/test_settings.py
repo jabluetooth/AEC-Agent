@@ -21,7 +21,8 @@ class TestSettings:
     def test_default_settings(self):
         """Test default settings values."""
         with patch.dict(os.environ, {}, clear=True):
-            settings = Settings()
+            # Create settings without reading .env file
+            settings = Settings(_env_file=None)
 
             assert settings.environment == Environment.DEVELOPMENT
             assert settings.llm_provider == LLMProvider.OPENAI
@@ -205,3 +206,4 @@ class TestLLMProviderEnum:
         assert LLMProvider.OPENAI.value == "openai"
         assert LLMProvider.ANTHROPIC.value == "anthropic"
         assert LLMProvider.AZURE_OPENAI.value == "azure_openai"
+        assert LLMProvider.HUGGINGFACE.value == "huggingface"

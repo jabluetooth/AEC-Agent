@@ -4,15 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AEC Agent is an AI-powered automation system bridging LLMs with AutoCAD and Revit on Windows Server multi-user RDP environments. It uses Model Context Protocol (MCP) for natural language CAD control.
+AEC Agent is an AI-powered automation system bridging LLMs with AutoCAD and Revit. It uses Model Context Protocol (MCP) for natural language CAD control.
 
 ## Architecture
 
-Four-layer stack with SSE/HTTP transport (not stdio) for RDP robustness:
+Three-layer stack with SSE/HTTP transport:
 
 ```
 ┌─────────────────┐
-│ Chainlit UI     │ Port 8000 (per-session unique)
+│ Chainlit UI     │ Port 8000
 │ (Frontend)      │
 └────────┬────────┘
          │ SSE
@@ -22,9 +22,9 @@ Four-layer stack with SSE/HTTP transport (not stdio) for RDP robustness:
 └────────┬────────┘
          │ HTTP (retry + circuit breaker)
 ┌────────▼────────┐
-│ Sidecars        │ Ports 20000-30000 (session-unique via GPO)
+│ Sidecars        │ Ports 20000-30000
 │ AutoCAD: .NET   │ Thread queue → Application.Idle
-│ Revit: pyRevit  │ Routes API → ExternalEvent auto-marshal
+│ Revit: pyRevit  │ Routes API → ExternalEvent
 └────────┬────────┘
          │
 ┌────────▼────────┐
@@ -47,9 +47,6 @@ pytest
 # Run single test file
 pytest tests/unit/test_settings.py -v
 
-# Run single test
-pytest tests/unit/test_settings.py::TestSettings::test_default_settings -v
-
 # Run with coverage
 pytest --cov=src/aec_agent --cov-report=html
 
@@ -67,11 +64,6 @@ aec-agent check
 
 # Show version matrix
 aec-agent version --matrix
-
-# Terraform (from infrastructure/terraform/)
-terraform init
-terraform plan -var-file="terraform.tfvars"
-terraform apply
 ```
 
 ## Key Files
@@ -81,28 +73,17 @@ terraform apply
 | `src/aec_agent/config/settings.py` | All configuration via Pydantic Settings (env vars) |
 | `src/aec_agent/config/versions.py` | Version compatibility matrix (AutoCAD/Revit/pyRevit) |
 | `src/aec_agent/utils/version_checker.py` | Environment validation utility |
-| `implementation_phases/*.md` | Detailed 8-phase implementation guides |
-| `infrastructure/terraform/main.tf` | AWS G4dn instances, VPC, security groups |
-| `infrastructure/scripts/Setup-AECAgent.ps1` | Windows Server setup with GPO logon script |
+| `src/sidecars/autocad/` | AutoCAD .NET sidecar plugin |
 
 ## Configuration
 
 All settings via environment variables or `.env` file. Key settings:
 
 - `LLM_PROVIDER`: openai, anthropic, azure_openai
-- `MCP_LISTENER_PORT`: 20000-30000 (set by GPO script per RDP session)
-- `SESSION_TOKEN`: UUID (set by GPO script per RDP session)
+- `MCP_LISTENER_PORT`: Sidecar port (default: 20000)
+- `SESSION_TOKEN`: UUID for sidecar authentication
 - `SIDECAR_READ_TIMEOUT`: 120s (CAD operations can be slow)
 - `MAX_CONCURRENT_TOOLS`: 1 (CAD safety—one operation at a time)
-
-## Port Orchestration
-
-Multi-session RDP requires dynamic ports. GPO logon script calculates:
-```powershell
-$port = 20000 + ($session % 10000)  # with availability check
-```
-
-Each user session gets unique `MCP_LISTENER_PORT` and `SESSION_TOKEN` environment variables.
 
 ## Patterns
 
@@ -132,7 +113,6 @@ using (DocumentLock lock = doc.LockDocument()) {
 - **AutoCAD:** 2021-2025 (2024 recommended), .NET Framework 4.8
 - **Revit:** 2021-2025 (2024 recommended), pyRevit 4.8.x (5.0+ for Revit 2025)
 - **Python:** 3.9-3.12 (3.11 recommended)
-- **AWS:** g4dn.4xlarge (16 vCPU, 64GB RAM, NVIDIA T4), 4 users/instance
 
 ## Test Markers
 
