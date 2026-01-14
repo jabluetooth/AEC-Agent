@@ -74,11 +74,18 @@ async def on_chat_start():
         return
 
     # Initialize agent
-    agent = AECAgent(mcp_client=mcp_client)
-
-    # Store in session
-    cl.user_session.set("mcp_client", mcp_client)
-    cl.user_session.set("agent", agent)
+    try:
+        agent = AECAgent(mcp_client=mcp_client)
+        # Store in session
+        cl.user_session.set("mcp_client", mcp_client)
+        cl.user_session.set("agent", agent)
+    except Exception as e:
+        logger.error("Failed to initialize agent", error=str(e))
+        await cl.Message(
+            content=f"*Error: Failed to initialize AI agent: {e}*\n\nPlease checks your settings and API keys.",
+            author="System",
+        ).send()
+        return
 
     # Show available tools
     tools = mcp_client.get_tools()

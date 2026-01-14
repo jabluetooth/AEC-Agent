@@ -26,6 +26,10 @@ pydantic-settings>=2.0.0
 # Logging
 structlog>=24.1.0
 
+# LLM Clients
+openai>=1.0.0
+anthropic>=0.3.0
+
 # Server framework (for SSE transport)
 uvicorn>=0.27.0
 starlette>=0.36.0
