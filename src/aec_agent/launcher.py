@@ -179,10 +179,25 @@ def launch() -> int:
         llm_provider=settings.llm_provider.value,
     )
 
-    # Generate session token for sidecar authentication
-    session_token = str(uuid.uuid4())
+    # Use existing SESSION_TOKEN if set (from GPO/logon script), otherwise generate
+    session_token = os.environ.get("SESSION_TOKEN")
+    if session_token:
+        logger.info("Using existing SESSION_TOKEN from environment")
+    else:
+        session_token = str(uuid.uuid4())
+        logger.info("Generated new SESSION_TOKEN")
 
-    # Find available ports
+    # Check for MCP_LISTENER_PORT (sidecar port from GPO/logon script)
+    sidecar_port = os.environ.get("MCP_LISTENER_PORT")
+    if sidecar_port:
+        logger.info("Sidecar port from environment", sidecar_port=sidecar_port)
+    else:
+        logger.warning(
+            "MCP_LISTENER_PORT not set - sidecar communication will fail. "
+            "Run the logon script first: scripts/AECAgent-Logon.ps1"
+        )
+
+    # Find available ports for MCP server and Chainlit
     try:
         mcp_port = find_free_port(settings.mcp_server_port)
         chainlit_port = find_free_port(settings.chainlit_port)
@@ -192,15 +207,18 @@ def launch() -> int:
 
     logger.info(
         "Ports allocated",
-        mcp_port=mcp_port,
+        mcp_server_port=mcp_port,
         chainlit_port=chainlit_port,
+        sidecar_port=sidecar_port or "NOT SET",
     )
 
     # Build environment for subprocesses
+    # IMPORTANT: Copy existing env to preserve MCP_LISTENER_PORT and SESSION_TOKEN
     env = os.environ.copy()
     env["MCP_SERVER_PORT"] = str(mcp_port)
     env["CHAINLIT_PORT"] = str(chainlit_port)
     env["SESSION_TOKEN"] = session_token
+    # MCP_LISTENER_PORT is already in os.environ if set by logon script
 
     # Ensure cache directory exists
     settings.ensure_cache_dir()
@@ -253,8 +271,13 @@ def launch() -> int:
     print("\n" + "=" * 60)
     print("  AEC Agent Started Successfully!")
     print("=" * 60)
-    print(f"\n  UI:         http://127.0.0.1:{chainlit_port}")
-    print(f"  MCP Server: http://127.0.0.1:{mcp_port}")
+    print(f"\n  UI:           http://127.0.0.1:{chainlit_port}")
+    print(f"  MCP Server:   http://127.0.0.1:{mcp_port}")
+    if sidecar_port:
+        print(f"  Sidecar Port: {sidecar_port}")
+    else:
+        print("  Sidecar Port: NOT SET (run logon script first!)")
+    print(f"\n  SESSION_TOKEN: {session_token[:8]}...")
     print(f"\n  Press Ctrl+C to stop")
     print("=" * 60 + "\n")
 

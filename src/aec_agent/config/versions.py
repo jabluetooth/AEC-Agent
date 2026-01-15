@@ -108,8 +108,15 @@ class VersionMatrix:
             version="2025",
             dotnet_framework="4.8",
             objectarx_sdk="2025",
+            status=SupportStatus.SUPPORTED,
+            notes="Current stable"
+        ),
+        AutoCADVersion(
+            version="2026",
+            dotnet_framework="8.0",
+            objectarx_sdk="2026",
             status=SupportStatus.TESTING,
-            notes="Verify API changes"
+            notes=".NET 8 migration - latest version"
         ),
     ])
 

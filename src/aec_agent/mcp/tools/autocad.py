@@ -1,12 +1,16 @@
 """
 MCP tools for AutoCAD automation.
+
+Uses command-based API format for AutoCAD sidecar:
+- POST to root endpoint with {"command": "...", "params": {...}}
+- Authorization: Bearer token
 """
 
 from typing import Optional, List
 
 from aec_agent.mcp.server import mcp, get_lock, get_cache
 from aec_agent.mcp.concurrency import with_tool_lock
-from aec_agent.mcp.sidecar_client import call_sidecar, SidecarError
+from aec_agent.mcp.sidecar_client import call_autocad_command, SidecarError
 from .base import success_result, error_result, ErrorCode
 
 import structlog
@@ -27,11 +31,7 @@ async def autocad_list_layers() -> dict:
         List of layers with name, color, and visibility state
     """
     try:
-        result = await call_sidecar(
-            endpoint="/layers",
-            method="GET",
-            sidecar_type="autocad"
-        )
+        result = await call_autocad_command("audit_layers")
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
@@ -64,11 +64,9 @@ async def autocad_create_layer(name: str, color: int = 7) -> dict:
         )
 
     try:
-        result = await call_sidecar(
-            endpoint="/layers/create",
-            method="POST",
-            payload={"name": name.strip(), "color": color},
-            sidecar_type="autocad"
+        result = await call_autocad_command(
+            "create_layer",
+            {"name": name.strip(), "color": color}
         )
         return result
     except SidecarError as e:
@@ -105,19 +103,14 @@ async def autocad_set_layer_state(
             "At least one of is_on or is_frozen must be specified"
         )
 
-    payload = {"name": name.strip()}
+    params = {"name": name.strip()}
     if is_on is not None:
-        payload["is_on"] = bool(is_on)
+        params["is_off"] = not bool(is_on)  # AutoCAD uses is_off, not is_on
     if is_frozen is not None:
-        payload["is_frozen"] = bool(is_frozen)
+        params["is_frozen"] = bool(is_frozen)
 
     try:
-        result = await call_sidecar(
-            endpoint="/layers/state",
-            method="POST",
-            payload=payload,
-            sidecar_type="autocad"
-        )
+        result = await call_autocad_command("modify_layer", params)
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
@@ -163,21 +156,17 @@ async def autocad_draw_line(
                 f"{coord_name} must be a number"
             )
 
-    payload = {
-        "start": {"x": float(start_x), "y": float(start_y)},
-        "end": {"x": float(end_x), "y": float(end_y)}
+    # AutoCAD expects arrays: {"start": [x, y], "end": [x, y]}
+    params = {
+        "start": [float(start_x), float(start_y)],
+        "end": [float(end_x), float(end_y)]
     }
 
     if layer:
-        payload["layer"] = layer.strip()
+        params["layer"] = layer.strip()
 
     try:
-        result = await call_sidecar(
-            endpoint="/draw/line",
-            method="POST",
-            payload=payload,
-            sidecar_type="autocad"
-        )
+        result = await call_autocad_command("draw_line", params)
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
@@ -218,21 +207,17 @@ async def autocad_draw_circle(
     if radius <= 0:
         return error_result(ErrorCode.INVALID_PARAMS, "Radius must be positive")
 
-    payload = {
-        "center": {"x": float(center_x), "y": float(center_y)},
+    # AutoCAD expects: {"center": [x, y], "radius": r}
+    params = {
+        "center": [float(center_x), float(center_y)],
         "radius": float(radius)
     }
 
     if layer:
-        payload["layer"] = layer.strip()
+        params["layer"] = layer.strip()
 
     try:
-        result = await call_sidecar(
-            endpoint="/draw/circle",
-            method="POST",
-            payload=payload,
-            sidecar_type="autocad"
-        )
+        result = await call_autocad_command("draw_circle", params)
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
@@ -273,21 +258,17 @@ async def autocad_draw_rectangle(
                 f"{coord_name} must be a number"
             )
 
-    payload = {
-        "corner1": {"x": float(corner1_x), "y": float(corner1_y)},
-        "corner2": {"x": float(corner2_x), "y": float(corner2_y)}
+    # AutoCAD expects: {"corner1": [x, y], "corner2": [x, y]}
+    params = {
+        "corner1": [float(corner1_x), float(corner1_y)],
+        "corner2": [float(corner2_x), float(corner2_y)]
     }
 
     if layer:
-        payload["layer"] = layer.strip()
+        params["layer"] = layer.strip()
 
     try:
-        result = await call_sidecar(
-            endpoint="/draw/rectangle",
-            method="POST",
-            payload=payload,
-            sidecar_type="autocad"
-        )
+        result = await call_autocad_command("draw_rectangle", params)
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
@@ -306,37 +287,37 @@ async def autocad_get_drawing_info() -> dict:
         Drawing name, path, and statistics
     """
     try:
-        result = await call_sidecar(
-            endpoint="/drawing/info",
-            method="GET",
-            sidecar_type="autocad"
-        )
+        result = await call_autocad_command("get_drawing_info")
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
 
 
 @mcp.tool()
-async def autocad_count_entities(layer: Optional[str] = None) -> dict:
+async def autocad_get_entities(
+    layer: Optional[str] = None,
+    entity_type: Optional[str] = None,
+    limit: int = 100
+) -> dict:
     """
-    Count entities in the drawing, optionally filtered by layer.
+    Get entities in the drawing, optionally filtered by layer or type.
 
     Args:
-        layer: Layer name to filter by (optional, counts all if not specified)
+        layer: Layer name to filter by (optional)
+        entity_type: Entity type to filter by (e.g., "Line", "Circle", "Polyline")
+        limit: Maximum number of entities to return (default 100)
 
     Returns:
-        Entity counts by type
+        List of entities with their properties
     """
-    endpoint = "/entities/count"
+    params = {"limit": limit, "include_geometry": True}
     if layer:
-        endpoint += f"?layer={layer}"
+        params["layer"] = layer.strip()
+    if entity_type:
+        params["entity_type"] = entity_type
 
     try:
-        result = await call_sidecar(
-            endpoint=endpoint,
-            method="GET",
-            sidecar_type="autocad"
-        )
+        result = await call_autocad_command("get_entities", params)
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)

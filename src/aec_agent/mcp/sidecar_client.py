@@ -73,13 +73,26 @@ def get_sidecar_url(endpoint: str) -> str:
     return f"http://127.0.0.1:{port}{endpoint}"
 
 
-def get_auth_headers() -> dict:
-    """Get authentication headers for sidecar requests."""
+def get_auth_headers(sidecar_type: str = "revit") -> dict:
+    """
+    Get authentication headers for sidecar requests.
+
+    Args:
+        sidecar_type: "autocad" or "revit" - different auth schemes
+
+    Returns:
+        Headers dict with appropriate auth header
+    """
     token = settings.session_token
     if not token:
         logger.warning("SESSION_TOKEN not configured, requests may be rejected")
         return {}
-    return {"X-Session-Token": token}
+
+    # AutoCAD uses Authorization: Bearer, Revit uses X-Session-Token
+    if sidecar_type == "autocad":
+        return {"Authorization": f"Bearer {token}"}
+    else:
+        return {"X-Session-Token": token}
 
 
 class SidecarError(Exception):
@@ -181,7 +194,7 @@ async def call_sidecar(
         raise SidecarCircuitOpenError()
 
     url = get_sidecar_url(endpoint)
-    headers = get_auth_headers()
+    headers = get_auth_headers(sidecar_type)
 
     logger.debug(
         "Calling sidecar",
@@ -231,6 +244,92 @@ async def call_sidecar(
         raise SidecarError(
             code=e.response.status_code,
             message=f"Sidecar returned {e.response.status_code}",
+            details=str(e)
+        )
+
+
+async def call_autocad_command(
+    command: str,
+    params: dict = None
+) -> dict:
+    """
+    Call an AutoCAD sidecar command using command-based API format.
+
+    AutoCAD sidecar uses a different API format than Revit:
+    - POST to root endpoint with {"command": "...", "params": {...}}
+    - Authorization: Bearer token
+
+    Args:
+        command: Command name (e.g., "draw_line", "create_layer")
+        params: Command parameters
+
+    Returns:
+        Response JSON as dict
+
+    Raises:
+        SidecarError: On any failure
+    """
+    circuit_breaker = _circuit_breakers.get("autocad")
+
+    # Check circuit breaker
+    if circuit_breaker and not await circuit_breaker.can_execute():
+        raise SidecarCircuitOpenError()
+
+    url = get_sidecar_url("/")
+    headers = get_auth_headers("autocad")
+
+    payload = {
+        "command": command,
+        "params": params or {}
+    }
+
+    logger.debug(
+        "Calling AutoCAD command",
+        command=command,
+        params=params
+    )
+
+    try:
+        response = await _call_sidecar_with_retry(
+            method="POST",
+            url=url,
+            headers=headers,
+            json_data=payload
+        )
+
+        result = response.json()
+
+        # Record success
+        if circuit_breaker:
+            await circuit_breaker.record_success()
+
+        logger.debug("AutoCAD response", success=result.get("success", False))
+        return result
+
+    except httpx.TimeoutException as e:
+        if circuit_breaker:
+            await circuit_breaker.record_failure()
+        logger.error("AutoCAD timeout", command=command, error=str(e))
+        raise SidecarTimeoutError(str(e))
+
+    except httpx.ConnectError as e:
+        if circuit_breaker:
+            await circuit_breaker.record_failure()
+        logger.error("AutoCAD connection failed", command=command, error=str(e))
+        raise SidecarConnectionError(str(e))
+
+    except httpx.HTTPStatusError as e:
+        if circuit_breaker:
+            await circuit_breaker.record_failure()
+        logger.error(
+            "AutoCAD HTTP error",
+            command=command,
+            status_code=e.response.status_code,
+            error=str(e)
+        )
+        raise SidecarError(
+            code=e.response.status_code,
+            message=f"AutoCAD returned {e.response.status_code}",
             details=str(e)
         )
 

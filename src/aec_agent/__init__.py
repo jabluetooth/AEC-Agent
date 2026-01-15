@@ -6,7 +6,7 @@ AI reasoning with legacy CAD applications.
 """
 
 __version__ = "0.1.0"
-__author__ = "AEC Team"
+__author__ = "Fil Heinz"
 
 from aec_agent.config.settings import Settings
 from aec_agent.config.versions import VersionMatrix
