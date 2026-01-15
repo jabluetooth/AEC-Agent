@@ -1,4 +1,0 @@
-C:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\Debug\AECAgentSidecar.csproj.AssemblyReference.cache
-C:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\Debug\AECAgentSidecar.GeneratedMSBuildEditorConfig.editorconfig
-C:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\Debug\AECAgentSidecar.csproj.CoreCompileInputs.cache
-C:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\Debug\AECAgentSidecar.sourcelink.json

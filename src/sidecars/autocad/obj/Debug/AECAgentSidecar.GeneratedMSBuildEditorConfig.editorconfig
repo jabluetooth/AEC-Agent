@@ -1,8 +1,0 @@
-is_global = true
-build_property.RootNamespace = AECAgent.AutoCAD
-build_property.ProjectDir = C:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\
-build_property.EnableComHosting = 
-build_property.EnableGeneratedComInterfaceComImportInterop = 
-build_property.CsWinRTUseWindowsUIXamlProjections = false
-build_property.EffectiveAnalysisLevelStyle = 
-build_property.EnableCodeStyleSeverity = 

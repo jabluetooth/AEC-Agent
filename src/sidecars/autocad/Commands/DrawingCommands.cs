@@ -38,8 +38,10 @@ namespace AECAgent.AutoCAD.Commands
         public object DrawLine(object parameters, Document doc, Transaction tr)
         {
             var param = Deserialize<DrawLineParams>(parameters);
-            if (param.Start == null || param.Start.Length < 2) throw new ArgumentException("Start point required");
-            if (param.End == null || param.End.Length < 2) throw new ArgumentException("End point required");
+            if (param.Start == null || param.Start.Length < 2) 
+                throw new ArgumentException($"Start point required. Received: {JsonConvert.SerializeObject(parameters)}");
+            if (param.End == null || param.End.Length < 2) 
+                throw new ArgumentException($"End point required. Received: {JsonConvert.SerializeObject(parameters)}");
 
             Database db = doc.Database;
             BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);

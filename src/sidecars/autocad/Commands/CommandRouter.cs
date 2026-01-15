@@ -35,7 +35,8 @@ namespace AECAgent.AutoCAD.Commands
                 { "create_layer", _layerCommands.CreateLayer },
                 { "modify_layer", _layerCommands.ModifyLayer },
                 { "delete_layer", _layerCommands.DeleteLayer },
-                { "set_current_layer", _layerCommands.SetCurrentLayer }
+                { "set_current_layer", _layerCommands.SetCurrentLayer },
+                { "zoom_extents", (p, d, t) => _queryCommands.ZoomExtents(p, d, t) }
             };
         }
 

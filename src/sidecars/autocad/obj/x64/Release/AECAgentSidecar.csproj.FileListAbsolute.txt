@@ -1,0 +1,11 @@
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\bin\Release\AutoCAD2026\AECAgentSidecar.deps.json
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\bin\Release\AutoCAD2026\AECAgentSidecar.dll
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\bin\Release\AutoCAD2026\AECAgentSidecar.pdb
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\x64\Release\AECAgentSidecar.csproj.AssemblyReference.cache
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\x64\Release\AECAgentSidecar.GeneratedMSBuildEditorConfig.editorconfig
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\x64\Release\AECAgentSidecar.csproj.CoreCompileInputs.cache
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\x64\Release\AECAgentSidecar.sourcelink.json
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\x64\Release\AECAgentSidecar.dll
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\x64\Release\refint\AECAgentSidecar.dll
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\x64\Release\AECAgentSidecar.pdb
+c:\Users\frelatorre\Desktop\Projects\aec\src\sidecars\autocad\obj\x64\Release\ref\AECAgentSidecar.dll

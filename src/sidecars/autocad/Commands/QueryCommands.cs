@@ -131,5 +131,14 @@ namespace AECAgent.AutoCAD.Commands
             }
             catch { return null; }
         }
+        public object ZoomExtents(object parameters, Document doc, Transaction tr)
+        {
+            // Use Application.AcadApplication to access COM object for SendCommand
+            // because Editor.Command/CommandAsync are not available in this context easily
+            // or require switching context. 
+            // SendStringToExecute is the safest way from arbitrary context.
+            doc.SendStringToExecute("._ZOOM _E ", true, false, false);
+            return new { executed = true, command = "ZOOM EXTENTS" };
+        }
     }
 }
