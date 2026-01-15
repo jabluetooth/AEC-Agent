@@ -1,24 +1,44 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net48</TargetFramework>
+    <!--
+      AutoCAD 2021-2025: .NET Framework 4.8 (net48)
+      AutoCAD 2026+: .NET 8.0 (net8.0-windows)
+
+      Set AutoCADVersion to build for specific version:
+        dotnet build -p:AutoCADVersion=2026
+        dotnet build -p:AutoCADVersion=2024
+    -->
+    <AutoCADVersion Condition="'$(AutoCADVersion)' == ''">2026</AutoCADVersion>
+
+    <!-- Target framework based on AutoCAD version -->
+    <TargetFramework Condition="'$(AutoCADVersion)' &gt;= '2026'">net8.0-windows</TargetFramework>
+    <TargetFramework Condition="'$(AutoCADVersion)' &lt; '2026'">net48</TargetFramework>
+
     <LangVersion>latest</LangVersion>
     <OutputType>Library</OutputType>
     <RootNamespace>AECAgent.AutoCAD</RootNamespace>
     <AssemblyName>AECAgentSidecar</AssemblyName>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
-    <!-- Set to true if AutoCAD is installed locally, false to use NuGet packages for dev -->
-    <UseLocalAutoCAD>false</UseLocalAutoCAD>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+
+    <!-- Suppress warnings about Windows-only APIs -->
+    <NoWarn>$(NoWarn);CA1416</NoWarn>
   </PropertyGroup>
 
-  <!-- AutoCAD path for local installation -->
+  <!-- AutoCAD installation paths by version -->
   <PropertyGroup>
-    <AutoCADPath Condition="'$(AutoCADPath)' == ''">C:\Program Files\Autodesk\AutoCAD 2024</AutoCADPath>
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND '$(AutoCADVersion)' == '2026'">C:\Program Files\Autodesk\AutoCAD 2026</AutoCADPath>
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND '$(AutoCADVersion)' == '2025'">C:\Program Files\Autodesk\AutoCAD 2025</AutoCADPath>
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND '$(AutoCADVersion)' == '2024'">C:\Program Files\Autodesk\AutoCAD 2024</AutoCADPath>
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND '$(AutoCADVersion)' == '2023'">C:\Program Files\Autodesk\AutoCAD 2023</AutoCADPath>
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND '$(AutoCADVersion)' == '2022'">C:\Program Files\Autodesk\AutoCAD 2022</AutoCADPath>
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND '$(AutoCADVersion)' == '2021'">C:\Program Files\Autodesk\AutoCAD 2021</AutoCADPath>
   </PropertyGroup>
 
-  <!-- Option 1: Use local AutoCAD installation (for building on machines with AutoCAD) -->
-  <ItemGroup Condition="'$(UseLocalAutoCAD)' == 'true'">
+  <!-- Reference AutoCAD assemblies from local installation -->
+  <ItemGroup>
     <Reference Include="accoremgd">
       <HintPath>$(AutoCADPath)\accoremgd.dll</HintPath>
       <Private>False</Private>
@@ -33,13 +53,14 @@
     </Reference>
   </ItemGroup>
 
-  <!-- Option 2: Use NuGet packages for development (IntelliSense, no AutoCAD needed) -->
-  <ItemGroup Condition="'$(UseLocalAutoCAD)' != 'true'">
-    <PackageReference Include="AutoCAD.NET" Version="24.0.0" />
-  </ItemGroup>
-
+  <!-- NuGet packages -->
   <ItemGroup>
     <PackageReference Include="Newtonsoft.Json" Version="13.0.3" />
   </ItemGroup>
+
+  <!-- Output path includes AutoCAD version for clarity -->
+  <PropertyGroup>
+    <OutputPath>bin\$(Configuration)\AutoCAD$(AutoCADVersion)\</OutputPath>
+  </PropertyGroup>
 
 </Project>
