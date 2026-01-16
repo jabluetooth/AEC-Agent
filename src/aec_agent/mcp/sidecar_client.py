@@ -280,7 +280,7 @@ async def call_autocad_command(
 
     payload = {
         "command": command,
-        "params": params or {}
+        "parameters": params or {}  # Note: C# sidecar expects "parameters", not "params"
     }
 
     logger.debug(

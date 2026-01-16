@@ -43,6 +43,7 @@ async def on_chat_start():
 
     # Initialize MCP client
     mcp_client = MCPClient()
+    logger.info("MCP client created", base_url=mcp_client.base_url)
 
     try:
         await mcp_client.connect()
@@ -61,11 +62,14 @@ async def on_chat_start():
             ).send()
 
     except Exception as e:
-        logger.error("Failed to connect to MCP server", error=str(e))
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error("Failed to connect to MCP server", error=str(e), traceback=error_details)
         await cl.Message(
             content=(
                 f"*Error: Could not connect to MCP server: {e}*\n\n"
-                "Please ensure the MCP server is running."
+                "Please ensure the MCP server is running.\n\n"
+                f"Details: Check the terminal for full error logs."
             ),
             author="System",
         ).send()

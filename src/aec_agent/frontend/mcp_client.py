@@ -8,16 +8,13 @@ Provides an async interface for the agent to call MCP tools.
 import os
 import json
 from typing import Any, Optional
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from contextlib import AsyncExitStack
 
-import httpx
 import structlog
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type,
-)
+from mcp.client.session import ClientSession
+from mcp.client.sse import sse_client
+from mcp import types as mcp_types
 
 from aec_agent.config.settings import get_settings
 
@@ -92,10 +89,10 @@ class MCPToolError(MCPClientError):
 
 class MCPClient:
     """
-    Client for communicating with the MCP server via HTTP/SSE.
+    Client for communicating with the MCP server via SSE.
 
-    Uses the JSON-RPC over HTTP approach for tool calls,
-    which is simpler for our synchronous tool-calling needs.
+    Uses the official MCP Python client library to properly handle
+    the SSE transport protocol.
     """
 
     def __init__(
@@ -116,7 +113,8 @@ class MCPClient:
         self.session_token = session_token or os.environ.get("SESSION_TOKEN", "")
 
         self._tools: dict[str, Tool] = {}
-        self._client: Optional[httpx.AsyncClient] = None
+        self._session: Optional[ClientSession] = None
+        self._exit_stack: Optional[AsyncExitStack] = None
 
     async def __aenter__(self) -> "MCPClient":
         """Async context manager entry."""
@@ -134,82 +132,87 @@ class MCPClient:
         Raises:
             MCPConnectionError: If connection fails.
         """
-        logger.info("Connecting to MCP server", base_url=self.base_url)
+        sse_url = f"{self.base_url}/sse"
+        logger.info("Connecting to MCP server via SSE", url=sse_url)
 
-        self._client = httpx.AsyncClient(
-            base_url=self.base_url,
-            timeout=httpx.Timeout(120.0, connect=5.0),
-            headers={"X-Session-Token": self.session_token},
-        )
+        try:
+            # Set up async exit stack for proper resource management
+            self._exit_stack = AsyncExitStack()
+            await self._exit_stack.__aenter__()
 
-        # Discover tools
-        await self._discover_tools()
+            # Build headers for authentication
+            headers = {}
+            if self.session_token:
+                headers["X-Session-Token"] = self.session_token
 
-        logger.info(
-            "Connected to MCP server",
-            tool_count=len(self._tools),
-            tools=list(self._tools.keys()),
-        )
+            # Connect to MCP server via SSE
+            read_stream, write_stream = await self._exit_stack.enter_async_context(
+                sse_client(
+                    url=sse_url,
+                    headers=headers,
+                    timeout=5.0,
+                    sse_read_timeout=300.0,  # 5 minutes for long operations
+                )
+            )
+
+            # Create and initialize session
+            self._session = await self._exit_stack.enter_async_context(
+                ClientSession(read_stream, write_stream)
+            )
+
+            # Initialize the MCP session
+            init_result = await self._session.initialize()
+            logger.info(
+                "MCP session initialized",
+                server_name=init_result.serverInfo.name if init_result.serverInfo else "unknown",
+                protocol_version=init_result.protocolVersion,
+            )
+
+            # Discover tools
+            await self._discover_tools()
+
+            logger.info(
+                "Connected to MCP server",
+                tool_count=len(self._tools),
+                tools=list(self._tools.keys()),
+            )
+
+        except Exception as e:
+            logger.error("Failed to connect to MCP server", error=str(e))
+            # Clean up on failure
+            if self._exit_stack:
+                await self._exit_stack.aclose()
+                self._exit_stack = None
+            raise MCPConnectionError(f"Failed to connect: {e}") from e
 
     async def close(self) -> None:
         """Close the connection to the MCP server."""
-        if self._client:
-            await self._client.aclose()
-            self._client = None
+        if self._exit_stack:
+            await self._exit_stack.aclose()
+            self._exit_stack = None
+        self._session = None
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type(httpx.RequestError),
-    )
     async def _discover_tools(self) -> None:
-        """
-        Discover available tools from the MCP server.
-
-        Uses the MCP tools/list endpoint.
-        """
-        if not self._client:
+        """Discover available tools from the MCP server."""
+        if not self._session:
             raise MCPClientError("Client not connected")
 
         try:
-            # MCP uses JSON-RPC format
-            response = await self._client.post(
-                "/mcp/v1/tools/list",
-                json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"},
-            )
-            response.raise_for_status()
-
-            result = response.json()
-
-            # Handle JSON-RPC response
-            if "error" in result:
-                raise MCPToolError(f"Tool discovery failed: {result['error']}")
-
-            tools_data = result.get("result", {}).get("tools", [])
+            result = await self._session.list_tools()
 
             self._tools.clear()
-            for tool_data in tools_data:
-                tool = Tool(
-                    name=tool_data["name"],
-                    description=tool_data.get("description", ""),
-                    input_schema=tool_data.get("inputSchema", {}),
+            for tool in result.tools:
+                self._tools[tool.name] = Tool(
+                    name=tool.name,
+                    description=tool.description or "",
+                    input_schema=tool.inputSchema if tool.inputSchema else {},
                 )
-                self._tools[tool.name] = tool
 
-        except httpx.HTTPStatusError as e:
-            # Fallback: Try the SSE endpoint to get tools
-            logger.warning(
-                "JSON-RPC tools/list failed, trying SSE fallback",
-                status=e.response.status_code,
-            )
-            await self._discover_tools_sse()
+            logger.debug("Discovered tools", count=len(self._tools))
 
-    async def _discover_tools_sse(self) -> None:
-        """Fallback tool discovery via SSE messages endpoint."""
-        # For now, we'll initialize with empty tools and discover on first call
-        # FastMCP may use different endpoints
-        logger.warning("SSE tool discovery not implemented, using empty tools list")
-        self._tools.clear()
+        except Exception as e:
+            logger.error("Tool discovery failed", error=str(e))
+            raise MCPToolError(f"Tool discovery failed: {e}") from e
 
     def get_tools(self) -> list[Tool]:
         """Get list of available tools."""
@@ -227,11 +230,6 @@ class MCPClient:
         """Get tools in Anthropic tool use format."""
         return [tool.to_anthropic_format() for tool in self._tools.values()]
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type(httpx.RequestError),
-    )
     async def call_tool(
         self,
         name: str,
@@ -247,82 +245,56 @@ class MCPClient:
         Returns:
             ToolResult containing the result or error.
         """
-        if not self._client:
+        if not self._session:
             raise MCPClientError("Client not connected")
 
         logger.info("Calling MCP tool", tool=name, arguments=arguments)
 
         try:
-            # MCP JSON-RPC call
-            response = await self._client.post(
-                "/mcp/v1/tools/call",
-                json={
-                    "jsonrpc": "2.0",
-                    "id": 1,
-                    "method": "tools/call",
-                    "params": {
-                        "name": name,
-                        "arguments": arguments,
-                    },
-                },
-            )
-            response.raise_for_status()
+            result = await self._session.call_tool(name, arguments)
 
-            result = response.json()
+            # Process the content blocks from the result
+            raw_content = ""
+            data = None
+            is_error = result.isError if hasattr(result, 'isError') else False
 
-            # Handle JSON-RPC response
-            if "error" in result:
-                error_data = result["error"]
-                return ToolResult(
-                    success=False,
-                    error={
-                        "code": error_data.get("code", -1),
-                        "message": error_data.get("message", "Unknown error"),
-                    },
-                )
+            for content_block in result.content:
+                if isinstance(content_block, mcp_types.TextContent):
+                    raw_content += content_block.text
+                elif hasattr(content_block, 'text'):
+                    raw_content += content_block.text
 
-            # Extract content from result
-            content = result.get("result", {}).get("content", [])
-            if content:
-                # MCP returns content as a list of content blocks
-                first_content = content[0]
-                if first_content.get("type") == "text":
-                    text = first_content.get("text", "")
-                    # Try to parse as JSON
-                    try:
-                        data = json.loads(text)
+            # Try to parse raw content as JSON
+            if raw_content:
+                try:
+                    data = json.loads(raw_content)
+                    # Check if the parsed data indicates success/failure
+                    if isinstance(data, dict):
+                        success = data.get("success", not is_error)
                         return ToolResult(
-                            success=data.get("success", True),
+                            success=success,
                             data=data.get("data"),
                             error=data.get("error"),
-                            raw_content=text,
+                            raw_content=raw_content,
                         )
-                    except json.JSONDecodeError:
-                        return ToolResult(
-                            success=True,
-                            raw_content=text,
-                        )
+                except json.JSONDecodeError:
+                    pass
 
-            return ToolResult(success=True)
-
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                "Tool call HTTP error",
-                tool=name,
-                status=e.response.status_code,
-                response=e.response.text[:500],
+            return ToolResult(
+                success=not is_error,
+                data=data,
+                raw_content=raw_content if raw_content else None,
             )
+
+        except Exception as e:
+            logger.error("Tool call failed", tool=name, error=str(e))
             return ToolResult(
                 success=False,
                 error={
-                    "code": e.response.status_code,
-                    "message": f"HTTP error: {e.response.status_code}",
+                    "code": -1,
+                    "message": str(e),
                 },
             )
-
-        except httpx.RequestError as e:
-            logger.error("Tool call request error", tool=name, error=str(e))
-            raise
 
     async def ping(self) -> bool:
         """
