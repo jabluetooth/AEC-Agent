@@ -35,6 +35,9 @@ async def autocad_list_layers() -> dict:
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in autocad_list_layers", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
 
 
 @mcp.tool()
@@ -71,6 +74,9 @@ async def autocad_create_layer(name: str, color: int = 7) -> dict:
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in autocad_create_layer", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
 
 
 @mcp.tool()

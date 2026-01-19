@@ -153,7 +153,7 @@ async def _call_sidecar_with_retry(
     Raises:
         httpx.TimeoutException: Request timed out
         httpx.ConnectError: Connection failed
-        httpx.HTTPStatusError: Non-2xx response
+        SidecarError: Non-2xx response with parsed error details
     """
     client = await get_client()
 
@@ -162,7 +162,27 @@ async def _call_sidecar_with_retry(
     else:
         response = await client.post(url, headers=headers, json=json_data)
 
-    response.raise_for_status()
+    # Parse response body for error details on non-2xx responses
+    if response.status_code >= 400:
+        error_details = None
+        try:
+            error_json = response.json()
+            # Extract error message from sidecar response format
+            if isinstance(error_json, dict):
+                error_obj = error_json.get("error", {})
+                if isinstance(error_obj, dict):
+                    error_details = error_obj.get("details") or error_obj.get("message")
+                elif error_json.get("details"):
+                    error_details = error_json.get("details")
+        except Exception:
+            error_details = response.text[:200] if response.text else None
+
+        raise SidecarError(
+            code=response.status_code,
+            message=f"Sidecar returned {response.status_code}",
+            details=error_details
+        )
+
     return response
 
 
@@ -232,20 +252,16 @@ async def call_sidecar(
         logger.error("Sidecar connection failed", endpoint=endpoint, error=str(e))
         raise SidecarConnectionError(str(e))
 
-    except httpx.HTTPStatusError as e:
+    except SidecarError as e:
         if circuit_breaker:
             await circuit_breaker.record_failure()
         logger.error(
             "Sidecar HTTP error",
             endpoint=endpoint,
-            status_code=e.response.status_code,
-            error=str(e)
+            status_code=e.code,
+            error=e.details or e.message
         )
-        raise SidecarError(
-            code=e.response.status_code,
-            message=f"Sidecar returned {e.response.status_code}",
-            details=str(e)
-        )
+        raise
 
 
 async def call_autocad_command(
@@ -318,20 +334,19 @@ async def call_autocad_command(
         logger.error("AutoCAD connection failed", command=command, error=str(e))
         raise SidecarConnectionError(str(e))
 
-    except httpx.HTTPStatusError as e:
+    except SidecarError as e:
         if circuit_breaker:
             await circuit_breaker.record_failure()
         logger.error(
             "AutoCAD HTTP error",
             command=command,
-            status_code=e.response.status_code,
-            error=str(e)
+            params=params,
+            status_code=e.code,
+            error_message=e.message,
+            error_details=e.details,
+            circuit_state=circuit_breaker.state if circuit_breaker else "none"
         )
-        raise SidecarError(
-            code=e.response.status_code,
-            message=f"AutoCAD returned {e.response.status_code}",
-            details=str(e)
-        )
+        raise
 
 
 async def check_sidecar_health(sidecar_type: str = "revit") -> dict:

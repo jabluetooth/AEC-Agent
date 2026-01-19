@@ -287,12 +287,20 @@ class MCPClient:
             )
 
         except Exception as e:
-            logger.error("Tool call failed", tool=name, error=str(e))
+            import traceback
+            error_traceback = traceback.format_exc()
+            logger.error(
+                "Tool call failed",
+                tool=name,
+                error=str(e),
+                traceback=error_traceback
+            )
             return ToolResult(
                 success=False,
                 error={
                     "code": -1,
                     "message": str(e),
+                    "traceback": error_traceback,
                 },
             )
 

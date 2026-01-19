@@ -94,7 +94,11 @@ namespace AECAgent.AutoCAD.HttpServer
                 }
 
                 if (job.Error != null)
-                    await SendErrorAsync(response, 500, "CAD Error", job.Error);
+                {
+                    // Use 400 for client/validation errors, 500 for internal errors
+                    int statusCode = IsClientError(job.Error) ? 400 : 500;
+                    await SendErrorAsync(response, statusCode, "CAD Error", job.Error);
+                }
                 else
                     await SendJsonAsync(response, 200, CommandResponse.Ok(job.Result));
 
@@ -157,6 +161,24 @@ namespace AECAgent.AutoCAD.HttpServer
             response.ContentLength64 = buffer.Length;
             response.OutputStream.Write(buffer, 0, buffer.Length);
             response.Close();
+        }
+
+        /// <summary>
+        /// Determines if an error message indicates a client error (400) vs server error (500).
+        /// Client errors are validation failures, not found, already exists, etc.
+        /// </summary>
+        private static bool IsClientError(string error)
+        {
+            if (string.IsNullOrEmpty(error)) return false;
+
+            string lower = error.ToLowerInvariant();
+            return lower.Contains("already exists") ||
+                   lower.Contains("not found") ||
+                   lower.Contains("required") ||
+                   lower.Contains("invalid") ||
+                   lower.Contains("cannot") ||
+                   lower.Contains("must be") ||
+                   lower.StartsWith("error:"); // ArgumentException messages
         }
     }
 }

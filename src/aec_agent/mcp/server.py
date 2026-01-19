@@ -64,3 +64,8 @@ def get_cache() -> CacheManager:
 def get_lock() -> ToolLock:
     """Get the tool lock instance."""
     return tool_lock
+
+
+def get_lock_timeout() -> float:
+    """Get the configured tool lock timeout."""
+    return settings.tool_lock_timeout

@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "c:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\AECAgentSidecar.csproj": {}
+    "C:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\AECAgentSidecar.csproj": {}
   },
   "projects": {
-    "c:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\AECAgentSidecar.csproj": {
+    "C:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\AECAgentSidecar.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "c:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\AECAgentSidecar.csproj",
+        "projectUniqueName": "C:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\AECAgentSidecar.csproj",
         "projectName": "AECAgentSidecar",
-        "projectPath": "c:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\AECAgentSidecar.csproj",
+        "projectPath": "C:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\AECAgentSidecar.csproj",
         "packagesPath": "C:\\Users\\frelatorre\\.nuget\\packages\\",
-        "outputPath": "c:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\obj\\",
+        "outputPath": "C:\\Users\\frelatorre\\Desktop\\Projects\\aec\\src\\sidecars\\autocad\\obj\\",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "C:\\Users\\frelatorre\\AppData\\Roaming\\NuGet\\NuGet.Config"

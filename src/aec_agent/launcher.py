@@ -103,7 +103,8 @@ class ProcessManager:
         self,
         args: list[str],
         env: dict[str, str],
-        name: str
+        name: str,
+        capture_output: bool = False
     ) -> subprocess.Popen:
         """
         Start a subprocess with the given arguments and environment.
@@ -112,6 +113,7 @@ class ProcessManager:
             args: Command line arguments.
             env: Environment variables.
             name: Name for logging.
+            capture_output: If False, output goes to terminal (useful for debugging).
 
         Returns:
             The started subprocess.
@@ -123,11 +125,15 @@ class ProcessManager:
         if sys.platform == "win32":
             creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
 
+        # Don't capture output by default - let it go to terminal for debugging
+        stdout = subprocess.PIPE if capture_output else None
+        stderr = subprocess.STDOUT if capture_output else None
+
         process = subprocess.Popen(
             args,
             env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
+            stdout=stdout,
+            stderr=stderr,
             creationflags=creationflags,
         )
         self._processes.append(process)

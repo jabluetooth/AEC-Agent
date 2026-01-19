@@ -40,6 +40,15 @@ def main():
         logger.info("Server stopped by user")
     except SystemExit:
         pass
+    except Exception as e:
+        logger.error(
+            "MCP Server crashed with unhandled exception",
+            error=str(e),
+            exc_info=True
+        )
+        import traceback
+        traceback.print_exc()
+        raise
 
 
 if __name__ == "__main__":

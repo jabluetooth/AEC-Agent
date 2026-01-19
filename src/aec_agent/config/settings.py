@@ -214,6 +214,13 @@ class Settings(BaseSettings):
         description="Maximum concurrent tool executions"
     )
 
+    tool_lock_timeout: float = Field(
+        default=120.0,
+        ge=10.0,
+        le=600.0,
+        description="Maximum time to wait for tool lock in seconds"
+    )
+
     memory_warning_threshold: int = Field(
         default=800,
         ge=256,

@@ -39,15 +39,33 @@ class ToolLock:
         self._total_executed = 0
         self._total_wait_time = 0.0
 
-    async def acquire(self) -> float:
+    async def acquire(self, timeout: float = 120.0) -> float:
         """
         Acquire the lock, waiting if necessary.
 
+        Args:
+            timeout: Maximum time to wait for lock (seconds). Default 120s.
+
         Returns:
             Time spent waiting for lock (seconds)
+
+        Raises:
+            asyncio.TimeoutError: If lock cannot be acquired within timeout
         """
         start = time.monotonic()
-        await self._semaphore.acquire()
+        try:
+            await asyncio.wait_for(self._semaphore.acquire(), timeout=timeout)
+        except asyncio.TimeoutError:
+            logger.error(
+                "Tool lock acquisition timed out",
+                timeout_seconds=timeout,
+                active_count=self._active_count,
+                total_executed=self._total_executed
+            )
+            raise asyncio.TimeoutError(
+                f"Could not acquire tool lock within {timeout}s. "
+                f"Another operation may be stuck. Active: {self._active_count}"
+            )
         wait_time = time.monotonic() - start
 
         self._active_count += 1
@@ -79,7 +97,7 @@ class ToolLock:
         }
 
 
-def with_tool_lock(lock: ToolLock):
+def with_tool_lock(lock: ToolLock, timeout: float = None):
     """
     Decorator to execute tool with concurrency lock.
 
@@ -91,6 +109,8 @@ def with_tool_lock(lock: ToolLock):
 
     Args:
         lock: ToolLock instance to use
+        timeout: Maximum time to wait for lock (seconds).
+                 If None, uses TOOL_LOCK_TIMEOUT setting (default 120s).
 
     Returns:
         Decorated function
@@ -98,7 +118,27 @@ def with_tool_lock(lock: ToolLock):
     def decorator(func: Callable[P, T]) -> Callable[P, T]:
         @functools.wraps(func)
         async def wrapper(*args: P.args, **kwargs: P.kwargs) -> T:
-            wait_time = await lock.acquire()
+            # Get timeout from settings if not explicitly provided
+            from aec_agent.config.settings import get_settings
+            effective_timeout = timeout if timeout is not None else get_settings().tool_lock_timeout
+
+            try:
+                wait_time = await lock.acquire(timeout=effective_timeout)
+            except asyncio.TimeoutError as e:
+                # Return error response instead of raising exception
+                logger.warning(
+                    "Tool lock timeout - returning error to client",
+                    tool=func.__name__,
+                    timeout_seconds=effective_timeout
+                )
+                return {
+                    "success": False,
+                    "error": {
+                        "code": 5007,
+                        "message": "Tool lock acquisition timed out",
+                        "details": str(e)
+                    }
+                }
             try:
                 logger.debug(
                     "Executing tool",

@@ -2,6 +2,9 @@
 Base utilities for MCP tools.
 """
 
+import functools
+import structlog
+
 from aec_agent.mcp.server import get_lock, get_cache
 from aec_agent.mcp.sidecar_client import (
     call_sidecar,
@@ -10,6 +13,8 @@ from aec_agent.mcp.sidecar_client import (
     SidecarConnectionError,
     SidecarCircuitOpenError,
 )
+
+logger = structlog.get_logger(__name__)
 
 
 def error_result(code: int, message: str, details: str = None) -> dict:
@@ -51,3 +56,37 @@ class ErrorCode:
     TIMEOUT = 5004
     CONNECTION_FAILED = 5005
     CIRCUIT_OPEN = 5006
+    LOCK_TIMEOUT = 5007
+
+
+def safe_tool(func):
+    """
+    Decorator to catch any unhandled exceptions in tool functions.
+    Prevents the MCP server from crashing on unexpected errors.
+    """
+    @functools.wraps(func)
+    async def wrapper(*args, **kwargs):
+        try:
+            return await func(*args, **kwargs)
+        except SidecarError as e:
+            logger.error(
+                "Sidecar error in tool",
+                tool=func.__name__,
+                error_code=e.code,
+                error_message=e.message,
+                error_details=e.details
+            )
+            return error_result(e.code, e.message, e.details)
+        except Exception as e:
+            logger.error(
+                "Unexpected error in tool",
+                tool=func.__name__,
+                error=str(e),
+                exc_info=True
+            )
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                f"Unexpected error in {func.__name__}",
+                str(e)
+            )
+    return wrapper
