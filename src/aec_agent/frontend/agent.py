@@ -644,6 +644,138 @@ class HuggingFaceBackend(LLMBackend):
                 yield chunk.choices[0].delta.content
 
 
+class GroqBackend(LLMBackend):
+    """Groq Inference API backend (OpenAI compatible)."""
+
+    def __init__(self, api_key: str, model: str):
+        self.api_key = api_key
+        self.model = model
+        self._client = None
+
+    async def _get_client(self):
+        """Lazy-load the OpenAI client configured for Groq."""
+        if self._client is None:
+            from openai import AsyncOpenAI
+            self._client = AsyncOpenAI(
+                api_key=self.api_key,
+                base_url="https://api.groq.com/openai/v1"
+            )
+        return self._client
+
+    async def generate(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]],
+    ) -> AgentResponse:
+        """Generate using Groq (via OpenAI protocol)."""
+        client = await self._get_client()
+
+        # Convert messages to OpenAI format
+        openai_messages = []
+        for msg in messages:
+            if msg.role == "tool":
+                openai_messages.append({
+                    "role": "tool",
+                    "content": msg.content,
+                    "tool_call_id": msg.tool_call_id,
+                })
+            elif msg.tool_calls:
+                openai_messages.append({
+                    "role": msg.role,
+                    "content": msg.content or "",
+                    "tool_calls": msg.tool_calls,
+                })
+            else:
+                openai_messages.append({
+                    "role": msg.role,
+                    "content": msg.content,
+                })
+
+        kwargs = {
+            "model": self.model,
+            "messages": openai_messages,
+            "max_tokens": 4096,
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        try:
+            response = await client.chat.completions.create(**kwargs)
+            choice = response.choices[0]
+            message = choice.message
+
+            # Extract tool calls
+            tool_calls = []
+            if message.tool_calls:
+                for tc in message.tool_calls:
+                    try:
+                        arguments = json.loads(tc.function.arguments)
+                    except json.JSONDecodeError:
+                        arguments = {}
+                    tool_calls.append(ToolCall(
+                        id=tc.id,
+                        name=tc.function.name,
+                        arguments=arguments,
+                    ))
+
+            return AgentResponse(
+                content=message.content or "",
+                tool_calls=tool_calls,
+                finished=choice.finish_reason == "stop",
+            )
+        except Exception as e:
+            logger.error("Groq API error", error=str(e))
+            return AgentResponse(
+                content=f"Error calling Groq API: {str(e)}",
+                finished=True
+            )
+
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]],
+    ) -> AsyncGenerator[str, None]:
+        """Stream using Groq."""
+        client = await self._get_client()
+
+        # Convert messages to OpenAI format
+        openai_messages = []
+        for msg in messages:
+            if msg.role == "tool":
+                openai_messages.append({
+                    "role": "tool",
+                    "content": msg.content,
+                    "tool_call_id": msg.tool_call_id,
+                })
+            elif msg.tool_calls:
+                openai_messages.append({
+                    "role": msg.role,
+                    "content": msg.content or "",
+                    "tool_calls": msg.tool_calls,
+                })
+            else:
+                openai_messages.append({
+                    "role": msg.role,
+                    "content": msg.content,
+                })
+
+        kwargs = {
+            "model": self.model,
+            "messages": openai_messages,
+            "stream": True,
+        }
+        if tools:
+            kwargs["tools"] = tools
+            kwargs["tool_choice"] = "auto"
+
+        stream = await client.chat.completions.create(**kwargs)
+
+        async for chunk in stream:
+            if chunk.choices and chunk.choices[0].delta.content:
+                yield chunk.choices[0].delta.content
+
+
 class AECAgent:
     """
     Main agent class that orchestrates LLM interactions and tool calls.
@@ -693,6 +825,11 @@ class AECAgent:
             return HuggingFaceBackend(
                 api_key=settings.get_llm_api_key(),
                 model=settings.huggingface_model,
+            )
+        elif settings.llm_provider == LLMProvider.GROQ:
+            return GroqBackend(
+                api_key=settings.get_llm_api_key(),
+                model=settings.groq_model,
             )
         else:
             raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")

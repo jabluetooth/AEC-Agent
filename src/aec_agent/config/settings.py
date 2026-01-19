@@ -32,6 +32,7 @@ class LLMProvider(str, Enum):
     ANTHROPIC = "anthropic"
     AZURE_OPENAI = "azure_openai"
     HUGGINGFACE = "huggingface"
+    GROQ = "groq"
 
 
 class Settings(BaseSettings):
@@ -97,6 +98,16 @@ class Settings(BaseSettings):
     huggingface_model: str = Field(
         default="meta-llama/Llama-3.1-8B-Instruct",
         description="Hugging Face model to use"
+    )
+
+    groq_api_key: Optional[str] = Field(
+        default=None,
+        description="Groq API key"
+    )
+
+    groq_model: str = Field(
+        default="moonshotai/kimi-k2-instruct",
+        description="Groq model to use"
     )
 
     # ==========================================================================
@@ -265,6 +276,10 @@ class Settings(BaseSettings):
             if not self.huggingface_api_key:
                 raise ValueError("HUGGINGFACE_API_KEY is required")
             return self.huggingface_api_key
+        elif self.llm_provider == LLMProvider.GROQ:
+            if not self.groq_api_key:
+                raise ValueError("GROQ_API_KEY is required")
+            return self.groq_api_key
         else:
             raise ValueError(f"Unknown LLM provider: {self.llm_provider}")
 
