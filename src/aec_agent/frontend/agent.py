@@ -17,37 +17,17 @@ from aec_agent.frontend.mcp_client import MCPClient, ToolResult
 
 logger = structlog.get_logger(__name__)
 
-# System prompt that defines the agent's behavior
-SYSTEM_PROMPT = """You are an expert AEC (Architecture, Engineering, Construction) Specialist AI assistant.
+# System prompt - kept concise to reduce token usage
+SYSTEM_PROMPT = """You are an AEC AI assistant for AutoCAD and Revit automation.
 
-Your primary role is to help users work with AutoCAD and Revit through natural language commands. You have access to specialized tools that allow you to:
+Tools available: layers, drawing (lines/circles/rectangles), levels, walls, rooms, document queries.
 
-**AutoCAD Operations:**
-- Manage layers (create, list, toggle visibility/frozen state)
-- Draw entities (lines, circles, rectangles)
-- Query drawing information and entity counts
-
-**Revit Operations:**
-- Manage levels (create, list)
-- Work with walls (create, list)
-- Manage rooms (list, query by level)
-- Get document status
-- Delete elements
-
-**Guidelines:**
-1. Always explain what you're about to do before executing commands
-2. Confirm destructive operations (like deleting elements) before proceeding
-3. Provide clear feedback on the results of operations
-4. If an operation fails, explain the error and suggest alternatives
-5. Use appropriate units (typically feet for Revit, drawing units for AutoCAD)
-6. When creating geometry, ask for dimensions if not specified
-
-**Important Notes:**
-- AutoCAD and Revit are single-threaded applications; operations run one at a time
-- Complex operations may take several seconds to complete
-- Always verify the target application (AutoCAD vs Revit) is running before operations
-
-Be helpful, precise, and proactive in suggesting improvements to the user's workflow."""
+Guidelines:
+- Explain actions briefly before executing
+- Confirm destructive operations (delete)
+- Report errors clearly with alternatives
+- Units: meters for Revit, drawing units for AutoCAD
+- Operations are single-threaded; one at a time"""
 
 
 @dataclass
@@ -787,6 +767,7 @@ class AECAgent:
         self,
         mcp_client: MCPClient,
         backend: Optional[LLMBackend] = None,
+        max_history_messages: Optional[int] = None,
     ):
         """
         Initialize the AEC Agent.
@@ -794,12 +775,31 @@ class AECAgent:
         Args:
             mcp_client: Connected MCP client for tool calls.
             backend: LLM backend to use. Auto-detected from settings if not provided.
+            max_history_messages: Maximum conversation messages to keep (excluding system).
+                                  Older messages are trimmed to reduce token usage.
+                                  Defaults to settings.max_history_messages.
         """
+        settings = get_settings()
         self.mcp_client = mcp_client
         self.backend = backend or self._create_backend()
+        self.max_history_messages = max_history_messages or settings.max_history_messages
         self.messages: list[Message] = [
             Message(role="system", content=SYSTEM_PROMPT)
         ]
+
+    def _trim_history(self) -> None:
+        """Trim conversation history to reduce token usage.
+
+        Keeps the system message and the most recent messages up to max_history_messages.
+        """
+        if len(self.messages) <= self.max_history_messages + 1:  # +1 for system
+            return
+
+        # Keep system message (index 0) and most recent messages
+        system_msg = self.messages[0]
+        recent_msgs = self.messages[-(self.max_history_messages):]
+        self.messages = [system_msg] + recent_msgs
+        logger.debug("Trimmed history", kept_messages=len(self.messages))
 
     def _create_backend(self) -> LLMBackend:
         """Create an LLM backend based on settings."""
@@ -834,15 +834,62 @@ class AECAgent:
         else:
             raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
-    def _get_tools(self) -> list[dict[str, Any]]:
-        """Get tools in the format expected by the current backend."""
+    def _detect_tool_context(self, user_input: str) -> Optional[str]:
+        """Detect which tool context (autocad/revit) based on user input.
+
+        Returns:
+            'autocad_' or 'revit_' prefix, or None for all tools.
+        """
+        text = user_input.lower()
+
+        # AutoCAD keywords
+        autocad_keywords = ['autocad', 'acad', 'dwg', 'layer', 'polyline', 'draw line',
+                           'draw circle', 'draw rect', 'entity', 'entities']
+        # Revit keywords
+        revit_keywords = ['revit', 'rvt', 'level', 'wall', 'room', 'floor', 'element',
+                         'family', 'worksharing']
+
+        autocad_score = sum(1 for kw in autocad_keywords if kw in text)
+        revit_score = sum(1 for kw in revit_keywords if kw in text)
+
+        # Only filter if clear preference (score >= 1 and other is 0)
+        if autocad_score > 0 and revit_score == 0:
+            return 'autocad_'
+        elif revit_score > 0 and autocad_score == 0:
+            return 'revit_'
+
+        # Ambiguous or general query - return all tools
+        return None
+
+    def _get_tools(self, user_input: Optional[str] = None) -> list[dict[str, Any]]:
+        """Get tools in the format expected by the current backend.
+
+        Args:
+            user_input: Optional user message to detect context for smart filtering.
+        """
         settings = get_settings()
 
+        # Smart tool filtering based on user context
+        filter_prefix = None
+        if settings.smart_tool_routing and user_input:
+            filter_prefix = self._detect_tool_context(user_input)
+            if filter_prefix:
+                logger.debug("Filtered tools by context", prefix=filter_prefix)
+
+        # Compress for HF/Groq or if explicitly enabled
+        compress = settings.compress_tool_schemas or settings.llm_provider in (
+            LLMProvider.HUGGINGFACE,
+            LLMProvider.GROQ,
+        )
+
         if settings.llm_provider == LLMProvider.ANTHROPIC:
-            return self.mcp_client.get_tools_for_anthropic()
+            return self.mcp_client.get_tools_for_anthropic(
+                compress=compress, filter_prefix=filter_prefix
+            )
         else:
-            # OpenAI and Azure use the same format
-            return self.mcp_client.get_tools_for_openai()
+            return self.mcp_client.get_tools_for_openai(
+                compress=compress, filter_prefix=filter_prefix
+            )
 
     async def process_message(self, user_input: str) -> AsyncGenerator[str, None]:
         """
@@ -857,10 +904,14 @@ class AECAgent:
         Yields:
             Response text chunks.
         """
+        # Trim history to reduce token usage
+        self._trim_history()
+
         # Add user message
         self.messages.append(Message(role="user", content=user_input))
 
-        tools = self._get_tools()
+        # Get tools with smart filtering based on user input
+        tools = self._get_tools(user_input)
         max_iterations = 10  # Prevent infinite loops
 
         for _ in range(max_iterations):

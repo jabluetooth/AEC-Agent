@@ -239,6 +239,23 @@ class Settings(BaseSettings):
         description="Memory warning threshold in MB"
     )
 
+    max_history_messages: int = Field(
+        default=20,
+        ge=4,
+        le=100,
+        description="Maximum conversation messages to keep (reduces token usage)"
+    )
+
+    compress_tool_schemas: bool = Field(
+        default=True,
+        description="Compress tool schemas to reduce token usage (auto-enabled for HF/Groq)"
+    )
+
+    smart_tool_routing: bool = Field(
+        default=True,
+        description="Enable smart tool filtering based on user context (AutoCAD vs Revit)"
+    )
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:

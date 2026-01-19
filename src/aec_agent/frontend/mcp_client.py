@@ -21,6 +21,67 @@ from aec_agent.config.settings import get_settings
 logger = structlog.get_logger(__name__)
 
 
+def _compress_description(desc: str) -> str:
+    """Compress tool description by removing examples and extra whitespace."""
+    if not desc:
+        return desc
+
+    lines = desc.split('\n')
+    compressed = []
+    skip_section = False
+
+    for line in lines:
+        line_lower = line.strip().lower()
+        # Skip example sections
+        if line_lower.startswith('example:') or line_lower.startswith('examples:'):
+            skip_section = True
+            continue
+        # Resume on new section (Args, Returns, etc.)
+        if skip_section and line_lower and (line_lower.startswith('args:') or
+            line_lower.startswith('returns:') or line_lower.startswith('warning:')):
+            skip_section = False
+        if skip_section:
+            continue
+        # Keep non-empty lines, compress whitespace
+        if line.strip():
+            compressed.append(line.strip())
+
+    return ' '.join(compressed)
+
+
+def _compress_schema(schema: dict[str, Any]) -> dict[str, Any]:
+    """Compress JSON schema by removing descriptions from properties."""
+    if not schema:
+        return schema
+
+    result = {}
+    for key, value in schema.items():
+        if key == 'properties' and isinstance(value, dict):
+            # Keep property definitions but remove verbose descriptions
+            compressed_props = {}
+            for prop_name, prop_def in value.items():
+                if isinstance(prop_def, dict):
+                    # Keep type and essential fields, shorten description
+                    compressed_prop = {k: v for k, v in prop_def.items()
+                                       if k in ('type', 'default', 'enum', 'items', 'minimum', 'maximum')}
+                    if 'description' in prop_def:
+                        # Keep first sentence only
+                        desc = prop_def['description']
+                        first_sentence = desc.split('.')[0] if '.' in desc else desc
+                        if len(first_sentence) < 100:
+                            compressed_prop['description'] = first_sentence
+                    compressed_props[prop_name] = compressed_prop
+                else:
+                    compressed_props[prop_name] = prop_def
+            result[key] = compressed_props
+        elif isinstance(value, dict):
+            result[key] = _compress_schema(value)
+        else:
+            result[key] = value
+
+    return result
+
+
 @dataclass
 class Tool:
     """Represents an MCP tool."""
@@ -29,23 +90,37 @@ class Tool:
     description: str
     input_schema: dict[str, Any]
 
-    def to_openai_format(self) -> dict[str, Any]:
-        """Convert to OpenAI function calling format."""
+    def to_openai_format(self, compress: bool = False) -> dict[str, Any]:
+        """Convert to OpenAI function calling format.
+
+        Args:
+            compress: If True, compress description and schema to reduce tokens.
+        """
+        desc = _compress_description(self.description) if compress else self.description
+        schema = _compress_schema(self.input_schema) if compress else self.input_schema
+
         return {
             "type": "function",
             "function": {
                 "name": self.name,
-                "description": self.description,
-                "parameters": self.input_schema,
+                "description": desc,
+                "parameters": schema,
             },
         }
 
-    def to_anthropic_format(self) -> dict[str, Any]:
-        """Convert to Anthropic tool use format."""
+    def to_anthropic_format(self, compress: bool = False) -> dict[str, Any]:
+        """Convert to Anthropic tool use format.
+
+        Args:
+            compress: If True, compress description and schema to reduce tokens.
+        """
+        desc = _compress_description(self.description) if compress else self.description
+        schema = _compress_schema(self.input_schema) if compress else self.input_schema
+
         return {
             "name": self.name,
-            "description": self.description,
-            "input_schema": self.input_schema,
+            "description": desc,
+            "input_schema": schema,
         }
 
 
@@ -58,15 +133,26 @@ class ToolResult:
     error: Optional[dict[str, Any]] = None
     raw_content: Optional[str] = None
 
-    def to_message_content(self) -> str:
-        """Convert result to a string for LLM context."""
+    def to_message_content(self, max_length: int = 2000) -> str:
+        """Convert result to a compact string for LLM context.
+
+        Args:
+            max_length: Maximum length of the result string to reduce token usage.
+        """
         if self.success and self.data:
-            return json.dumps(self.data, indent=2)
+            # Compact JSON (no indent) to save tokens
+            content = json.dumps(self.data, separators=(',', ':'))
         elif self.error:
             return f"Error: {self.error.get('message', 'Unknown error')}"
         elif self.raw_content:
-            return self.raw_content
-        return "No result returned"
+            content = self.raw_content
+        else:
+            return "No result"
+
+        # Truncate if too long
+        if len(content) > max_length:
+            return content[:max_length] + "...[truncated]"
+        return content
 
 
 class MCPClientError(Exception):
@@ -214,21 +300,53 @@ class MCPClient:
             logger.error("Tool discovery failed", error=str(e))
             raise MCPToolError(f"Tool discovery failed: {e}") from e
 
-    def get_tools(self) -> list[Tool]:
-        """Get list of available tools."""
-        return list(self._tools.values())
+    def get_tools(self, filter_prefix: Optional[str] = None) -> list[Tool]:
+        """Get list of available tools.
+
+        Args:
+            filter_prefix: If provided, only return tools starting with this prefix.
+        """
+        tools = list(self._tools.values())
+        if filter_prefix:
+            tools = [t for t in tools if t.name.startswith(filter_prefix)]
+        return tools
 
     def get_tool(self, name: str) -> Optional[Tool]:
         """Get a specific tool by name."""
         return self._tools.get(name)
 
-    def get_tools_for_openai(self) -> list[dict[str, Any]]:
-        """Get tools in OpenAI function calling format."""
-        return [tool.to_openai_format() for tool in self._tools.values()]
+    def get_tools_for_openai(
+        self,
+        compress: bool = False,
+        filter_prefix: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Get tools in OpenAI function calling format.
 
-    def get_tools_for_anthropic(self) -> list[dict[str, Any]]:
-        """Get tools in Anthropic tool use format."""
-        return [tool.to_anthropic_format() for tool in self._tools.values()]
+        Args:
+            compress: If True, compress descriptions to reduce tokens.
+            filter_prefix: If provided, only include tools with this prefix
+                          (e.g., 'autocad_' or 'revit_').
+        """
+        tools = self._tools.values()
+        if filter_prefix:
+            tools = [t for t in tools if t.name.startswith(filter_prefix)]
+        return [tool.to_openai_format(compress=compress) for tool in tools]
+
+    def get_tools_for_anthropic(
+        self,
+        compress: bool = False,
+        filter_prefix: Optional[str] = None,
+    ) -> list[dict[str, Any]]:
+        """Get tools in Anthropic tool use format.
+
+        Args:
+            compress: If True, compress descriptions to reduce tokens.
+            filter_prefix: If provided, only include tools with this prefix.
+        """
+        tools = self._tools.values()
+        if filter_prefix:
+            tools = [t for t in tools if t.name.startswith(filter_prefix)]
+        return [tool.to_anthropic_format(compress=compress) for tool in tools]
 
     async def call_tool(
         self,
