@@ -90,14 +90,27 @@ class Tool:
     description: str
     input_schema: dict[str, Any]
 
-    def to_openai_format(self, compress: bool = False) -> dict[str, Any]:
+    def to_openai_format(
+        self,
+        compress: bool = False,
+        compression_mode: str = "standard"
+    ) -> dict[str, Any]:
         """Convert to OpenAI function calling format.
 
         Args:
             compress: If True, compress description and schema to reduce tokens.
+            compression_mode: Compression level (full, standard, minimal, ultra).
         """
-        desc = _compress_description(self.description) if compress else self.description
-        schema = _compress_schema(self.input_schema) if compress else self.input_schema
+        if compress:
+            from aec_agent.frontend.tool_optimization import (
+                get_optimized_description,
+                get_optimized_schema,
+            )
+            desc = get_optimized_description(self.name, self.description, compression_mode)
+            schema = get_optimized_schema(self.input_schema, compression_mode)
+        else:
+            desc = self.description
+            schema = self.input_schema
 
         return {
             "type": "function",
@@ -108,14 +121,27 @@ class Tool:
             },
         }
 
-    def to_anthropic_format(self, compress: bool = False) -> dict[str, Any]:
+    def to_anthropic_format(
+        self,
+        compress: bool = False,
+        compression_mode: str = "standard"
+    ) -> dict[str, Any]:
         """Convert to Anthropic tool use format.
 
         Args:
             compress: If True, compress description and schema to reduce tokens.
+            compression_mode: Compression level (full, standard, minimal, ultra).
         """
-        desc = _compress_description(self.description) if compress else self.description
-        schema = _compress_schema(self.input_schema) if compress else self.input_schema
+        if compress:
+            from aec_agent.frontend.tool_optimization import (
+                get_optimized_description,
+                get_optimized_schema,
+            )
+            desc = get_optimized_description(self.name, self.description, compression_mode)
+            schema = get_optimized_schema(self.input_schema, compression_mode)
+        else:
+            desc = self.description
+            schema = self.input_schema
 
         return {
             "name": self.name,
@@ -133,12 +159,16 @@ class ToolResult:
     error: Optional[dict[str, Any]] = None
     raw_content: Optional[str] = None
 
-    def to_message_content(self, max_length: int = 2000) -> str:
+    def to_message_content(self, max_length: Optional[int] = None) -> str:
         """Convert result to a compact string for LLM context.
 
         Args:
-            max_length: Maximum length of the result string to reduce token usage.
+            max_length: Maximum length of the result string. If None, uses settings.
         """
+        if max_length is None:
+            from aec_agent.config.settings import get_settings
+            max_length = get_settings().max_tool_result_chars
+
         if self.success and self.data:
             # Compact JSON (no indent) to save tokens
             content = json.dumps(self.data, separators=(',', ':'))
@@ -151,8 +181,55 @@ class ToolResult:
 
         # Truncate if too long
         if len(content) > max_length:
-            return content[:max_length] + "...[truncated]"
+            return self._smart_truncate(content, max_length)
         return content
+
+    def _smart_truncate(self, content: str, max_length: int) -> str:
+        """Smart truncation that preserves structure when possible."""
+        if len(content) <= max_length:
+            return content
+
+        # Try to parse as JSON for smarter truncation
+        try:
+            data = json.loads(content)
+
+            # If it's a list, truncate items
+            if isinstance(data, list) and len(data) > 0:
+                items_shown = 0
+                truncated_list = []
+                running_length = 2  # for []
+
+                for item in data:
+                    item_str = json.dumps(item, separators=(',', ':'))
+                    if running_length + len(item_str) + 1 < max_length - 50:
+                        truncated_list.append(item)
+                        running_length += len(item_str) + 1
+                        items_shown += 1
+                    else:
+                        break
+
+                remaining = len(data) - items_shown
+                if remaining > 0:
+                    result = json.dumps(truncated_list, separators=(',', ':'))
+                    return f"{result[:-1]}]...[{remaining} more items]"
+                return json.dumps(truncated_list, separators=(',', ':'))
+
+            # If it's a dict with a list field, truncate that
+            if isinstance(data, dict):
+                for key in ['elements', 'items', 'results', 'data']:
+                    if key in data and isinstance(data[key], list):
+                        original_len = len(data[key])
+                        # Keep first 5 items
+                        data[key] = data[key][:5]
+                        truncated = json.dumps(data, separators=(',', ':'))
+                        if len(truncated) < max_length:
+                            return f"{truncated}...[showing 5 of {original_len}]"
+
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+        # Fall back to simple truncation
+        return content[:max_length - 20] + "...[truncated]"
 
 
 class MCPClientError(Exception):
@@ -318,35 +395,90 @@ class MCPClient:
     def get_tools_for_openai(
         self,
         compress: bool = False,
+        compression_mode: str = "standard",
         filter_prefix: Optional[str] = None,
+        tool_tier: Optional[str] = None,
+        include_metadata: bool = True,
     ) -> list[dict[str, Any]]:
         """Get tools in OpenAI function calling format.
 
         Args:
             compress: If True, compress descriptions to reduce tokens.
+            compression_mode: Compression level (full, standard, minimal, ultra).
             filter_prefix: If provided, only include tools with this prefix
                           (e.g., 'autocad_' or 'revit_').
+            tool_tier: Tool tier (essential, standard, advanced). If set,
+                      only tools in that tier and below are included.
+            include_metadata: If False, exclude metadata/semantic tools.
         """
-        tools = self._tools.values()
+        tools = list(self._tools.values())
+
+        # Filter by tier
+        if tool_tier:
+            from aec_agent.frontend.tool_optimization import get_tools_for_tier
+            allowed_tools = set(get_tools_for_tier(tool_tier))
+            tools = [t for t in tools if t.name in allowed_tools]
+
+        # Filter out metadata tools if disabled
+        if not include_metadata:
+            metadata_tools = {
+                "find_elements", "get_nearby_elements", "get_related_elements",
+                "resolve_coordinates", "sync_metadata", "draw_line_between",
+                "draw_circle_at", "draw_rectangle_around", "get_distance_between"
+            }
+            tools = [t for t in tools if t.name not in metadata_tools]
+
+        # Filter by prefix
         if filter_prefix:
             tools = [t for t in tools if t.name.startswith(filter_prefix)]
-        return [tool.to_openai_format(compress=compress) for tool in tools]
+
+        return [
+            tool.to_openai_format(compress=compress, compression_mode=compression_mode)
+            for tool in tools
+        ]
 
     def get_tools_for_anthropic(
         self,
         compress: bool = False,
+        compression_mode: str = "standard",
         filter_prefix: Optional[str] = None,
+        tool_tier: Optional[str] = None,
+        include_metadata: bool = True,
     ) -> list[dict[str, Any]]:
         """Get tools in Anthropic tool use format.
 
         Args:
             compress: If True, compress descriptions to reduce tokens.
+            compression_mode: Compression level (full, standard, minimal, ultra).
             filter_prefix: If provided, only include tools with this prefix.
+            tool_tier: Tool tier (essential, standard, advanced).
+            include_metadata: If False, exclude metadata/semantic tools.
         """
-        tools = self._tools.values()
+        tools = list(self._tools.values())
+
+        # Filter by tier
+        if tool_tier:
+            from aec_agent.frontend.tool_optimization import get_tools_for_tier
+            allowed_tools = set(get_tools_for_tier(tool_tier))
+            tools = [t for t in tools if t.name in allowed_tools]
+
+        # Filter out metadata tools if disabled
+        if not include_metadata:
+            metadata_tools = {
+                "find_elements", "get_nearby_elements", "get_related_elements",
+                "resolve_coordinates", "sync_metadata", "draw_line_between",
+                "draw_circle_at", "draw_rectangle_around", "get_distance_between"
+            }
+            tools = [t for t in tools if t.name not in metadata_tools]
+
+        # Filter by prefix
         if filter_prefix:
             tools = [t for t in tools if t.name.startswith(filter_prefix)]
-        return [tool.to_anthropic_format(compress=compress) for tool in tools]
+
+        return [
+            tool.to_anthropic_format(compress=compress, compression_mode=compression_mode)
+            for tool in tools
+        ]
 
     async def call_tool(
         self,

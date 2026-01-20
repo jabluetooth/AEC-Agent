@@ -256,6 +256,107 @@ class Settings(BaseSettings):
         description="Enable smart tool filtering based on user context (AutoCAD vs Revit)"
     )
 
+    # ==========================================================================
+    # Tool Optimization Configuration
+    # ==========================================================================
+    tool_tier: str = Field(
+        default="standard",
+        description="Tool loading tier: essential (minimal), standard (default), advanced (all)"
+    )
+
+    tool_compression_mode: str = Field(
+        default="standard",
+        description="Tool description compression: full (none), standard, minimal, ultra"
+    )
+
+    enable_metadata_tools: bool = Field(
+        default=True,
+        description="Enable metadata/semantic search tools (requires database)"
+    )
+
+    max_tool_result_chars: int = Field(
+        default=2000,
+        ge=500,
+        le=10000,
+        description="Maximum characters in tool result (truncation threshold)"
+    )
+
+    enable_result_summarization: bool = Field(
+        default=False,
+        description="Use LLM to summarize long results instead of truncating"
+    )
+
+    # ==========================================================================
+    # Database Configuration (PostgreSQL with PostGIS + pgvector)
+    # ==========================================================================
+    database_url: Optional[str] = Field(
+        default=None,
+        description="PostgreSQL connection string (postgresql://user:pass@host:port/db)"
+    )
+
+    database_pool_size: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Database connection pool size"
+    )
+
+    database_pool_max_overflow: int = Field(
+        default=10,
+        ge=0,
+        le=50,
+        description="Maximum overflow connections beyond pool size"
+    )
+
+    # ==========================================================================
+    # Embedding Configuration
+    # ==========================================================================
+    embedding_model: str = Field(
+        default="all-MiniLM-L6-v2",
+        description="Sentence transformer model for semantic search"
+    )
+
+    embedding_dimension: int = Field(
+        default=384,
+        ge=64,
+        le=4096,
+        description="Embedding vector dimension (must match model)"
+    )
+
+    # ==========================================================================
+    # Extraction & Sync Configuration
+    # ==========================================================================
+    sync_on_save: bool = Field(
+        default=True,
+        description="Automatically sync metadata when document is saved"
+    )
+
+    sync_debounce_ms: int = Field(
+        default=2000,
+        ge=100,
+        le=10000,
+        description="Debounce time for incremental sync in milliseconds"
+    )
+
+    relationship_distance_threshold: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=100.0,
+        description="Distance threshold in meters for 'near' relationships"
+    )
+
+    extraction_batch_size: int = Field(
+        default=1000,
+        ge=100,
+        le=10000,
+        description="Batch size for entity extraction (prevents memory issues)"
+    )
+
+    @property
+    def has_database(self) -> bool:
+        """Check if PostgreSQL database is configured."""
+        return self.database_url is not None
+
     @field_validator("log_level")
     @classmethod
     def validate_log_level(cls, v: str) -> str:

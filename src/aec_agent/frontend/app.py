@@ -5,6 +5,7 @@ Provides the user-facing chat interface with real-time tool execution display.
 """
 
 import chainlit as cl
+from chainlit.input_widget import Select
 import structlog
 
 from aec_agent.config.settings import get_settings
@@ -12,6 +13,13 @@ from aec_agent.frontend.mcp_client import MCPClient
 from aec_agent.frontend.agent import AECAgent
 
 logger = structlog.get_logger(__name__)
+
+# App selector options
+APP_OPTIONS = {
+    "both": "Both (AutoCAD + Revit)",
+    "autocad": "AutoCAD Only",
+    "revit": "Revit Only",
+}
 
 
 @cl.on_chat_start
@@ -23,12 +31,29 @@ async def on_chat_start():
     """
     settings = get_settings()
 
+    # Set up chat settings with app selector
+    chat_settings = await cl.ChatSettings(
+        [
+            Select(
+                id="app_context",
+                label="Application",
+                description="Select which CAD application to use",
+                values=list(APP_OPTIONS.keys()),
+                initial_value="both",
+            ),
+        ]
+    ).send()
+
+    # Store initial app context
+    app_context = chat_settings.get("app_context", "both")
+    cl.user_session.set("app_context", app_context)
+
     # Send welcome message
     await cl.Message(
         content=(
             "Welcome to **AEC Agent**!\n\n"
             "I'm your AI assistant for AutoCAD and Revit automation. "
-            "I can help you:\n\n"
+            "Use the **Settings** (gear icon) to select your application.\n\n"
             "**AutoCAD:**\n"
             "- Create and manage layers\n"
             "- Draw lines, circles, and rectangles\n"
@@ -52,7 +77,7 @@ async def on_chat_start():
         # Check server health
         if await mcp_client.ping():
             await cl.Message(
-                content="*Connected to MCP server successfully.*",
+                content=f"*Connected to MCP server. App: **{APP_OPTIONS[app_context]}***",
                 author="System",
             ).send()
         else:
@@ -77,26 +102,37 @@ async def on_chat_start():
         cl.user_session.set("mcp_client", mcp_client)
         return
 
-    # Initialize agent
+    # Initialize agent with app context
     try:
-        agent = AECAgent(mcp_client=mcp_client)
+        agent = AECAgent(mcp_client=mcp_client, app_context=app_context)
         # Store in session
         cl.user_session.set("mcp_client", mcp_client)
         cl.user_session.set("agent", agent)
     except Exception as e:
         logger.error("Failed to initialize agent", error=str(e))
         await cl.Message(
-            content=f"*Error: Failed to initialize AI agent: {e}*\n\nPlease checks your settings and API keys.",
+            content=f"*Error: Failed to initialize AI agent: {e}*\n\nPlease check your settings and API keys.",
             author="System",
         ).send()
         return
 
-    # Show available tools
-    tools = mcp_client.get_tools()
+    # Show available tools for selected context
+    await _show_tools_for_context(mcp_client, app_context)
+
+
+async def _show_tools_for_context(mcp_client: MCPClient, app_context: str):
+    """Show tools available for the selected app context."""
+    filter_prefix = None
+    if app_context == "autocad":
+        filter_prefix = "autocad_"
+    elif app_context == "revit":
+        filter_prefix = "revit_"
+
+    tools = mcp_client.get_tools(filter_prefix=filter_prefix)
     if tools:
-        tool_list = "\n".join([f"- `{t.name}`: {t.description}" for t in tools[:10]])
+        tool_list = "\n".join([f"- `{t.name}`" for t in tools[:10]])
         if len(tools) > 10:
-            tool_list += f"\n- *...and {len(tools) - 10} more tools*"
+            tool_list += f"\n- *...and {len(tools) - 10} more*"
 
         await cl.Message(
             content=f"**Available Tools ({len(tools)}):**\n{tool_list}",
@@ -252,6 +288,29 @@ async def chat_profiles():
 async def settings_update(settings: dict):
     """Handle settings updates from the UI."""
     logger.info("Settings updated", settings=settings)
+
+    # Update app context if changed
+    new_context = settings.get("app_context")
+    old_context = cl.user_session.get("app_context")
+
+    if new_context and new_context != old_context:
+        cl.user_session.set("app_context", new_context)
+
+        # Update agent's app context
+        agent: AECAgent = cl.user_session.get("agent")
+        if agent:
+            agent.set_app_context(new_context)
+
+        # Notify user
+        await cl.Message(
+            content=f"*Switched to **{APP_OPTIONS.get(new_context, new_context)}**. Tools filtered accordingly.*",
+            author="System",
+        ).send()
+
+        # Show new available tools
+        mcp_client: MCPClient = cl.user_session.get("mcp_client")
+        if mcp_client:
+            await _show_tools_for_context(mcp_client, new_context)
 
 
 # Custom CSS for the UI (via chainlit.md config)

@@ -759,7 +759,7 @@ class GroqBackend(LLMBackend):
 class AECAgent:
     """
     Main agent class that orchestrates LLM interactions and tool calls.
-    
+
     Manages the conversation loop, tool execution, and message history.
     """
 
@@ -768,6 +768,7 @@ class AECAgent:
         mcp_client: MCPClient,
         backend: Optional[LLMBackend] = None,
         max_history_messages: Optional[int] = None,
+        app_context: str = "both",
     ):
         """
         Initialize the AEC Agent.
@@ -778,14 +779,27 @@ class AECAgent:
             max_history_messages: Maximum conversation messages to keep (excluding system).
                                   Older messages are trimmed to reduce token usage.
                                   Defaults to settings.max_history_messages.
+            app_context: Application context ("both", "autocad", or "revit").
+                        Controls which tools are available to reduce token usage.
         """
         settings = get_settings()
         self.mcp_client = mcp_client
         self.backend = backend or self._create_backend()
         self.max_history_messages = max_history_messages or settings.max_history_messages
+        self.app_context = app_context
         self.messages: list[Message] = [
             Message(role="system", content=SYSTEM_PROMPT)
         ]
+
+    def set_app_context(self, app_context: str) -> None:
+        """
+        Update the application context.
+
+        Args:
+            app_context: New context ("both", "autocad", or "revit")
+        """
+        self.app_context = app_context
+        logger.info("App context updated", context=app_context)
 
     def _trim_history(self) -> None:
         """Trim conversation history to reduce token usage.
@@ -842,20 +856,30 @@ class AECAgent:
         """
         text = user_input.lower()
 
-        # AutoCAD keywords
-        autocad_keywords = ['autocad', 'acad', 'dwg', 'layer', 'polyline', 'draw line',
-                           'draw circle', 'draw rect', 'entity', 'entities']
+        # AutoCAD keywords (weighted by specificity)
+        autocad_keywords = {
+            'autocad': 3, 'acad': 3, 'dwg': 3,  # High specificity
+            'layer': 1, 'polyline': 2, 'entity': 1, 'entities': 1,  # Medium
+            'draw line': 1, 'draw circle': 1, 'draw rect': 1,  # Generic drawing
+        }
         # Revit keywords
-        revit_keywords = ['revit', 'rvt', 'level', 'wall', 'room', 'floor', 'element',
-                         'family', 'worksharing']
+        revit_keywords = {
+            'revit': 3, 'rvt': 3, 'worksharing': 3,  # High specificity
+            'level': 1, 'wall': 1, 'room': 1, 'floor': 1,  # Medium
+            'family': 2, 'element': 1,  # Medium-low
+        }
 
-        autocad_score = sum(1 for kw in autocad_keywords if kw in text)
-        revit_score = sum(1 for kw in revit_keywords if kw in text)
+        autocad_score = sum(
+            weight for kw, weight in autocad_keywords.items() if kw in text
+        )
+        revit_score = sum(
+            weight for kw, weight in revit_keywords.items() if kw in text
+        )
 
-        # Only filter if clear preference (score >= 1 and other is 0)
-        if autocad_score > 0 and revit_score == 0:
+        # Need clear preference (score >= 2 with ratio > 2:1)
+        if autocad_score >= 2 and autocad_score > revit_score * 2:
             return 'autocad_'
-        elif revit_score > 0 and autocad_score == 0:
+        elif revit_score >= 2 and revit_score > autocad_score * 2:
             return 'revit_'
 
         # Ambiguous or general query - return all tools
@@ -869,26 +893,52 @@ class AECAgent:
         """
         settings = get_settings()
 
-        # Smart tool filtering based on user context
+        # Determine tool filter prefix based on app context
         filter_prefix = None
-        if settings.smart_tool_routing and user_input:
+        if self.app_context == "autocad":
+            filter_prefix = "autocad_"
+        elif self.app_context == "revit":
+            filter_prefix = "revit_"
+        elif settings.smart_tool_routing and user_input:
+            # Fall back to smart routing only for "both" context
             filter_prefix = self._detect_tool_context(user_input)
-            if filter_prefix:
-                logger.debug("Filtered tools by context", prefix=filter_prefix)
 
-        # Compress for HF/Groq or if explicitly enabled
+        if filter_prefix:
+            logger.debug("Filtered tools by context", prefix=filter_prefix, app_context=self.app_context)
+
+        # Determine compression settings
         compress = settings.compress_tool_schemas or settings.llm_provider in (
             LLMProvider.HUGGINGFACE,
             LLMProvider.GROQ,
         )
 
+        # Use more aggressive compression for budget providers
+        compression_mode = settings.tool_compression_mode
+        if settings.llm_provider in (LLMProvider.HUGGINGFACE, LLMProvider.GROQ):
+            compression_mode = "minimal"
+
+        # Determine tool tier
+        tool_tier = settings.tool_tier if settings.tool_tier != "standard" else None
+
+        # Determine if metadata tools should be included
+        # Only include if database is configured AND setting allows
+        include_metadata = settings.enable_metadata_tools and settings.has_database
+
         if settings.llm_provider == LLMProvider.ANTHROPIC:
             return self.mcp_client.get_tools_for_anthropic(
-                compress=compress, filter_prefix=filter_prefix
+                compress=compress,
+                compression_mode=compression_mode,
+                filter_prefix=filter_prefix,
+                tool_tier=tool_tier,
+                include_metadata=include_metadata,
             )
         else:
             return self.mcp_client.get_tools_for_openai(
-                compress=compress, filter_prefix=filter_prefix
+                compress=compress,
+                compression_mode=compression_mode,
+                filter_prefix=filter_prefix,
+                tool_tier=tool_tier,
+                include_metadata=include_metadata,
             )
 
     async def process_message(self, user_input: str) -> AsyncGenerator[str, None]:
