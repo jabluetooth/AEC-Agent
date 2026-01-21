@@ -21,6 +21,18 @@ APP_OPTIONS = {
     "revit": "Revit Only",
 }
 
+# Selection indicators with emojis for visual feedback
+APP_INDICATORS = {
+    "both": "🔗 Both (AutoCAD + Revit)",
+    "autocad": "🔷 AutoCAD Only",
+    "revit": "🏠 Revit Only",
+}
+
+
+def _get_selection_indicator(app_context: str) -> str:
+    """Get a visual indicator for the current app selection."""
+    return APP_INDICATORS.get(app_context, APP_OPTIONS.get(app_context, app_context))
+
 
 @cl.on_chat_start
 async def on_chat_start():
@@ -48,22 +60,40 @@ async def on_chat_start():
     app_context = chat_settings.get("app_context", "both")
     cl.user_session.set("app_context", app_context)
 
-    # Send welcome message
+    # Create app selection action buttons
+    actions = [
+        cl.Action(
+            name="select_autocad",
+            payload={"app": "autocad"},
+            label="🔷 AutoCAD",
+            description="Use AutoCAD tools only (saves tokens)",
+        ),
+        cl.Action(
+            name="select_revit",
+            payload={"app": "revit"},
+            label="🏠 Revit",
+            description="Use Revit tools only (saves tokens)",
+        ),
+        cl.Action(
+            name="select_both",
+            payload={"app": "both"},
+            label="🔗 Both",
+            description="Use all tools (AutoCAD + Revit)",
+        ),
+    ]
+
+    # Get current selection indicator
+    selection_indicator = _get_selection_indicator(app_context)
+
+    # Send welcome message with action buttons
     await cl.Message(
         content=(
             "Welcome to **AEC Agent**!\n\n"
-            "I'm your AI assistant for AutoCAD and Revit automation. "
-            "Use the **Settings** (gear icon) to select your application.\n\n"
-            "**AutoCAD:**\n"
-            "- Create and manage layers\n"
-            "- Draw lines, circles, and rectangles\n"
-            "- Query drawing information\n\n"
-            "**Revit:**\n"
-            "- Create and manage levels\n"
-            "- Draw walls\n"
-            "- Query rooms and elements\n\n"
-            "How can I help you today?"
+            "I'm your AI assistant for AutoCAD and Revit automation.\n\n"
+            f"**Current Mode:** {selection_indicator}\n\n"
+            "**Select your application to optimize token usage:**"
         ),
+        actions=actions,
     ).send()
 
     # Initialize MCP client
@@ -234,6 +264,66 @@ async def on_clear_history(action: cl.Action):
             content="*Conversation history cleared.*",
             author="System",
         ).send()
+
+
+@cl.action_callback("select_autocad")
+@cl.action_callback("select_revit")
+@cl.action_callback("select_both")
+async def on_select_app(action: cl.Action):
+    """Handle app selection button clicks."""
+    new_context = action.payload.get("app", "both")
+    old_context = cl.user_session.get("app_context")
+
+    if new_context == old_context:
+        await cl.Message(
+            content=f"*Already using {_get_selection_indicator(new_context)}*",
+            author="System",
+        ).send()
+        return
+
+    # Update session
+    cl.user_session.set("app_context", new_context)
+
+    # Update agent's app context
+    agent: AECAgent = cl.user_session.get("agent")
+    if agent:
+        agent.set_app_context(new_context)
+
+    # Create new action buttons with updated selection
+    actions = [
+        cl.Action(
+            name="select_autocad",
+            payload={"app": "autocad"},
+            label="🔷 AutoCAD" + (" ✓" if new_context == "autocad" else ""),
+            description="Use AutoCAD tools only (saves tokens)",
+        ),
+        cl.Action(
+            name="select_revit",
+            payload={"app": "revit"},
+            label="🏠 Revit" + (" ✓" if new_context == "revit" else ""),
+            description="Use Revit tools only (saves tokens)",
+        ),
+        cl.Action(
+            name="select_both",
+            payload={"app": "both"},
+            label="🔗 Both" + (" ✓" if new_context == "both" else ""),
+            description="Use all tools (AutoCAD + Revit)",
+        ),
+    ]
+
+    # Notify user with new buttons
+    await cl.Message(
+        content=f"**Switched to {_get_selection_indicator(new_context)}**\n\nTools filtered accordingly. This reduces token usage for your LLM calls.",
+        author="System",
+        actions=actions,
+    ).send()
+
+    # Show new available tools
+    mcp_client: MCPClient = cl.user_session.get("mcp_client")
+    if mcp_client:
+        await _show_tools_for_context(mcp_client, new_context)
+
+    logger.info("App context changed via button", old=old_context, new=new_context)
 
 
 @cl.action_callback("check_sidecar")
