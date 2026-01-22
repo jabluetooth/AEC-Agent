@@ -14,6 +14,8 @@ import structlog
 
 from aec_agent.config.settings import get_settings, LLMProvider
 from aec_agent.frontend.mcp_client import MCPClient, ToolResult
+from aec_agent.intent.classifier import IntentClassifier, get_intent_classifier
+from aec_agent.intent.models import IntentResult, MEPDomain
 
 logger = structlog.get_logger(__name__)
 
@@ -769,6 +771,7 @@ class AECAgent:
         backend: Optional[LLMBackend] = None,
         max_history_messages: Optional[int] = None,
         app_context: str = "both",
+        intent_classifier: Optional[IntentClassifier] = None,
     ):
         """
         Initialize the AEC Agent.
@@ -781,6 +784,8 @@ class AECAgent:
                                   Defaults to settings.max_history_messages.
             app_context: Application context ("both", "autocad", or "revit").
                         Controls which tools are available to reduce token usage.
+            intent_classifier: Optional IntentClassifier for MEP-aware tool filtering.
+                              If not provided, uses global instance.
         """
         settings = get_settings()
         self.mcp_client = mcp_client
@@ -790,6 +795,9 @@ class AECAgent:
         self.messages: list[Message] = [
             Message(role="system", content=SYSTEM_PROMPT)
         ]
+        # Intent classifier for MEP-aware tool filtering
+        self._intent_classifier = intent_classifier
+        self._last_intent: Optional[IntentResult] = None
 
     def set_app_context(self, app_context: str) -> None:
         """
@@ -848,63 +856,119 @@ class AECAgent:
         else:
             raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
 
+    def _get_intent_classifier(self) -> IntentClassifier:
+        """Get or create the intent classifier."""
+        if self._intent_classifier is None:
+            settings = get_settings()
+            # Use embeddings only if enabled in settings
+            use_embeddings = getattr(settings, 'use_intent_embeddings', False)
+            self._intent_classifier = get_intent_classifier(
+                use_embeddings=use_embeddings
+            )
+        return self._intent_classifier
+
+    def _classify_intent(self, user_input: str) -> IntentResult:
+        """
+        Classify user intent for smart tool filtering.
+
+        This replaces the simple keyword matching with the full IntentClassifier,
+        enabling MEP-aware tool filtering that can reduce token usage by 40-60%.
+
+        Args:
+            user_input: The user's message
+
+        Returns:
+            IntentResult with domain, action, and tool suggestions
+        """
+        classifier = self._get_intent_classifier()
+        intent = classifier.classify(user_input)
+        self._last_intent = intent
+
+        logger.debug(
+            "Classified user intent",
+            domain=intent.domain.value,
+            subdomain=intent.subdomain,
+            action=intent.action.value,
+            confidence=intent.confidence,
+            app_context=intent.app_context.value,
+            keywords=intent.keywords_matched,
+        )
+
+        return intent
+
     def _detect_tool_context(self, user_input: str) -> Optional[str]:
         """Detect which tool context (autocad/revit) based on user input.
+
+        This is a legacy method that uses the new IntentClassifier.
 
         Returns:
             'autocad_' or 'revit_' prefix, or None for all tools.
         """
-        text = user_input.lower()
+        intent = self._classify_intent(user_input)
+        return intent.tool_filter_prefix
 
-        # AutoCAD keywords (weighted by specificity)
-        autocad_keywords = {
-            'autocad': 3, 'acad': 3, 'dwg': 3,  # High specificity
-            'layer': 1, 'polyline': 2, 'entity': 1, 'entities': 1,  # Medium
-            'draw line': 1, 'draw circle': 1, 'draw rect': 1,  # Generic drawing
-        }
-        # Revit keywords
-        revit_keywords = {
-            'revit': 3, 'rvt': 3, 'worksharing': 3,  # High specificity
-            'level': 1, 'wall': 1, 'room': 1, 'floor': 1,  # Medium
-            'family': 2, 'element': 1,  # Medium-low
-        }
-
-        autocad_score = sum(
-            weight for kw, weight in autocad_keywords.items() if kw in text
-        )
-        revit_score = sum(
-            weight for kw, weight in revit_keywords.items() if kw in text
-        )
-
-        # Need clear preference (score >= 2 with ratio > 2:1)
-        if autocad_score >= 2 and autocad_score > revit_score * 2:
-            return 'autocad_'
-        elif revit_score >= 2 and revit_score > autocad_score * 2:
-            return 'revit_'
-
-        # Ambiguous or general query - return all tools
-        return None
+    def get_last_intent(self) -> Optional[IntentResult]:
+        """Get the last classified intent for debugging/logging."""
+        return self._last_intent
 
     def _get_tools(self, user_input: Optional[str] = None) -> list[dict[str, Any]]:
         """Get tools in the format expected by the current backend.
+
+        Uses intent classification for intelligent tool filtering:
+        - Detects MEP domain (HVAC, electrical, plumbing, fire protection)
+        - Determines appropriate tool tier based on action
+        - Filters by app context (AutoCAD vs Revit)
+
+        This can reduce token usage by 40-60% by loading only relevant tools.
 
         Args:
             user_input: Optional user message to detect context for smart filtering.
         """
         settings = get_settings()
 
-        # Determine tool filter prefix based on app context
+        # Default values
         filter_prefix = None
+        tool_tier = settings.tool_tier if settings.tool_tier != "standard" else None
+        include_metadata = settings.enable_metadata_tools and settings.has_database
+
+        # Classify intent if smart routing is enabled and we have user input
+        intent: Optional[IntentResult] = None
+        if settings.smart_tool_routing and user_input:
+            intent = self._classify_intent(user_input)
+
+        # Determine tool filter prefix based on app context
         if self.app_context == "autocad":
             filter_prefix = "autocad_"
         elif self.app_context == "revit":
             filter_prefix = "revit_"
-        elif settings.smart_tool_routing and user_input:
-            # Fall back to smart routing only for "both" context
-            filter_prefix = self._detect_tool_context(user_input)
+        elif intent:
+            # Use intent-based app context for "both" mode
+            filter_prefix = intent.tool_filter_prefix
+
+        # Use intent to determine tool tier if available
+        if intent and intent.is_mep_specific:
+            # MEP-specific intent detected - use domain-aware tier
+            intent_tier = intent.get_tool_tier()
+            if intent_tier != "standard":
+                tool_tier = intent_tier
+                logger.debug(
+                    "Using intent-based tool tier",
+                    tier=tool_tier,
+                    domain=intent.domain.value,
+                    action=intent.action.value,
+                )
+
+            # Always include metadata tools for MEP queries
+            if settings.has_database:
+                include_metadata = True
 
         if filter_prefix:
-            logger.debug("Filtered tools by context", prefix=filter_prefix, app_context=self.app_context)
+            logger.debug(
+                "Filtered tools by context",
+                prefix=filter_prefix,
+                app_context=self.app_context,
+                mep_domain=intent.domain.value if intent else None,
+            )
 
         # Determine compression settings
         compress = settings.compress_tool_schemas or settings.llm_provider in (
@@ -916,13 +980,6 @@ class AECAgent:
         compression_mode = settings.tool_compression_mode
         if settings.llm_provider in (LLMProvider.HUGGINGFACE, LLMProvider.GROQ):
             compression_mode = "minimal"
-
-        # Determine tool tier
-        tool_tier = settings.tool_tier if settings.tool_tier != "standard" else None
-
-        # Determine if metadata tools should be included
-        # Only include if database is configured AND setting allows
-        include_metadata = settings.enable_metadata_tools and settings.has_database
 
         if settings.llm_provider == LLMProvider.ANTHROPIC:
             return self.mcp_client.get_tools_for_anthropic(

@@ -214,6 +214,144 @@ TOOL_TIERS = {
 }
 
 
+# MEP-specific tool tiers for domain-aware loading
+# These provide more granular control when intent classification detects MEP domains
+MEP_TOOL_TIERS = {
+    # HVAC domain tools
+    "hvac": {
+        "essential": [
+            "find_elements",       # Find equipment, ducts, terminals
+            "get_nearby_elements", # Clearance checking
+            "sync_metadata",       # Extract model data
+        ],
+        "standard": [
+            "get_related_elements",    # System connections
+            "get_distance_between",    # Spacing verification
+            "draw_line_between",       # Duct routing visualization
+        ],
+        "advanced": [
+            "get_intersecting_elements",  # Clash detection (future)
+            "draw_circle_at",             # Equipment markers
+            "draw_rectangle_around",      # Zone highlighting
+        ],
+    },
+
+    # Electrical domain tools
+    "electrical": {
+        "essential": [
+            "find_elements",
+            "get_nearby_elements",
+            "sync_metadata",
+        ],
+        "standard": [
+            "get_related_elements",
+            "get_distance_between",
+        ],
+        "advanced": [
+            "draw_line_between",
+            "get_intersecting_elements",
+        ],
+    },
+
+    # Plumbing domain tools
+    "plumbing": {
+        "essential": [
+            "find_elements",
+            "get_nearby_elements",
+            "sync_metadata",
+        ],
+        "standard": [
+            "get_related_elements",
+            "get_distance_between",
+        ],
+        "advanced": [
+            "draw_line_between",
+            "get_intersecting_elements",
+        ],
+    },
+
+    # Fire protection domain tools
+    "fire_protection": {
+        "essential": [
+            "find_elements",
+            "get_nearby_elements",
+            "sync_metadata",
+        ],
+        "standard": [
+            "get_related_elements",
+        ],
+        "advanced": [
+            "get_intersecting_elements",
+        ],
+    },
+}
+
+# Keywords to filter elements by category/type for each MEP domain
+MEP_CATEGORY_FILTERS = {
+    "hvac": {
+        "revit_categories": [
+            "Mechanical Equipment",
+            "Ducts",
+            "Duct Fittings",
+            "Duct Accessories",
+            "Air Terminals",
+            "Flex Ducts",
+        ],
+        "autocad_layers": [
+            "M-HVAC", "M-DUCT", "M-EQUIP", "MECH", "HVAC",
+            "DUCT", "DIFFUSER", "AHU", "VAV",
+        ],
+        "entity_types": [
+            "duct", "diffuser", "air terminal", "mechanical equipment",
+            "vav", "ahu", "fan coil",
+        ],
+    },
+    "electrical": {
+        "revit_categories": [
+            "Electrical Equipment",
+            "Electrical Fixtures",
+            "Conduits",
+            "Cable Trays",
+            "Lighting Fixtures",
+        ],
+        "autocad_layers": [
+            "E-POWER", "E-LITE", "E-EQUIP", "ELEC", "ELECTRICAL",
+            "CONDUIT", "PANEL", "RECEPTACLE",
+        ],
+        "entity_types": [
+            "panel", "conduit", "receptacle", "switch", "light fixture",
+        ],
+    },
+    "plumbing": {
+        "revit_categories": [
+            "Plumbing Fixtures",
+            "Pipes",
+            "Pipe Fittings",
+            "Pipe Accessories",
+        ],
+        "autocad_layers": [
+            "P-SANR", "P-DOME", "P-FIXT", "PLUMB", "PLUMBING",
+            "PIPE", "DRAIN", "FIXTURE",
+        ],
+        "entity_types": [
+            "pipe", "fixture", "sink", "toilet", "valve",
+        ],
+    },
+    "fire_protection": {
+        "revit_categories": [
+            "Sprinklers",
+            "Fire Alarm Devices",
+        ],
+        "autocad_layers": [
+            "F-SPKL", "F-ALRM", "FIRE", "SPRINKLER",
+        ],
+        "entity_types": [
+            "sprinkler", "fire alarm", "smoke detector",
+        ],
+    },
+}
+
+
 def get_tools_for_tier(tier: str) -> list[str]:
     """Get tool names for a given tier and below."""
     tiers = ["essential", "standard", "advanced"]
@@ -223,6 +361,43 @@ def get_tools_for_tier(tier: str) -> list[str]:
     for t in tiers[:idx + 1]:
         tools.extend(TOOL_TIERS.get(t, []))
     return tools
+
+
+def get_mep_tools_for_domain(domain: str, tier: str = "standard") -> list[str]:
+    """
+    Get tool names for a specific MEP domain and tier.
+
+    Args:
+        domain: MEP domain (hvac, electrical, plumbing, fire_protection)
+        tier: Tool tier (essential, standard, advanced)
+
+    Returns:
+        List of tool names for the domain
+    """
+    domain_lower = domain.lower()
+    if domain_lower not in MEP_TOOL_TIERS:
+        return get_tools_for_tier(tier)
+
+    domain_tiers = MEP_TOOL_TIERS[domain_lower]
+    tiers = ["essential", "standard", "advanced"]
+    idx = tiers.index(tier) if tier in tiers else 1
+
+    tools = []
+    for t in tiers[:idx + 1]:
+        tools.extend(domain_tiers.get(t, []))
+    return tools
+
+
+def get_mep_category_filter(domain: str) -> dict:
+    """
+    Get category filter criteria for an MEP domain.
+
+    Returns dict with:
+        - revit_categories: List of Revit categories to include
+        - autocad_layers: List of AutoCAD layer patterns to include
+        - entity_types: List of entity type keywords to include
+    """
+    return MEP_CATEGORY_FILTERS.get(domain.lower(), {})
 
 
 def estimate_token_count(text: str) -> int:

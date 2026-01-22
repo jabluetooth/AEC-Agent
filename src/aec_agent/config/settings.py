@@ -287,6 +287,31 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
+    # Intent Classification Configuration (MEP workflow enhancement)
+    # ==========================================================================
+    enable_intent_classification: bool = Field(
+        default=True,
+        description="Enable MEP-aware intent classification for smart tool filtering"
+    )
+
+    use_intent_embeddings: bool = Field(
+        default=False,
+        description="Use embedding-based similarity for intent classification (requires more memory)"
+    )
+
+    intent_min_confidence: float = Field(
+        default=0.3,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence threshold for MEP intent classification"
+    )
+
+    mep_domain_priority: str = Field(
+        default="hvac",
+        description="Primary MEP domain focus: hvac, electrical, plumbing, fire_protection, all"
+    )
+
+    # ==========================================================================
     # Database Configuration (PostgreSQL with PostGIS + pgvector)
     # ==========================================================================
     database_url: Optional[str] = Field(

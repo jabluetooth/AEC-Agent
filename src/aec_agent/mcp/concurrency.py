@@ -33,11 +33,17 @@ class ToolLock:
         Args:
             max_concurrent: Maximum concurrent operations (default 1)
         """
-        self._semaphore = asyncio.Semaphore(max_concurrent)
+        self._semaphore: asyncio.Semaphore | None = None  # Lazy init
         self._max_concurrent = max_concurrent
         self._active_count = 0
         self._total_executed = 0
         self._total_wait_time = 0.0
+
+    def _get_semaphore(self) -> asyncio.Semaphore:
+        """Get or create the semaphore (lazy initialization)."""
+        if self._semaphore is None:
+            self._semaphore = asyncio.Semaphore(self._max_concurrent)
+        return self._semaphore
 
     async def acquire(self, timeout: float = 120.0) -> float:
         """
@@ -54,7 +60,7 @@ class ToolLock:
         """
         start = time.monotonic()
         try:
-            await asyncio.wait_for(self._semaphore.acquire(), timeout=timeout)
+            await asyncio.wait_for(self._get_semaphore().acquire(), timeout=timeout)
         except asyncio.TimeoutError:
             logger.error(
                 "Tool lock acquisition timed out",
@@ -80,7 +86,7 @@ class ToolLock:
         """Release the lock."""
         self._active_count -= 1
         self._total_executed += 1
-        self._semaphore.release()
+        self._get_semaphore().release()
 
     @property
     def stats(self) -> dict:
@@ -190,7 +196,13 @@ class CircuitBreaker:
         self._half_open_max_calls = half_open_max_calls
         self._half_open_calls = 0
         self._last_failure_time = 0.0
-        self._lock = asyncio.Lock()
+        self._lock: asyncio.Lock | None = None  # Lazy init
+
+    def _get_lock(self) -> asyncio.Lock:
+        """Get or create the lock (lazy initialization)."""
+        if self._lock is None:
+            self._lock = asyncio.Lock()
+        return self._lock
 
     @property
     def state(self) -> str:
@@ -204,7 +216,7 @@ class CircuitBreaker:
         Returns:
             True if call is allowed, False otherwise
         """
-        async with self._lock:
+        async with self._get_lock():
             if self._state == self.CLOSED:
                 return True
 
@@ -225,7 +237,7 @@ class CircuitBreaker:
 
     async def record_success(self):
         """Record a successful call."""
-        async with self._lock:
+        async with self._get_lock():
             if self._state == self.HALF_OPEN:
                 self._state = self.CLOSED
                 self._failure_count = 0
@@ -235,7 +247,7 @@ class CircuitBreaker:
 
     async def record_failure(self):
         """Record a failed call."""
-        async with self._lock:
+        async with self._get_lock():
             self._failure_count += 1
             self._last_failure_time = time.monotonic()
 

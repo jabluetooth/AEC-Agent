@@ -34,10 +34,10 @@ class TestBoundsInfo:
         )
         wkt = bounds.to_wkt_polygon()
         assert "POLYGON" in wkt
-        assert "0 0" in wkt
-        assert "10 0" in wkt
-        assert "10 20" in wkt
-        assert "0 20" in wkt
+        assert "0.0 0.0" in wkt
+        assert "10.0 0.0" in wkt
+        assert "10.0 20.0" in wkt
+        assert "0.0 20.0" in wkt
 
 
 class TestCentroidInfo:
