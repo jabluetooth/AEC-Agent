@@ -262,16 +262,47 @@ class AnthropicBackend(LLMBackend):
                     "content": msg.content,
                 })
 
-        # Build request
+        # Build request with optional prompt caching
         kwargs = {
             "model": self.model,
             "max_tokens": 4096,
             "messages": anthropic_messages,
         }
+
+        # Check if prompt caching is enabled
+        settings = get_settings()
+        use_caching = settings.enable_prompt_caching
+
+        # Use prompt caching for system prompt (reduces repeated token costs)
         if system_content:
-            kwargs["system"] = system_content
+            if use_caching:
+                kwargs["system"] = [
+                    {
+                        "type": "text",
+                        "text": system_content,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ]
+            else:
+                kwargs["system"] = system_content
+
+        # Use prompt caching for tool definitions
         if tools:
-            kwargs["tools"] = tools
+            if use_caching:
+                # Add cache_control to the last tool for efficient caching
+                cached_tools = []
+                for i, tool in enumerate(tools):
+                    if i == len(tools) - 1:
+                        # Add cache control to last tool
+                        cached_tools.append({
+                            **tool,
+                            "cache_control": {"type": "ephemeral"},
+                        })
+                    else:
+                        cached_tools.append(tool)
+                kwargs["tools"] = cached_tools
+            else:
+                kwargs["tools"] = tools
 
         response = await client.messages.create(**kwargs)
 
@@ -793,6 +824,13 @@ class AECAgent:
         self._intent_classifier = intent_classifier
         self._last_intent: Optional[IntentResult] = None
 
+        # Conversation summarizer for long conversations
+        from aec_agent.memory.summarizer import ConversationSummarizer
+        self._summarizer = ConversationSummarizer(
+            max_summary_tokens=settings.max_summary_tokens,
+        )
+        self._context_summary: Optional[str] = None
+
     def set_app_context(self, app_context: str) -> None:
         """
         Update the application context.
@@ -816,6 +854,58 @@ class AECAgent:
         recent_msgs = self.messages[-(self.max_history_messages):]
         self.messages = [system_msg] + recent_msgs
         logger.debug("Trimmed history", kept_messages=len(self.messages))
+
+    def _optimize_context(self) -> None:
+        """Optimize context using summarization for long conversations.
+
+        When enabled, summarizes older messages instead of just trimming them,
+        preserving important context while reducing tokens.
+        """
+        settings = get_settings()
+
+        # Fall back to simple trimming if summarization disabled
+        if not settings.enable_conversation_summarization:
+            self._trim_history()
+            return
+
+        # Get non-system messages
+        if len(self.messages) <= 1:
+            return
+
+        non_system = self.messages[1:]
+        keep_recent = settings.summarization_keep_recent
+
+        # Not enough messages to summarize
+        if len(non_system) <= keep_recent:
+            return
+
+        # Generate summary of older messages
+        result = self._summarizer.summarize(non_system, keep_recent=keep_recent)
+
+        if result is None:
+            return
+
+        # Store the summary
+        self._context_summary = result.summary
+
+        # Rebuild messages: system + summary message + recent
+        system_msg = self.messages[0]
+        recent_msgs = self.messages[-(keep_recent):]
+
+        # Create summary message as a system reminder
+        summary_msg = Message(
+            role="system",
+            content=f"[Previous context summary: {result.summary}]"
+        )
+
+        self.messages = [system_msg, summary_msg] + recent_msgs
+
+        logger.info(
+            "Context optimized with summarization",
+            messages_summarized=result.messages_summarized,
+            tokens_saved=result.tokens_saved_estimate,
+            new_message_count=len(self.messages),
+        )
 
     def _estimate_context_tokens(self) -> int:
         """Estimate current context token count.
@@ -1084,8 +1174,8 @@ class AECAgent:
         Yields:
             Response text chunks.
         """
-        # Trim history to reduce token usage
-        self._trim_history()
+        # Optimize context (summarization or trimming based on settings)
+        self._optimize_context()
 
         # Add user message
         self.messages.append(Message(role="user", content=user_input))

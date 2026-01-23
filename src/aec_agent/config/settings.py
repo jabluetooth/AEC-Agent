@@ -312,6 +312,33 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
+    # Conversation Summarization (Phase 3)
+    # ==========================================================================
+    enable_conversation_summarization: bool = Field(
+        default=True,
+        description="Summarize old context to reduce tokens in long conversations"
+    )
+
+    summarization_keep_recent: int = Field(
+        default=6,
+        ge=2,
+        le=20,
+        description="Number of recent messages to keep verbatim (rest gets summarized)"
+    )
+
+    max_summary_tokens: int = Field(
+        default=200,
+        ge=50,
+        le=500,
+        description="Maximum tokens for conversation summary"
+    )
+
+    enable_prompt_caching: bool = Field(
+        default=True,
+        description="Enable provider-specific prompt caching (Anthropic)"
+    )
+
+    # ==========================================================================
     # Intent Classification Configuration (MEP workflow enhancement)
     # ==========================================================================
     enable_intent_classification: bool = Field(

@@ -22,6 +22,12 @@ from aec_agent.memory.user_preferences import (
     get_user_preferences,
     get_current_user,
 )
+from aec_agent.memory.summarizer import (
+    ConversationSummarizer,
+    SummaryResult,
+    get_summarizer,
+    reset_summarizer,
+)
 
 __all__ = [
     # Models
@@ -39,4 +45,9 @@ __all__ = [
     "PreferenceCategory",
     "get_user_preferences",
     "get_current_user",
+    # Summarizer
+    "ConversationSummarizer",
+    "SummaryResult",
+    "get_summarizer",
+    "reset_summarizer",
 ]
