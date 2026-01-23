@@ -19,17 +19,11 @@ from aec_agent.intent.models import IntentResult, MEPDomain
 
 logger = structlog.get_logger(__name__)
 
-# System prompt - kept concise to reduce token usage
-SYSTEM_PROMPT = """You are an AEC AI assistant for AutoCAD and Revit automation.
-
-Tools available: layers, drawing (lines/circles/rectangles), levels, walls, rooms, document queries.
-
-Guidelines:
-- Explain actions briefly before executing
-- Confirm destructive operations (delete)
-- Report errors clearly with alternatives
-- Units: meters for Revit, drawing units for AutoCAD
-- Operations are single-threaded; one at a time"""
+# System prompt - optimized for minimal tokens (~60 tokens vs ~100)
+SYSTEM_PROMPT = """AEC assistant for AutoCAD/Revit automation.
+Tools: layers, drawing, levels, walls, rooms, queries.
+Rules: Brief explanations. Confirm deletes. Report errors with alternatives.
+Units: meters (Revit), drawing units (AutoCAD). One operation at a time."""
 
 
 @dataclass
@@ -823,6 +817,67 @@ class AECAgent:
         self.messages = [system_msg] + recent_msgs
         logger.debug("Trimmed history", kept_messages=len(self.messages))
 
+    def _estimate_context_tokens(self) -> int:
+        """Estimate current context token count.
+
+        Uses rough approximation of ~4 characters per token.
+        """
+        total = 0
+        for msg in self.messages:
+            if msg.content:
+                total += len(msg.content) // 4
+            if msg.tool_calls:
+                total += len(json.dumps(msg.tool_calls)) // 4
+        return total
+
+    def _get_dynamic_compression_mode(self) -> str:
+        """Get compression mode based on context size.
+
+        Automatically escalates compression as context grows to stay
+        within token limits while preserving quality when possible.
+
+        Returns:
+            Compression mode: "standard", "minimal", or "ultra"
+        """
+        settings = get_settings()
+
+        # If dynamic compression disabled, use static setting
+        if not settings.enable_dynamic_compression:
+            return settings.tool_compression_mode
+
+        # Calculate context ratio
+        tokens = self._estimate_context_tokens()
+        ratio = tokens / settings.max_context_tokens
+
+        # Escalate compression based on usage
+        if ratio < 0.3:
+            return "standard"
+        elif ratio < 0.6:
+            return "minimal"
+        else:
+            return "ultra"
+
+    def _log_token_usage(self, tools_loaded: int, compression_mode: str) -> None:
+        """Log token usage for monitoring.
+
+        Args:
+            tools_loaded: Number of tools in current request
+            compression_mode: Current compression mode
+        """
+        settings = get_settings()
+        if not settings.enable_token_logging:
+            return
+
+        estimated_tokens = self._estimate_context_tokens()
+        logger.info(
+            "Token usage",
+            estimated_input_tokens=estimated_tokens,
+            tools_loaded=tools_loaded,
+            compression_mode=compression_mode,
+            history_messages=len(self.messages),
+            context_ratio=round(estimated_tokens / settings.max_context_tokens, 2),
+        )
+
     def _create_backend(self) -> LLMBackend:
         """Create an LLM backend based on settings."""
         settings = get_settings()
@@ -945,18 +1000,29 @@ class AECAgent:
             # Use intent-based app context for "both" mode
             filter_prefix = intent.tool_filter_prefix
 
-        # Use intent to determine tool tier if available
+        # Use intent to determine tool tier and domain-specific loading
+        domain_priority_tools = None
         if intent and intent.is_mep_specific:
             # MEP-specific intent detected - use domain-aware tier
             intent_tier = intent.get_tool_tier()
             if intent_tier != "standard":
                 tool_tier = intent_tier
-                logger.debug(
-                    "Using intent-based tool tier",
-                    tier=tool_tier,
-                    domain=intent.domain.value,
-                    action=intent.action.value,
-                )
+
+            # Get domain priority tools for more focused loading
+            from aec_agent.frontend.tool_optimization import get_domain_priority_tools
+            domain_priority_tools = get_domain_priority_tools(
+                intent.domain.value,
+                include_useful=(intent.confidence > 0.7)
+            )
+
+            logger.debug(
+                "MEP domain-specific tool loading",
+                tier=tool_tier,
+                domain=intent.domain.value,
+                action=intent.action.value,
+                confidence=intent.confidence,
+                priority_tools=list(domain_priority_tools) if domain_priority_tools else None,
+            )
 
             # Always include metadata tools for MEP queries
             if settings.has_database:
@@ -976,13 +1042,15 @@ class AECAgent:
             LLMProvider.GROQ,
         )
 
-        # Use more aggressive compression for budget providers
-        compression_mode = settings.tool_compression_mode
+        # Use dynamic compression based on context size
+        compression_mode = self._get_dynamic_compression_mode()
+
+        # Override with minimal for budget providers
         if settings.llm_provider in (LLMProvider.HUGGINGFACE, LLMProvider.GROQ):
             compression_mode = "minimal"
 
         if settings.llm_provider == LLMProvider.ANTHROPIC:
-            return self.mcp_client.get_tools_for_anthropic(
+            tools = self.mcp_client.get_tools_for_anthropic(
                 compress=compress,
                 compression_mode=compression_mode,
                 filter_prefix=filter_prefix,
@@ -990,13 +1058,18 @@ class AECAgent:
                 include_metadata=include_metadata,
             )
         else:
-            return self.mcp_client.get_tools_for_openai(
+            tools = self.mcp_client.get_tools_for_openai(
                 compress=compress,
                 compression_mode=compression_mode,
                 filter_prefix=filter_prefix,
                 tool_tier=tool_tier,
                 include_metadata=include_metadata,
             )
+
+        # Log token usage
+        self._log_token_usage(len(tools), compression_mode)
+
+        return tools
 
     async def process_message(self, user_input: str) -> AsyncGenerator[str, None]:
         """

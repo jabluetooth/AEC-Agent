@@ -14,6 +14,7 @@ class MEPDomain(str, Enum):
     ELECTRICAL = "electrical"
     PLUMBING = "plumbing"
     FIRE_PROTECTION = "fire_protection"
+    LOW_VOLTAGE = "low_voltage"  # Security, fire alarm, BMS, AV, data/telecom
     GENERAL = "general"
 
     @classmethod

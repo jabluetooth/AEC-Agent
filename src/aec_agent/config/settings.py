@@ -287,6 +287,31 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
+    # Dynamic Token Optimization (Phase 1)
+    # ==========================================================================
+    max_context_tokens: int = Field(
+        default=8000,
+        ge=2000,
+        le=128000,
+        description="Maximum context tokens before aggressive compression"
+    )
+
+    enable_dynamic_compression: bool = Field(
+        default=True,
+        description="Auto-escalate compression based on context size"
+    )
+
+    enable_token_logging: bool = Field(
+        default=True,
+        description="Log token usage per request for monitoring"
+    )
+
+    result_field_preset: str = Field(
+        default="standard",
+        description="Result field filtering: minimal, standard, full"
+    )
+
+    # ==========================================================================
     # Intent Classification Configuration (MEP workflow enhancement)
     # ==========================================================================
     enable_intent_classification: bool = Field(

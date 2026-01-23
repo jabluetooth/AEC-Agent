@@ -159,19 +159,27 @@ class ToolResult:
     error: Optional[dict[str, Any]] = None
     raw_content: Optional[str] = None
 
-    def to_message_content(self, max_length: Optional[int] = None) -> str:
+    def to_message_content(self, max_length: Optional[int] = None, field_preset: Optional[str] = None) -> str:
         """Convert result to a compact string for LLM context.
 
         Args:
             max_length: Maximum length of the result string. If None, uses settings.
+            field_preset: Field filtering preset (minimal, standard, full). If None, uses settings.
         """
+        from aec_agent.config.settings import get_settings
+        settings = get_settings()
+
         if max_length is None:
-            from aec_agent.config.settings import get_settings
-            max_length = get_settings().max_tool_result_chars
+            max_length = settings.max_tool_result_chars
+
+        if field_preset is None:
+            field_preset = settings.result_field_preset
 
         if self.success and self.data:
+            # Filter fields before serialization to reduce tokens
+            filtered_data = _filter_result_fields(self.data, field_preset)
             # Compact JSON (no indent) to save tokens
-            content = json.dumps(self.data, separators=(',', ':'))
+            content = json.dumps(filtered_data, separators=(',', ':'))
         elif self.error:
             return f"Error: {self.error.get('message', 'Unknown error')}"
         elif self.raw_content:
@@ -230,6 +238,82 @@ class ToolResult:
 
         # Fall back to simple truncation
         return content[:max_length - 20] + "...[truncated]"
+
+
+# =============================================================================
+# Result Field Filtering (Phase 2 optimization)
+# =============================================================================
+# Reduces output tokens by returning only relevant fields
+
+RESULT_FIELD_PRESETS = {
+    "minimal": {"id", "name", "type"},
+    "standard": {"id", "name", "type", "layer", "category", "level", "location",
+                 "source_id", "entity_type", "description"},
+    "full": None,  # All fields
+}
+
+# Fields that should always be preserved regardless of preset
+PRESERVED_FIELDS = {"elements", "count", "message", "success", "error", "data"}
+
+
+def _filter_result_fields(data: Any, preset: str = "standard") -> Any:
+    """
+    Filter result data to include only specified fields.
+
+    Args:
+        data: The data to filter (dict, list, or other)
+        preset: Field preset name (minimal, standard, full)
+
+    Returns:
+        Filtered data with only allowed fields
+    """
+    allowed = RESULT_FIELD_PRESETS.get(preset)
+    if allowed is None:
+        return data
+
+    if isinstance(data, dict):
+        filtered = {}
+        for k, v in data.items():
+            # Always preserve structural fields
+            if k in PRESERVED_FIELDS:
+                if k == "elements" and isinstance(v, list):
+                    # Recursively filter element lists
+                    filtered[k] = [_filter_result_fields(el, preset) for el in v]
+                elif k == "data" and isinstance(v, dict):
+                    filtered[k] = _filter_result_fields(v, preset)
+                else:
+                    filtered[k] = v
+            elif k in allowed:
+                filtered[k] = v
+        return filtered
+
+    if isinstance(data, list):
+        return [_filter_result_fields(item, preset) for item in data]
+
+    return data
+
+
+def filter_tool_result(result: "ToolResult", preset: str = "standard") -> "ToolResult":
+    """
+    Filter a ToolResult's data using the specified preset.
+
+    Args:
+        result: The ToolResult to filter
+        preset: Field preset name
+
+    Returns:
+        New ToolResult with filtered data
+    """
+    if result.data is None:
+        return result
+
+    filtered_data = _filter_result_fields(result.data, preset)
+    return ToolResult(
+        success=result.success,
+        data=filtered_data,
+        error=result.error,
+        raw_content=result.raw_content,
+    )
 
 
 class MCPClientError(Exception):

@@ -269,16 +269,11 @@ class IntentClassifier:
         elif action == MEPAction.COORDINATE:
             tools.extend(["get_intersecting_elements", "find_elements"])
 
-        # Domain-specific tools
-        if domain == MEPDomain.HVAC:
-            # When we add HVAC-specific tools, they'll be suggested here
-            pass
-        elif domain == MEPDomain.ELECTRICAL:
-            pass
-        elif domain == MEPDomain.PLUMBING:
-            pass
-        elif domain == MEPDomain.FIRE_PROTECTION:
-            pass
+        # Domain-specific tools - use domain priority tools from optimization module
+        from aec_agent.frontend.tool_optimization import get_domain_priority_tools
+        domain_tools = get_domain_priority_tools(domain.value, include_useful=True)
+        if domain_tools:
+            tools.extend(domain_tools)
 
         return list(set(tools))  # Remove duplicates
 

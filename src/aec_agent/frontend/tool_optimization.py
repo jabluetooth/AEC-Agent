@@ -6,7 +6,34 @@ to minimize token usage with budget LLM providers.
 """
 
 from typing import Any
+import json
 import re
+
+
+# =============================================================================
+# Schema and Description Caching (Phase 1 optimization)
+# =============================================================================
+# Caches compressed schemas and descriptions to avoid regeneration
+_schema_cache: dict[str, dict] = {}
+_description_cache: dict[str, str] = {}
+
+
+def clear_schema_cache() -> None:
+    """Clear cached schemas and descriptions.
+
+    Call this when tools are reloaded or compression settings change.
+    """
+    global _schema_cache, _description_cache
+    _schema_cache.clear()
+    _description_cache.clear()
+
+
+def get_cache_stats() -> dict[str, int]:
+    """Get cache statistics for monitoring."""
+    return {
+        "schema_cache_size": len(_schema_cache),
+        "description_cache_size": len(_description_cache),
+    }
 
 
 # Minimal tool descriptions - under 50 words each
@@ -116,6 +143,8 @@ def get_optimized_description(tool_name: str, full_desc: str, mode: str = "stand
     """
     Get optimized tool description based on mode.
 
+    Uses caching to avoid recomputation for repeated calls.
+
     Args:
         tool_name: Name of the tool
         full_desc: Full tool description
@@ -128,19 +157,30 @@ def get_optimized_description(tool_name: str, full_desc: str, mode: str = "stand
     if mode == "full":
         return full_desc
 
+    # Check cache first
+    cache_key = f"{tool_name}:{mode}"
+    if cache_key in _description_cache:
+        return _description_cache[cache_key]
+
+    # Compute optimized description
     if mode == "ultra":
-        return tool_name.replace("_", " ").title()
+        result = tool_name.replace("_", " ").title()
+    elif mode == "minimal":
+        result = MINIMAL_DESCRIPTIONS.get(tool_name, compress_description_aggressive(full_desc))
+    else:
+        # Standard mode
+        result = compress_description_aggressive(full_desc)
 
-    if mode == "minimal":
-        return MINIMAL_DESCRIPTIONS.get(tool_name, compress_description_aggressive(full_desc))
-
-    # Standard mode
-    return compress_description_aggressive(full_desc)
+    # Cache and return
+    _description_cache[cache_key] = result
+    return result
 
 
 def get_optimized_schema(schema: dict[str, Any], mode: str = "standard") -> dict[str, Any]:
     """
     Get optimized schema based on mode.
+
+    Uses caching based on schema hash to avoid recomputation.
 
     Args:
         schema: Full JSON schema
@@ -153,6 +193,19 @@ def get_optimized_schema(schema: dict[str, Any], mode: str = "standard") -> dict
     if mode == "full":
         return schema
 
+    # Create cache key from schema hash + mode
+    try:
+        schema_str = json.dumps(schema, sort_keys=True)
+        cache_key = f"{hash(schema_str)}:{mode}"
+    except (TypeError, ValueError):
+        # If schema is not JSON serializable, skip caching
+        cache_key = None
+
+    # Check cache first
+    if cache_key and cache_key in _schema_cache:
+        return _schema_cache[cache_key]
+
+    # Compute optimized schema
     if mode == "ultra":
         # Only required properties with types
         result = {"type": "object"}
@@ -163,14 +216,17 @@ def get_optimized_schema(schema: dict[str, Any], mode: str = "standard") -> dict
                 if k in schema["required"]
             }
             result["required"] = schema["required"]
-        return result
+    elif mode == "minimal":
+        result = create_minimal_schema(schema)
+    else:
+        # Standard mode - use existing compression
+        from aec_agent.frontend.mcp_client import _compress_schema
+        result = _compress_schema(schema)
 
-    if mode == "minimal":
-        return create_minimal_schema(schema)
-
-    # Standard mode - use existing compression
-    from aec_agent.frontend.mcp_client import _compress_schema
-    return _compress_schema(schema)
+    # Cache and return
+    if cache_key:
+        _schema_cache[cache_key] = result
+    return result
 
 
 # Tool tiers for conditional loading
@@ -284,6 +340,23 @@ MEP_TOOL_TIERS = {
             "get_intersecting_elements",
         ],
     },
+
+    # Low voltage domain tools (security, fire alarm, BMS, AV, data/telecom)
+    "low_voltage": {
+        "essential": [
+            "find_elements",
+            "get_nearby_elements",
+            "sync_metadata",
+        ],
+        "standard": [
+            "get_related_elements",
+            "get_distance_between",
+        ],
+        "advanced": [
+            "draw_line_between",
+            "draw_circle_at",
+        ],
+    },
 }
 
 # Keywords to filter elements by category/type for each MEP domain
@@ -349,6 +422,26 @@ MEP_CATEGORY_FILTERS = {
             "sprinkler", "fire alarm", "smoke detector",
         ],
     },
+    "low_voltage": {
+        "revit_categories": [
+            "Communication Devices",
+            "Data Devices",
+            "Fire Alarm Devices",
+            "Security Devices",
+            "Telephone Devices",
+            "Nurse Call Devices",
+        ],
+        "autocad_layers": [
+            "LV-DATA", "LV-TELE", "LV-SEC", "LV-FA", "LV-AV",
+            "LV-BMS", "LV-CCTV", "LV-ACC", "D-", "T-",
+            "COMM", "TELECOM", "DATA", "SECURITY", "CCTV",
+        ],
+        "entity_types": [
+            "data outlet", "camera", "card reader", "smoke detector",
+            "speaker", "access point", "patch panel", "controller",
+            "network switch", "wifi", "intercom", "pull station",
+        ],
+    },
 }
 
 
@@ -398,6 +491,78 @@ def get_mep_category_filter(domain: str) -> dict:
         - entity_types: List of entity type keywords to include
     """
     return MEP_CATEGORY_FILTERS.get(domain.lower(), {})
+
+
+# =============================================================================
+# Domain Priority Tools (Phase 2 optimization)
+# =============================================================================
+# More granular control over which tools are loaded for specific domains
+
+DOMAIN_PRIORITY_TOOLS = {
+    "hvac": {
+        "must_have": ["find_elements", "get_nearby_elements", "sync_metadata"],
+        "useful": ["get_related_elements", "draw_line_between", "get_distance_between"],
+        "exclude": [],
+    },
+    "electrical": {
+        "must_have": ["find_elements", "get_nearby_elements", "sync_metadata"],
+        "useful": ["get_related_elements", "get_distance_between"],
+        "exclude": [],
+    },
+    "plumbing": {
+        "must_have": ["find_elements", "get_nearby_elements", "sync_metadata"],
+        "useful": ["get_related_elements", "get_distance_between"],
+        "exclude": [],
+    },
+    "fire_protection": {
+        "must_have": ["find_elements", "get_nearby_elements"],
+        "useful": ["sync_metadata", "get_related_elements"],
+        "exclude": [],
+    },
+    "low_voltage": {
+        "must_have": ["find_elements", "get_nearby_elements"],
+        "useful": ["get_related_elements", "sync_metadata", "get_distance_between"],
+        "exclude": [],
+    },
+}
+
+
+def get_domain_priority_tools(domain: str, include_useful: bool = True) -> set[str]:
+    """
+    Get prioritized tools for an MEP domain.
+
+    Args:
+        domain: MEP domain (hvac, electrical, plumbing, fire_protection, low_voltage)
+        include_useful: Whether to include "useful" tools (default True)
+
+    Returns:
+        Set of tool names that are prioritized for this domain
+    """
+    domain_lower = domain.lower()
+    if domain_lower not in DOMAIN_PRIORITY_TOOLS:
+        return set()
+
+    config = DOMAIN_PRIORITY_TOOLS[domain_lower]
+    tools = set(config["must_have"])
+    if include_useful:
+        tools.update(config["useful"])
+    return tools
+
+
+def get_domain_excluded_tools(domain: str) -> set[str]:
+    """
+    Get tools that should be excluded for an MEP domain.
+
+    Args:
+        domain: MEP domain
+
+    Returns:
+        Set of tool names to exclude
+    """
+    domain_lower = domain.lower()
+    if domain_lower not in DOMAIN_PRIORITY_TOOLS:
+        return set()
+    return set(DOMAIN_PRIORITY_TOOLS[domain_lower].get("exclude", []))
 
 
 def estimate_token_count(text: str) -> int:
