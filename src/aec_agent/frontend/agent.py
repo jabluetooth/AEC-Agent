@@ -978,6 +978,77 @@ class GeminiBackend(LLMBackend):
             yield f"Error streaming from Gemini: {str(e)}"
 
 
+class ProviderChain(LLMBackend):
+    """
+    LLM provider fallback chain.
+
+    Tries providers in order: primary -> fallback1 -> fallback2 -> ...
+    On failure, automatically falls back to the next provider.
+    Remembers the last successful provider for subsequent calls.
+    """
+
+    def __init__(self, backends: list[tuple[str, LLMBackend]]):
+        """
+        Args:
+            backends: Ordered list of (provider_name, backend) tuples.
+        """
+        if not backends:
+            raise ValueError("ProviderChain requires at least one backend")
+        self._backends = backends
+        self._current_index = 0
+
+    async def generate(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]],
+    ) -> AgentResponse:
+        """Try each provider in order until one succeeds."""
+        errors = []
+
+        # Start from current index, wrap around to try all
+        indices = list(range(self._current_index, len(self._backends))) + \
+                  list(range(0, self._current_index))
+
+        for i in indices:
+            name, backend = self._backends[i]
+            try:
+                response = await backend.generate(messages, tools)
+                if i != self._current_index:
+                    logger.info("Provider fallback succeeded", provider=name, index=i)
+                    self._current_index = i
+                return response
+            except Exception as e:
+                logger.warning(
+                    "Provider failed, trying next",
+                    provider=name,
+                    error=str(e),
+                )
+                errors.append(f"{name}: {e}")
+
+        # All providers failed
+        error_summary = "; ".join(errors)
+        raise RuntimeError(f"All LLM providers failed: {error_summary}")
+
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]],
+    ) -> AsyncGenerator[str, None]:
+        """Stream from the current provider (no fallback during stream)."""
+        name, backend = self._backends[self._current_index]
+        try:
+            async for chunk in backend.stream(messages, tools):
+                yield chunk
+        except Exception as e:
+            logger.warning("Stream failed", provider=name, error=str(e))
+            yield f"[Provider {name} failed: {e}. Retry to use fallback.]"
+
+    @property
+    def current_provider(self) -> str:
+        """Name of the currently active provider."""
+        return self._backends[self._current_index][0]
+
+
 class AECAgent:
     """
     Main agent class that orchestrates LLM interactions and tool calls.
@@ -1164,42 +1235,116 @@ class AECAgent:
         )
 
     def _create_backend(self) -> LLMBackend:
-        """Create an LLM backend based on settings."""
+        """Create an LLM backend based on settings.
+
+        When fallback is enabled, returns a ProviderChain that tries
+        providers in order: primary -> fallback1 -> fallback2 -> ...
+        """
         settings = get_settings()
 
-        if settings.llm_provider == LLMProvider.OPENAI:
+        primary = self._create_single_backend(settings.llm_provider, settings)
+
+        if not settings.enable_provider_fallback:
+            return primary
+
+        # Build fallback chain: primary + configured fallbacks
+        chain: list[tuple[str, LLMBackend]] = [
+            (settings.llm_provider.value, primary)
+        ]
+
+        for provider_name in settings.fallback_providers:
+            provider_name = provider_name.strip().lower()
+
+            # Skip the primary (already added)
+            if provider_name == settings.llm_provider.value:
+                continue
+
+            backend = self._try_create_fallback(provider_name, settings)
+            if backend:
+                chain.append((provider_name, backend))
+
+        if len(chain) == 1:
+            # No fallbacks available, return primary directly
+            return primary
+
+        logger.info(
+            "Provider fallback chain created",
+            providers=[name for name, _ in chain],
+        )
+        return ProviderChain(chain)
+
+    def _create_single_backend(self, provider: LLMProvider, settings) -> LLMBackend:
+        """Create a single LLM backend for a given provider."""
+        if provider == LLMProvider.OPENAI:
             return OpenAIBackend(
                 api_key=settings.get_llm_api_key(),
                 model="gpt-4o",
             )
-        elif settings.llm_provider == LLMProvider.ANTHROPIC:
+        elif provider == LLMProvider.ANTHROPIC:
             return AnthropicBackend(
                 api_key=settings.get_llm_api_key(),
                 model="claude-3-5-sonnet-20241022",
             )
-        elif settings.llm_provider == LLMProvider.AZURE_OPENAI:
+        elif provider == LLMProvider.AZURE_OPENAI:
             return AzureOpenAIBackend(
                 api_key=settings.get_llm_api_key(),
                 endpoint=settings.azure_openai_endpoint or "",
                 deployment=settings.azure_openai_deployment or "",
             )
-        elif settings.llm_provider == LLMProvider.HUGGINGFACE:
+        elif provider == LLMProvider.HUGGINGFACE:
             return HuggingFaceBackend(
                 api_key=settings.get_llm_api_key(),
                 model=settings.huggingface_model,
             )
-        elif settings.llm_provider == LLMProvider.GROQ:
+        elif provider == LLMProvider.GROQ:
             return GroqBackend(
                 api_key=settings.get_llm_api_key(),
                 model=settings.groq_model,
             )
-        elif settings.llm_provider == LLMProvider.GEMINI:
+        elif provider == LLMProvider.GEMINI:
             return GeminiBackend(
                 api_key=settings.get_llm_api_key(),
                 model=settings.gemini_model,
             )
         else:
-            raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")
+            raise ValueError(f"Unsupported LLM provider: {provider}")
+
+    def _try_create_fallback(self, provider_name: str, settings) -> Optional[LLMBackend]:
+        """Try to create a fallback backend. Returns None if API key is missing."""
+        try:
+            key_map = {
+                "openai": settings.openai_api_key,
+                "anthropic": settings.anthropic_api_key,
+                "azure_openai": settings.azure_openai_api_key,
+                "huggingface": settings.huggingface_api_key,
+                "groq": settings.groq_api_key,
+                "gemini": settings.gemini_api_key,
+            }
+
+            api_key = key_map.get(provider_name)
+            if not api_key:
+                return None
+
+            backend_map = {
+                "openai": lambda: OpenAIBackend(api_key=api_key, model="gpt-4o"),
+                "anthropic": lambda: AnthropicBackend(api_key=api_key, model="claude-3-5-sonnet-20241022"),
+                "azure_openai": lambda: AzureOpenAIBackend(
+                    api_key=api_key,
+                    endpoint=settings.azure_openai_endpoint or "",
+                    deployment=settings.azure_openai_deployment or "",
+                ),
+                "huggingface": lambda: HuggingFaceBackend(api_key=api_key, model=settings.huggingface_model),
+                "groq": lambda: GroqBackend(api_key=api_key, model=settings.groq_model),
+                "gemini": lambda: GeminiBackend(api_key=api_key, model=settings.gemini_model),
+            }
+
+            factory = backend_map.get(provider_name)
+            if factory:
+                return factory()
+        except Exception as e:
+            logger.debug("Could not create fallback", provider=provider_name, error=str(e))
+
+        return None
 
     def _get_intent_classifier(self) -> IntentClassifier:
         """Get or create the intent classifier."""

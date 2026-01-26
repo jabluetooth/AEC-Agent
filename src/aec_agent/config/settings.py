@@ -121,6 +121,17 @@ class Settings(BaseSettings):
         description="Gemini model to use (gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp)"
     )
 
+    # Provider fallback chain
+    enable_provider_fallback: bool = Field(
+        default=True,
+        description="Enable automatic fallback to alternative LLM providers on failure"
+    )
+
+    fallback_providers: list[str] = Field(
+        default=["gemini", "openai", "anthropic"],
+        description="Ordered list of fallback provider names (tried after primary fails)"
+    )
+
     # ==========================================================================
     # Port Configuration
     # ==========================================================================

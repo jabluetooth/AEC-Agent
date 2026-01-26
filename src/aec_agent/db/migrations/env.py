@@ -9,7 +9,7 @@ import asyncio
 from logging.config import fileConfig
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
-from sqlalchemy.ext.asyncio import async_engine_from_config
+from sqlalchemy.ext.asyncio import create_async_engine
 from alembic import context
 import os
 
@@ -23,6 +23,9 @@ if config.config_file_name is not None:
 # Get database URL from environment
 database_url = os.environ.get("DATABASE_URL")
 if database_url:
+    # Ensure SQLAlchemy async dialect prefix is present
+    if database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://", 1)
     config.set_main_option("sqlalchemy.url", database_url)
 
 # No target metadata needed - we use raw SQL migrations
@@ -57,11 +60,10 @@ def do_run_migrations(connection: Connection) -> None:
 
 async def run_async_migrations() -> None:
     """Run migrations in async mode."""
-    connectable = async_engine_from_config(
-        config.get_section(config.config_ini_section, {}),
-        prefix="sqlalchemy.",
-        poolclass=pool.NullPool,
-    )
+    url = config.get_main_option("sqlalchemy.url")
+    if not url:
+        raise RuntimeError("DATABASE_URL environment variable is not set")
+    connectable = create_async_engine(url, poolclass=pool.NullPool)
 
     async with connectable.connect() as connection:
         await connection.run_sync(do_run_migrations)

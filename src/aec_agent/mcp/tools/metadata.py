@@ -487,6 +487,143 @@ async def sync_metadata(
         )
 
 
+@mcp.tool()
+@safe_tool
+async def get_file_context(
+    source: Optional[str] = None,
+) -> dict:
+    """
+    Get a compact summary of the current drawing/model from cache.
+
+    Returns element counts by type, layers, categories, and key stats
+    without loading full element data. This is the fastest way to
+    understand what's in the current file.
+
+    Use this before making queries to avoid expensive sidecar calls.
+
+    Args:
+        source: Filter by source ("autocad" or "revit"), or None for all
+
+    Returns:
+        Compact file context: element counts, layers, categories, families
+    """
+    pool, _ = await _get_services()
+
+    if not pool:
+        return error_result(
+            MetadataErrorCode.DATABASE_NOT_CONFIGURED,
+            "Database not configured. Set DATABASE_URL for cached context."
+        )
+
+    project_id = await _get_active_project_id()
+    if not project_id:
+        return error_result(
+            MetadataErrorCode.PROJECT_NOT_FOUND,
+            "No active project. Open a drawing/model first."
+        )
+
+    async with pool.acquire() as conn:
+        # Project info
+        project = await conn.fetchrow(
+            "SELECT name, source, file_path, extracted_at FROM projects WHERE id = $1",
+            project_id,
+        )
+        if not project:
+            return error_result(MetadataErrorCode.PROJECT_NOT_FOUND, "Project not found")
+
+        # Element count by type
+        type_counts = await conn.fetch(
+            """
+            SELECT entity_type, COUNT(*) as count
+            FROM elements
+            WHERE project_id = $1 AND deleted_at IS NULL
+            GROUP BY entity_type
+            ORDER BY count DESC
+            LIMIT 30
+            """,
+            project_id,
+        )
+
+        # Layer summary
+        layers = await conn.fetch(
+            """
+            SELECT layer, COUNT(*) as count
+            FROM elements
+            WHERE project_id = $1 AND deleted_at IS NULL AND layer IS NOT NULL
+            GROUP BY layer
+            ORDER BY count DESC
+            LIMIT 30
+            """,
+            project_id,
+        )
+
+        # Category summary (Revit)
+        categories = await conn.fetch(
+            """
+            SELECT category, COUNT(*) as count
+            FROM elements
+            WHERE project_id = $1 AND deleted_at IS NULL AND category IS NOT NULL
+            GROUP BY category
+            ORDER BY count DESC
+            LIMIT 20
+            """,
+            project_id,
+        )
+
+        # Family summary (Revit)
+        families = await conn.fetch(
+            """
+            SELECT family, COUNT(*) as count
+            FROM elements
+            WHERE project_id = $1 AND deleted_at IS NULL AND family IS NOT NULL
+            GROUP BY family
+            ORDER BY count DESC
+            LIMIT 20
+            """,
+            project_id,
+        )
+
+        # Total counts
+        total = await conn.fetchval(
+            "SELECT COUNT(*) FROM elements WHERE project_id = $1 AND deleted_at IS NULL",
+            project_id,
+        )
+
+        with_embeddings = await conn.fetchval(
+            "SELECT COUNT(*) FROM elements WHERE project_id = $1 AND deleted_at IS NULL AND embedding IS NOT NULL",
+            project_id,
+        )
+
+        relationship_count = await conn.fetchval(
+            "SELECT COUNT(*) FROM element_relationships WHERE project_id = $1",
+            project_id,
+        )
+
+    context = {
+        "project": {
+            "id": str(project_id),
+            "name": project["name"],
+            "source": project["source"],
+            "file_path": project["file_path"],
+            "extracted_at": project["extracted_at"].isoformat() if project["extracted_at"] else None,
+        },
+        "summary": {
+            "total_elements": total or 0,
+            "elements_with_embeddings": with_embeddings or 0,
+            "relationship_count": relationship_count or 0,
+        },
+        "element_types": {row["entity_type"]: row["count"] for row in type_counts},
+        "layers": {row["layer"]: row["count"] for row in layers},
+        "categories": {row["category"]: row["count"] for row in categories},
+        "families": {row["family"]: row["count"] for row in families},
+    }
+
+    return success_result(
+        data=context,
+        message=f"File context: {total} elements across {len(type_counts)} types"
+    )
+
+
 async def _get_cache():
     """Get cache manager."""
     from aec_agent.mcp.server import get_cache

@@ -56,6 +56,9 @@ class DatabasePool:
                 "asyncpg is not installed. Install with: pip install asyncpg"
             )
 
+        # asyncpg needs plain postgresql:// (not postgresql+asyncpg://)
+        if database_url.startswith("postgresql+asyncpg://"):
+            database_url = database_url.replace("postgresql+asyncpg://", "postgresql://", 1)
         self._database_url = database_url
         self._min_size = min_size
         self._max_size = max_size
