@@ -207,3 +207,69 @@ class TestLLMProviderEnum:
         assert LLMProvider.ANTHROPIC.value == "anthropic"
         assert LLMProvider.AZURE_OPENAI.value == "azure_openai"
         assert LLMProvider.HUGGINGFACE.value == "huggingface"
+        assert LLMProvider.GROQ.value == "groq"
+        assert LLMProvider.GEMINI.value == "gemini"
+
+
+class TestGroqProvider:
+    """Tests for Groq LLM provider."""
+
+    def test_get_llm_api_key_groq(self):
+        """Test getting Groq API key."""
+        with patch.dict(os.environ, {
+            "LLM_PROVIDER": "groq",
+            "GROQ_API_KEY": "gsk-test-key"
+        }):
+            settings = Settings()
+            assert settings.get_llm_api_key() == "gsk-test-key"
+
+    def test_get_llm_api_key_groq_missing(self):
+        """Test error when Groq API key is missing."""
+        with patch.dict(os.environ, {"LLM_PROVIDER": "groq"}, clear=True):
+            settings = Settings(_env_file=None)
+            with pytest.raises(ValueError, match="GROQ_API_KEY is required"):
+                settings.get_llm_api_key()
+
+    def test_groq_model_default(self):
+        """Test default Groq model setting."""
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings(_env_file=None)
+            assert settings.groq_model == "moonshotai/kimi-k2-instruct"
+
+    def test_groq_model_from_env(self):
+        """Test Groq model from environment."""
+        with patch.dict(os.environ, {"GROQ_MODEL": "llama-3.3-70b-versatile"}):
+            settings = Settings()
+            assert settings.groq_model == "llama-3.3-70b-versatile"
+
+
+class TestGeminiProvider:
+    """Tests for Gemini LLM provider."""
+
+    def test_get_llm_api_key_gemini(self):
+        """Test getting Gemini API key."""
+        with patch.dict(os.environ, {
+            "LLM_PROVIDER": "gemini",
+            "GEMINI_API_KEY": "AIzaSy-test-key"
+        }):
+            settings = Settings()
+            assert settings.get_llm_api_key() == "AIzaSy-test-key"
+
+    def test_get_llm_api_key_gemini_missing(self):
+        """Test error when Gemini API key is missing."""
+        with patch.dict(os.environ, {"LLM_PROVIDER": "gemini"}, clear=True):
+            settings = Settings(_env_file=None)
+            with pytest.raises(ValueError, match="GEMINI_API_KEY is required"):
+                settings.get_llm_api_key()
+
+    def test_gemini_model_default(self):
+        """Test default Gemini model setting."""
+        with patch.dict(os.environ, {}, clear=True):
+            settings = Settings(_env_file=None)
+            assert settings.gemini_model == "gemini-1.5-flash"
+
+    def test_gemini_model_from_env(self):
+        """Test Gemini model from environment."""
+        with patch.dict(os.environ, {"GEMINI_MODEL": "gemini-2.0-flash-exp"}):
+            settings = Settings()
+            assert settings.gemini_model == "gemini-2.0-flash-exp"

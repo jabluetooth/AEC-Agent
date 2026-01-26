@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## 🚀 workflow: Start Here
+**ALWAYS read `docs/SESSION_CONTEXT.md` first.**
+This file contains the current active plan, completed tasks, and immediate next steps. Do not re-scan the entire repository or ask for a plan unless `SESSION_CONTEXT.md` is missing or empty.
+
 ## Project Overview
 
 AEC Agent is an AI-powered automation system bridging LLMs with AutoCAD and Revit. It uses Model Context Protocol (MCP) for natural language CAD control, with semantic search and spatial awareness via PostgreSQL.

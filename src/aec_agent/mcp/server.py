@@ -135,3 +135,87 @@ def get_lock() -> ToolLock:
 def get_lock_timeout() -> float:
     """Get the configured tool lock timeout."""
     return settings.tool_lock_timeout
+
+
+def get_sync_manager():
+    """Get the sync manager instance."""
+    return sync_manager
+
+
+def get_database_pool():
+    """Get the database pool instance."""
+    return database_pool
+
+
+def get_embedding_service():
+    """Get the embedding service instance."""
+    return embedding_service
+
+
+# Debounce tracking for background syncs
+_sync_debounce: dict[str, float] = {}
+_sync_debounce_ms: int = 2000  # 2 seconds
+
+
+async def trigger_background_sync(source: str, file_path: str, force: bool = False) -> dict:
+    """
+    Trigger a background sync for a file.
+
+    This is called by sidecar event hooks when files are opened/saved.
+    Uses debouncing to avoid excessive syncs.
+
+    Args:
+        source: 'autocad' or 'revit'
+        file_path: Path to the file
+        force: Force sync even if recently synced
+
+    Returns:
+        Status dict with sync result
+    """
+    import time
+
+    global _sync_debounce
+
+    if not sync_manager:
+        logger.warning("Sync manager not available, skipping background sync")
+        return {"status": "skipped", "reason": "sync_manager_not_available"}
+
+    # Debounce check
+    cache_key = f"{source}:{file_path}"
+    now = time.time()
+
+    if not force and cache_key in _sync_debounce:
+        elapsed_ms = (now - _sync_debounce[cache_key]) * 1000
+        if elapsed_ms < _sync_debounce_ms:
+            logger.debug(
+                "Sync debounced",
+                source=source,
+                file_path=file_path,
+                wait_ms=_sync_debounce_ms - elapsed_ms
+            )
+            return {"status": "debounced", "wait_ms": _sync_debounce_ms - elapsed_ms}
+
+    _sync_debounce[cache_key] = now
+
+    # Run sync in background
+    async def do_sync():
+        try:
+            result = await sync_manager.trigger_full_sync(source, file_path, force=force)
+            logger.info(
+                "Background sync completed",
+                source=source,
+                file_path=file_path,
+                elements=result.elements_extracted,
+                duration_ms=result.duration_ms
+            )
+        except Exception as e:
+            logger.error(
+                "Background sync failed",
+                source=source,
+                file_path=file_path,
+                error=str(e)
+            )
+
+    asyncio.create_task(do_sync())
+
+    return {"status": "queued", "source": source, "file_path": file_path}

@@ -33,6 +33,7 @@ class LLMProvider(str, Enum):
     AZURE_OPENAI = "azure_openai"
     HUGGINGFACE = "huggingface"
     GROQ = "groq"
+    GEMINI = "gemini"
 
 
 class Settings(BaseSettings):
@@ -108,6 +109,16 @@ class Settings(BaseSettings):
     groq_model: str = Field(
         default="moonshotai/kimi-k2-instruct",
         description="Groq model to use"
+    )
+
+    gemini_api_key: Optional[str] = Field(
+        default=None,
+        description="Google Gemini API key"
+    )
+
+    gemini_model: str = Field(
+        default="gemini-1.5-flash",
+        description="Gemini model to use (gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp)"
     )
 
     # ==========================================================================
@@ -475,6 +486,10 @@ class Settings(BaseSettings):
             if not self.groq_api_key:
                 raise ValueError("GROQ_API_KEY is required")
             return self.groq_api_key
+        elif self.llm_provider == LLMProvider.GEMINI:
+            if not self.gemini_api_key:
+                raise ValueError("GEMINI_API_KEY is required")
+            return self.gemini_api_key
         else:
             raise ValueError(f"Unknown LLM provider: {self.llm_provider}")
 

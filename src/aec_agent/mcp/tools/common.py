@@ -2,7 +2,9 @@
 Common MCP tools shared across AutoCAD and Revit.
 """
 
-from aec_agent.mcp.server import mcp, get_lock, get_cache
+from typing import Optional
+
+from aec_agent.mcp.server import mcp, get_lock, get_cache, trigger_background_sync
 from aec_agent.mcp.sidecar_client import check_sidecar_health
 from aec_agent.config.settings import get_settings
 from .base import success_result, error_result
@@ -92,3 +94,40 @@ async def sync_cache(categories: list[str] = None) -> dict:
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
+
+
+@mcp.tool()
+async def notify_file_opened(
+    source: str,
+    file_path: str,
+    document_title: Optional[str] = None,
+    force_sync: bool = False,
+) -> dict:
+    """
+    Notify the server that a file was opened.
+
+    Called by sidecar event hooks when AutoCAD/Revit opens a document.
+    Triggers background sync to PostgreSQL for caching.
+
+    Args:
+        source: 'autocad' or 'revit'
+        file_path: Full path to the opened file
+        document_title: Optional document title for display
+        force_sync: Force re-extraction even if file unchanged
+
+    Returns:
+        Sync status (queued, debounced, or skipped)
+    """
+    if source not in ("autocad", "revit"):
+        return error_result(4002, f"Invalid source: {source}. Use 'autocad' or 'revit'")
+
+    if not file_path:
+        return error_result(4002, "file_path is required")
+
+    # Trigger background sync
+    result = await trigger_background_sync(source, file_path, force=force_sync)
+
+    return success_result(
+        data=result,
+        message=f"File open notification received: {document_title or file_path}"
+    )

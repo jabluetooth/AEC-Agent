@@ -783,6 +783,201 @@ class GroqBackend(LLMBackend):
                 yield chunk.choices[0].delta.content
 
 
+class GeminiBackend(LLMBackend):
+    """Google Gemini backend."""
+
+    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
+        self.api_key = api_key
+        self.model = model
+        self._client = None
+
+    async def _get_client(self):
+        """Lazy-load the Gemini client."""
+        if self._client is None:
+            import google.generativeai as genai
+            genai.configure(api_key=self.api_key)
+            self._client = genai.GenerativeModel(self.model)
+        return self._client
+
+    def _convert_messages_to_gemini(
+        self, messages: list[Message]
+    ) -> tuple[str, list[dict]]:
+        """Convert messages to Gemini format."""
+        system_instruction = ""
+        gemini_history = []
+
+        for msg in messages:
+            if msg.role == "system":
+                system_instruction = msg.content or ""
+            elif msg.role == "user":
+                gemini_history.append({
+                    "role": "user",
+                    "parts": [msg.content or ""]
+                })
+            elif msg.role == "assistant":
+                parts = []
+                if msg.content:
+                    parts.append(msg.content)
+                if msg.tool_calls:
+                    for tc in msg.tool_calls:
+                        parts.append({
+                            "function_call": {
+                                "name": tc.get("function", {}).get("name", tc.get("name", "")),
+                                "args": tc.get("function", {}).get("arguments", tc.get("arguments", {}))
+                            }
+                        })
+                if parts:
+                    gemini_history.append({
+                        "role": "model",
+                        "parts": parts if len(parts) > 1 else [parts[0]] if parts else [""]
+                    })
+            elif msg.role == "tool":
+                gemini_history.append({
+                    "role": "user",
+                    "parts": [{
+                        "function_response": {
+                            "name": msg.name or "tool",
+                            "response": {"result": msg.content or ""}
+                        }
+                    }]
+                })
+
+        return system_instruction, gemini_history
+
+    def _convert_tools_to_gemini(self, tools: list[dict]) -> list[dict]:
+        """Convert OpenAI-style tools to Gemini function declarations."""
+        if not tools:
+            return []
+
+        function_declarations = []
+        for tool in tools:
+            if tool.get("type") == "function":
+                func = tool.get("function", {})
+                function_declarations.append({
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "parameters": func.get("parameters", {})
+                })
+        return function_declarations
+
+    async def generate(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]],
+    ) -> AgentResponse:
+        """Generate using Gemini."""
+        import asyncio
+
+        client = await self._get_client()
+        system_instruction, gemini_history = self._convert_messages_to_gemini(messages)
+        function_declarations = self._convert_tools_to_gemini(tools)
+
+        try:
+            # Create generation config
+            generation_config = {"max_output_tokens": 4096}
+
+            # Build tool config if we have functions
+            tool_config = None
+            if function_declarations:
+                tool_config = [{"function_declarations": function_declarations}]
+
+            # Create a new model with system instruction if provided
+            if system_instruction:
+                model = await asyncio.to_thread(
+                    lambda: __import__('google.generativeai', fromlist=['GenerativeModel']).GenerativeModel(
+                        self.model,
+                        system_instruction=system_instruction
+                    )
+                )
+            else:
+                model = client
+
+            # Start chat with history (excluding the last user message)
+            history = gemini_history[:-1] if len(gemini_history) > 1 else []
+            last_message = gemini_history[-1]["parts"] if gemini_history else [""]
+
+            chat = model.start_chat(history=history)
+
+            # Send the last message
+            response = await asyncio.to_thread(
+                chat.send_message,
+                last_message,
+                generation_config=generation_config,
+                tools=tool_config
+            )
+
+            # Extract content and tool calls
+            content = ""
+            tool_calls = []
+
+            if response.parts:
+                for part in response.parts:
+                    if hasattr(part, 'text') and part.text:
+                        content += part.text
+                    elif hasattr(part, 'function_call'):
+                        fc = part.function_call
+                        tool_calls.append(ToolCall(
+                            id=f"call_{len(tool_calls)}",
+                            name=fc.name,
+                            arguments=dict(fc.args) if fc.args else {},
+                        ))
+
+            return AgentResponse(
+                content=content,
+                tool_calls=tool_calls,
+                finished=len(tool_calls) == 0,
+            )
+
+        except Exception as e:
+            logger.error("Gemini API error", error=str(e))
+            return AgentResponse(
+                content=f"Error calling Gemini API: {str(e)}",
+                finished=True
+            )
+
+    async def stream(
+        self,
+        messages: list[Message],
+        tools: list[dict[str, Any]],
+    ) -> AsyncGenerator[str, None]:
+        """Stream using Gemini."""
+        import asyncio
+
+        client = await self._get_client()
+        system_instruction, gemini_history = self._convert_messages_to_gemini(messages)
+
+        try:
+            # Create a model with system instruction if provided
+            if system_instruction:
+                model = await asyncio.to_thread(
+                    lambda: __import__('google.generativeai', fromlist=['GenerativeModel']).GenerativeModel(
+                        self.model,
+                        system_instruction=system_instruction
+                    )
+                )
+            else:
+                model = client
+
+            # Start chat
+            history = gemini_history[:-1] if len(gemini_history) > 1 else []
+            last_message = gemini_history[-1]["parts"] if gemini_history else [""]
+
+            chat = model.start_chat(history=history)
+
+            # Stream response
+            response = await asyncio.to_thread(
+                lambda: chat.send_message(last_message, stream=True)
+            )
+
+            for chunk in response:
+                if hasattr(chunk, 'text') and chunk.text:
+                    yield chunk.text
+
+        except Exception as e:
+            logger.error("Gemini streaming error", error=str(e))
+            yield f"Error streaming from Gemini: {str(e)}"
+
+
 class AECAgent:
     """
     Main agent class that orchestrates LLM interactions and tool calls.
@@ -997,6 +1192,11 @@ class AECAgent:
             return GroqBackend(
                 api_key=settings.get_llm_api_key(),
                 model=settings.groq_model,
+            )
+        elif settings.llm_provider == LLMProvider.GEMINI:
+            return GeminiBackend(
+                api_key=settings.get_llm_api_key(),
+                model=settings.gemini_model,
             )
         else:
             raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")

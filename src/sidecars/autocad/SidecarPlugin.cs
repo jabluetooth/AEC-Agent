@@ -1,5 +1,7 @@
 using System;
 using System.Collections.Concurrent;
+using System.Net.Http;
+using System.Text;
 using System.Threading.Tasks;
 using Autodesk.AutoCAD.ApplicationServices;
 using Autodesk.AutoCAD.Runtime;
@@ -18,8 +20,11 @@ namespace AECAgent.AutoCAD
         private static ConcurrentQueue<JobRequest> _jobQueue;
         private static string _sessionToken;
         private static int _listenerPort;
+        private static int _mcpServerPort;
         private static bool _isInitialized;
+        private static bool _enablePostgresSync;
         private static CommandRouter _commandRouter;
+        private static HttpClient _httpClient;
 
         public static ConcurrentQueue<JobRequest> JobQueue => _jobQueue;
         public static string SessionToken => _sessionToken;
@@ -31,6 +36,8 @@ namespace AECAgent.AutoCAD
             {
                 _sessionToken = Environment.GetEnvironmentVariable("SESSION_TOKEN");
                 string portStr = Environment.GetEnvironmentVariable("MCP_LISTENER_PORT");
+                string mcpServerPortStr = Environment.GetEnvironmentVariable("MCP_SERVER_PORT") ?? "54321";
+                string enableSyncStr = Environment.GetEnvironmentVariable("ENABLE_POSTGRES_SYNC") ?? "true";
 
                 if (string.IsNullOrEmpty(_sessionToken) || string.IsNullOrEmpty(portStr))
                 {
@@ -45,10 +52,21 @@ namespace AECAgent.AutoCAD
                     return;
                 }
 
+                // MCP server configuration for PostgreSQL sync
+                int.TryParse(mcpServerPortStr, out _mcpServerPort);
+                if (_mcpServerPort == 0) _mcpServerPort = 54321;
+                _enablePostgresSync = enableSyncStr.ToLowerInvariant() == "true";
+
                 _jobQueue = new ConcurrentQueue<JobRequest>();
                 _commandRouter = new CommandRouter();
+                _httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
 
                 Application.Idle += OnIdle;
+
+                // Document events for PostgreSQL sync
+                Application.DocumentManager.DocumentCreated += OnDocumentCreated;
+                Application.DocumentManager.DocumentBecameCurrent += OnDocumentBecameCurrent;
+                Application.DocumentManager.DocumentToBeDestroyed += OnDocumentClosing;
 
                 _listener = new SidecarListener(_listenerPort, _sessionToken, _jobQueue);
                 Task.Run(() => _listener.StartAsync());
@@ -71,8 +89,16 @@ namespace AECAgent.AutoCAD
             {
                 _isInitialized = false;
                 Application.Idle -= OnIdle;
+
+                // Unregister document events
+                Application.DocumentManager.DocumentCreated -= OnDocumentCreated;
+                Application.DocumentManager.DocumentBecameCurrent -= OnDocumentBecameCurrent;
+                Application.DocumentManager.DocumentToBeDestroyed -= OnDocumentClosing;
+
                 _listener?.Stop();
                 _listener = null;
+                _httpClient?.Dispose();
+                _httpClient = null;
                 while (_jobQueue?.TryDequeue(out _) == true) { }
                 Logger.Info("AEC Agent Sidecar terminated");
             }
@@ -80,6 +106,65 @@ namespace AECAgent.AutoCAD
             {
                 Logger.Error($"Error during termination: {ex.Message}", ex);
             }
+        }
+
+        private static void OnDocumentCreated(object sender, DocumentCollectionEventArgs e)
+        {
+            if (!_isInitialized || e.Document == null) return;
+
+            var doc = e.Document;
+            Logger.Info($"Document created/opened: {doc.Name}");
+            NotifyPostgresSync(doc.Name, "autocad", false);
+        }
+
+        private static void OnDocumentBecameCurrent(object sender, DocumentCollectionEventArgs e)
+        {
+            if (!_isInitialized || e.Document == null) return;
+
+            var doc = e.Document;
+            Logger.Info($"Document became current: {doc.Name}");
+            // Only notify on document switch (for caching purposes)
+            // NotifyPostgresSync(doc.Name, "autocad", false);
+        }
+
+        private static void OnDocumentClosing(object sender, DocumentCollectionEventArgs e)
+        {
+            if (!_isInitialized || e.Document == null) return;
+
+            Logger.Info($"Document closing: {e.Document.Name}");
+        }
+
+        private static void NotifyPostgresSync(string filePath, string source, bool force)
+        {
+            if (!_enablePostgresSync || _httpClient == null) return;
+
+            Task.Run(async () =>
+            {
+                try
+                {
+                    var payload = $"{{\"source\":\"{source}\",\"file_path\":\"{filePath.Replace("\\", "\\\\")}\",\"force_sync\":{force.ToString().ToLowerInvariant()}}}";
+                    var content = new StringContent(payload, Encoding.UTF8, "application/json");
+
+                    var response = await _httpClient.PostAsync(
+                        $"http://localhost:{_mcpServerPort}/tools/notify_file_opened",
+                        content
+                    );
+
+                    if (response.IsSuccessStatusCode)
+                    {
+                        Logger.Info("PostgreSQL sync notification sent successfully");
+                    }
+                    else
+                    {
+                        Logger.Warn($"PostgreSQL sync notification failed: {response.StatusCode}");
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    // Don't fail on notification errors - PostgreSQL sync is optional
+                    Logger.Debug($"PostgreSQL sync notification skipped: {ex.Message}");
+                }
+            });
         }
 
         private static void OnIdle(object sender, EventArgs e)

@@ -5,6 +5,7 @@ Provides tools for:
 - Semantic search for elements
 - Spatial proximity queries
 - Element resolution from natural language
+- Cache-first data access
 """
 
 from typing import Optional, List
@@ -18,6 +19,11 @@ from aec_agent.mcp.tools.base import (
     error_result,
     safe_tool,
     ErrorCode,
+)
+from aec_agent.mcp.tools.cache_helpers import (
+    get_element_with_context,
+    is_cache_fresh,
+    get_cache_stats,
 )
 
 logger = structlog.get_logger(__name__)
@@ -152,6 +158,7 @@ async def get_nearby_elements(
     Find elements near a specific element.
 
     Uses spatial proximity queries (PostGIS) to find nearby elements.
+    Uses cache-first pattern for element lookup.
 
     Args:
         element_id: Source element ID (Handle, ElementId, or UUID)
@@ -177,18 +184,35 @@ async def get_nearby_elements(
             "No active project"
         )
 
-    from aec_agent.db.repository import ElementRepository
+    # Cache-first element lookup
+    element_data = await get_element_with_context(
+        source_id=element_id,
+        project_id=project_id,
+        fallback_to_sidecar=False,  # Spatial queries require PostgreSQL
+    )
 
+    if not element_data:
+        return error_result(
+            MetadataErrorCode.ELEMENT_NOT_FOUND,
+            f"Element not found: {element_id}"
+        )
+
+    # Get the actual element object for spatial query
+    from aec_agent.db.repository import ElementRepository
     repo = ElementRepository(pool)
 
-    # Resolve element ID
-    element = await repo.get_element_by_source_id(project_id, element_id)
-    if not element:
-        # Try as UUID
-        try:
-            element = await repo.get_element(UUID(element_id))
-        except ValueError:
-            pass
+    # Use the resolved element ID from cache lookup
+    element_uuid = element_data.get("id") or element_data.get("element_id")
+    if not element_uuid:
+        return error_result(
+            MetadataErrorCode.ELEMENT_NOT_FOUND,
+            f"Element not found: {element_id}"
+        )
+
+    try:
+        element = await repo.get_element(UUID(str(element_uuid)))
+    except (ValueError, TypeError):
+        element = None
 
     if not element:
         return error_result(
@@ -231,6 +255,7 @@ async def get_related_elements(
     Get elements related to a specific element.
 
     Finds elements connected through spatial or logical relationships.
+    Uses cache-first pattern for element lookup.
 
     Args:
         element_id: Element ID to find relations for
@@ -260,17 +285,35 @@ async def get_related_elements(
             "No active project"
         )
 
-    from aec_agent.db.repository import ElementRepository
+    # Cache-first element lookup
+    element_data = await get_element_with_context(
+        source_id=element_id,
+        project_id=project_id,
+        include_related=True,  # Hint that we need relations
+        fallback_to_sidecar=False,
+    )
 
+    if not element_data:
+        return error_result(
+            MetadataErrorCode.ELEMENT_NOT_FOUND,
+            f"Element not found: {element_id}"
+        )
+
+    # Get the actual element object for relationship query
+    from aec_agent.db.repository import ElementRepository
     repo = ElementRepository(pool)
 
-    # Resolve element ID
-    element = await repo.get_element_by_source_id(project_id, element_id)
-    if not element:
-        try:
-            element = await repo.get_element(UUID(element_id))
-        except ValueError:
-            pass
+    element_uuid = element_data.get("id") or element_data.get("element_id")
+    if not element_uuid:
+        return error_result(
+            MetadataErrorCode.ELEMENT_NOT_FOUND,
+            f"Element not found: {element_id}"
+        )
+
+    try:
+        element = await repo.get_element(UUID(str(element_uuid)))
+    except (ValueError, TypeError):
+        element = None
 
     if not element:
         return error_result(
@@ -448,3 +491,44 @@ async def _get_cache():
     """Get cache manager."""
     from aec_agent.mcp.server import get_cache
     return get_cache()
+
+
+@mcp.tool()
+@safe_tool
+async def get_cache_status() -> dict:
+    """
+    Get cache status and statistics.
+
+    Returns information about the PostgreSQL cache including:
+    - Whether cache is available and configured
+    - Number of cached elements for active project
+    - Cache freshness status
+    - Last sync timestamp
+
+    Returns:
+        Cache status and statistics
+    """
+    pool, embeddings = await _get_services()
+
+    status = {
+        "database_configured": pool is not None,
+        "embeddings_available": embeddings is not None,
+    }
+
+    project_id = await _get_active_project_id()
+    if project_id:
+        status["active_project_id"] = str(project_id)
+
+        # Get detailed cache stats
+        stats = await get_cache_stats(project_id)
+        status.update(stats)
+
+        # Check cache freshness
+        is_fresh = await is_cache_fresh(project_id, max_age_seconds=300)
+        status["cache_fresh"] = is_fresh
+    else:
+        status["active_project_id"] = None
+        status["cache_fresh"] = False
+        status["message"] = "No active project. Extract a drawing first."
+
+    return success_result(data=status)

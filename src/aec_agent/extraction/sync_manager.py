@@ -6,7 +6,9 @@ Handles both full syncs and incremental updates with debouncing.
 """
 
 import asyncio
+import hashlib
 from datetime import datetime
+from pathlib import Path
 from typing import Optional, Dict, Set, List
 from uuid import UUID
 import time
@@ -68,6 +70,7 @@ class SyncManager:
         self,
         source: str,
         file_path: str,
+        force: bool = False,
     ) -> ExtractionResult:
         """
         Trigger full extraction and sync.
@@ -75,11 +78,34 @@ class SyncManager:
         Args:
             source: 'autocad' or 'revit'
             file_path: Path to drawing/model
+            force: Force re-extraction even if file unchanged
 
         Returns:
             Extraction result
         """
-        logger.info("Starting full sync", source=source, file_path=file_path)
+        logger.info("Starting full sync", source=source, file_path=file_path, force=force)
+
+        # Check for unchanged file (hash-based skip detection)
+        if not force and file_path:
+            existing_project = await self._repository.get_project_by_file_path(file_path)
+            if existing_project:
+                current_hash = await self._compute_file_hash(file_path)
+                if current_hash and existing_project.file_hash == current_hash:
+                    logger.info(
+                        "File unchanged, skipping extraction",
+                        project_id=str(existing_project.id),
+                        file_hash=current_hash
+                    )
+                    return ExtractionResult(
+                        project_id=existing_project.id,
+                        elements_extracted=0,
+                        elements_updated=0,
+                        elements_deleted=0,
+                        embeddings_generated=0,
+                        relationships_computed=0,
+                        duration_ms=0,
+                        success=True,
+                    )
 
         config = ExtractionConfig()
 
@@ -350,3 +376,28 @@ class SyncManager:
     def set_embedding_service(self, service: EmbeddingService) -> None:
         """Set or update the embedding service."""
         self._embeddings = service
+
+    async def _compute_file_hash(self, file_path: str) -> str:
+        """
+        Compute file hash for change detection.
+
+        Uses file size and modification time for fast hashing
+        (actual file content hashing would be slow for large CAD files).
+
+        Args:
+            file_path: Path to the file
+
+        Returns:
+            Hash string or empty string if file not accessible
+        """
+        try:
+            path = Path(file_path)
+            if path.exists():
+                stats = path.stat()
+                # Combine size and mtime for a fast "fingerprint"
+                content = f"{stats.st_size}:{stats.st_mtime}"
+                return hashlib.sha256(content.encode()).hexdigest()[:16]
+        except Exception as e:
+            logger.warning("Could not compute file hash", file_path=file_path, error=str(e))
+
+        return ""
