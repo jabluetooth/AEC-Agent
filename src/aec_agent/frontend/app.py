@@ -223,7 +223,8 @@ async def on_message(message: cl.Message):
         await response_msg.update()
 
     except Exception as e:
-        logger.error("Error processing message", error=str(e))
+        import traceback
+        logger.error("Error processing message", error=str(e), traceback=traceback.format_exc())
         await cl.Message(
             content=f"*Error processing message: {e}*",
         ).send()

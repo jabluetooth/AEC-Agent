@@ -122,9 +122,9 @@ class ConversationSummarizer:
         errors = []
 
         for msg in messages:
-            role = getattr(msg, 'role', None) or msg.get('role', '')
-            content = getattr(msg, 'content', None) or msg.get('content', '')
-            tool_calls = getattr(msg, 'tool_calls', None) or msg.get('tool_calls', None)
+            role = getattr(msg, 'role', None)
+            content = getattr(msg, 'content', None)
+            tool_calls = getattr(msg, 'tool_calls', None)
 
             if role == "assistant" and tool_calls:
                 # Extract tool actions
@@ -177,11 +177,11 @@ class ConversationSummarizer:
         """Estimate token count for messages."""
         total = 0
         for msg in messages:
-            content = getattr(msg, 'content', None) or msg.get('content', '')
+            content = getattr(msg, 'content', None)
             if content:
                 total += len(content) // 4
 
-            tool_calls = getattr(msg, 'tool_calls', None) or msg.get('tool_calls', None)
+            tool_calls = getattr(msg, 'tool_calls', None)
             if tool_calls:
                 import json
                 try:

@@ -23,8 +23,8 @@
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
 
-    <!-- Suppress warnings about Windows-only APIs -->
-    <NoWarn>$(NoWarn);CA1416</NoWarn>
+    <!-- Suppress warnings about Windows-only APIs and assembly conflicts -->
+    <NoWarn>$(NoWarn);CA1416;MSB3277</NoWarn>
   </PropertyGroup>
 
   <!-- AutoCAD installation paths by version -->

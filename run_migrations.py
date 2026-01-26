@@ -13,6 +13,8 @@ if env_path.exists():
                 key, value = line.split("=", 1)
                 os.environ[key] = value
 
+import sys
+
 # Run alembic
-result = subprocess.run(["alembic", "upgrade", "head"], cwd=Path(__file__).parent)
+result = subprocess.run([sys.executable, "-m", "alembic", "upgrade", "head"], cwd=Path(__file__).parent)
 exit(result.returncode)
