@@ -535,6 +535,295 @@ namespace AECAgent.AutoCAD.Commands
         }
 
         // =====================================================================
+        // Extract All Entities (sync - uses Transaction)
+        // =====================================================================
+
+        /// <summary>
+        /// Extract all entities from the drawing with full geometry data.
+        /// Returns paginated results with handle, type, layer, color, geometry
+        /// points/coordinates, and bounding box. Used for PostgreSQL storage.
+        /// </summary>
+        public object ExtractAllEntities(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<ExtractAllEntitiesParams>(parameters);
+            int offset = Math.Max(0, param.Offset);
+            int limit = param.Limit > 0 ? param.Limit : 500;
+
+            Database db = doc.Database;
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForRead);
+
+            var entities = new List<Dictionary<string, object>>();
+            int index = 0;
+            int total = 0;
+
+            foreach (ObjectId id in btr)
+            {
+                try
+                {
+                    Entity ent = (Entity)tr.GetObject(id, OpenMode.ForRead);
+
+                    // Skip raster images from extraction
+                    if (ent is RasterImage) continue;
+
+                    // Layer filter
+                    if (!string.IsNullOrEmpty(param.LayerFilter) &&
+                        !ent.Layer.Equals(param.LayerFilter, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    total++;
+
+                    // Pagination
+                    if (index < offset) { index++; continue; }
+                    if (entities.Count >= limit) { index++; continue; }
+
+                    var entityData = new Dictionary<string, object>
+                    {
+                        { "handle", ent.Handle.ToString() },
+                        { "entity_type", ent.GetType().Name },
+                        { "layer", ent.Layer },
+                        { "color", ent.ColorIndex },
+                        { "linetype", ent.Linetype }
+                    };
+
+                    // Extract geometry based on entity type
+                    var geometry = ExtractGeometry(ent);
+                    if (geometry != null)
+                        entityData["geometry"] = geometry;
+
+                    // Extract bounds
+                    try
+                    {
+                        var extents = ent.GeometricExtents;
+                        entityData["bounds"] = new Dictionary<string, double>
+                        {
+                            { "min_x", extents.MinPoint.X },
+                            { "min_y", extents.MinPoint.Y },
+                            { "min_z", extents.MinPoint.Z },
+                            { "max_x", extents.MaxPoint.X },
+                            { "max_y", extents.MaxPoint.Y },
+                            { "max_z", extents.MaxPoint.Z }
+                        };
+                    }
+                    catch { }
+
+                    // Block reference info
+                    if (ent is BlockReference blkRef)
+                    {
+                        entityData["block_name"] = blkRef.Name;
+                        entityData["properties"] = new Dictionary<string, object>
+                        {
+                            { "position", new double[] { blkRef.Position.X, blkRef.Position.Y, blkRef.Position.Z } },
+                            { "rotation", blkRef.Rotation },
+                            { "scale_x", blkRef.ScaleFactors.X },
+                            { "scale_y", blkRef.ScaleFactors.Y }
+                        };
+                    }
+
+                    // Text entity info
+                    if (ent is DBText text)
+                    {
+                        entityData["properties"] = new Dictionary<string, object>
+                        {
+                            { "text_string", text.TextString },
+                            { "height", text.Height },
+                            { "rotation", text.Rotation }
+                        };
+                    }
+                    else if (ent is MText mtext)
+                    {
+                        entityData["properties"] = new Dictionary<string, object>
+                        {
+                            { "text_string", mtext.Text },
+                            { "height", mtext.TextHeight },
+                            { "width", mtext.Width }
+                        };
+                    }
+
+                    entities.Add(entityData);
+                    index++;
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"Could not extract entity: {ex.Message}");
+                    index++;
+                }
+            }
+
+            return new Dictionary<string, object>
+            {
+                { "entities", entities },
+                { "total", total },
+                { "offset", offset },
+                { "limit", limit },
+                { "has_more", (offset + entities.Count) < total }
+            };
+        }
+
+        /// <summary>
+        /// Extract geometry information from an entity.
+        /// Returns type-specific coordinate data.
+        /// </summary>
+        private Dictionary<string, object> ExtractGeometry(Entity ent)
+        {
+            var geom = new Dictionary<string, object>();
+
+            if (ent is Line line)
+            {
+                geom["type"] = "Line";
+                geom["start"] = new double[] { line.StartPoint.X, line.StartPoint.Y, line.StartPoint.Z };
+                geom["end"] = new double[] { line.EndPoint.X, line.EndPoint.Y, line.EndPoint.Z };
+            }
+            else if (ent is Circle circle)
+            {
+                geom["type"] = "Circle";
+                geom["center"] = new double[] { circle.Center.X, circle.Center.Y, circle.Center.Z };
+                geom["radius"] = circle.Radius;
+            }
+            else if (ent is Arc arc)
+            {
+                geom["type"] = "Arc";
+                geom["center"] = new double[] { arc.Center.X, arc.Center.Y, arc.Center.Z };
+                geom["radius"] = arc.Radius;
+                geom["start_angle"] = arc.StartAngle;
+                geom["end_angle"] = arc.EndAngle;
+            }
+            else if (ent is Polyline pline)
+            {
+                geom["type"] = "Polyline";
+                geom["closed"] = pline.Closed;
+                var pts = new List<double[]>();
+                for (int i = 0; i < pline.NumberOfVertices; i++)
+                {
+                    var pt = pline.GetPoint3dAt(i);
+                    pts.Add(new double[] { pt.X, pt.Y, pt.Z });
+                }
+                geom["points"] = pts;
+                geom["vertex_count"] = pline.NumberOfVertices;
+            }
+            else if (ent is Polyline2d pline2d)
+            {
+                geom["type"] = "Polyline2d";
+                geom["closed"] = pline2d.Closed;
+            }
+            else if (ent is Polyline3d pline3d)
+            {
+                geom["type"] = "Polyline3d";
+                geom["closed"] = pline3d.Closed;
+            }
+            else if (ent is Ellipse ellipse)
+            {
+                geom["type"] = "Ellipse";
+                geom["center"] = new double[] { ellipse.Center.X, ellipse.Center.Y, ellipse.Center.Z };
+                geom["major_radius"] = ellipse.MajorRadius;
+                geom["minor_radius"] = ellipse.MinorRadius;
+            }
+            else if (ent is Spline spline)
+            {
+                geom["type"] = "Spline";
+                geom["closed"] = spline.Closed;
+                geom["degree"] = spline.Degree;
+                var pts = new List<double[]>();
+                for (int i = 0; i < spline.NumControlPoints; i++)
+                {
+                    var pt = spline.GetControlPointAt(i);
+                    pts.Add(new double[] { pt.X, pt.Y, pt.Z });
+                }
+                geom["control_points"] = pts;
+            }
+            else if (ent is DBText text)
+            {
+                geom["type"] = "Text";
+                geom["position"] = new double[] { text.Position.X, text.Position.Y, text.Position.Z };
+            }
+            else if (ent is MText mtext)
+            {
+                geom["type"] = "MText";
+                geom["position"] = new double[] { mtext.Location.X, mtext.Location.Y, mtext.Location.Z };
+            }
+            else if (ent is BlockReference blkRef)
+            {
+                geom["type"] = "BlockReference";
+                geom["position"] = new double[] { blkRef.Position.X, blkRef.Position.Y, blkRef.Position.Z };
+            }
+            else if (ent is Hatch hatch)
+            {
+                geom["type"] = "Hatch";
+                geom["pattern_name"] = hatch.PatternName;
+            }
+            else
+            {
+                geom["type"] = ent.GetType().Name;
+            }
+
+            return geom;
+        }
+
+        // =====================================================================
+        // Fade Raster Image (sync - uses Transaction)
+        // =====================================================================
+
+        /// <summary>
+        /// Fade all raster images in the drawing to reduce opacity.
+        /// Used after vectorization to keep raster as a dim background reference.
+        /// </summary>
+        public object FadeImage(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<FadeImageParams>(parameters);
+            int fadePercent = Math.Max(0, Math.Min(100, param.FadePercent > 0 ? param.FadePercent : 70));
+
+            Database db = doc.Database;
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+
+            int fadedCount = 0;
+            foreach (ObjectId id in btr)
+            {
+                try
+                {
+                    Entity ent = tr.GetObject(id, OpenMode.ForRead) as Entity;
+                    if (ent is RasterImage rasterImg)
+                    {
+                        rasterImg.UpgradeOpen();
+                        // Fade controls transparency: 0 = opaque, 100 = invisible
+                        // Use Brightness property for fading effect
+                        // The actual API uses the Fade property (0-100)
+                        try
+                        {
+                            // Set image transparency via system variable
+                            Application.SetSystemVariable("IMAGEFADE", fadePercent);
+                        }
+                        catch
+                        {
+                            // Fallback: try entity-level transparency
+                            var transparency = new Autodesk.AutoCAD.Colors.Transparency((byte)(255 * fadePercent / 100));
+                            rasterImg.Transparency = transparency;
+                        }
+                        fadedCount++;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Warn($"Could not fade image: {ex.Message}");
+                }
+            }
+
+            Logger.Info($"Faded {fadedCount} raster images to {fadePercent}%");
+
+            return new RasterOperationResult
+            {
+                Operation = "fade_image",
+                Status = "completed",
+                Message = $"Faded {fadedCount} raster image(s) to {fadePercent}% transparency",
+                Details = new Dictionary<string, object>
+                {
+                    { "fade_percent", fadePercent },
+                    { "images_faded", fadedCount }
+                }
+            };
+        }
+
+        // =====================================================================
         // Helpers
         // =====================================================================
 

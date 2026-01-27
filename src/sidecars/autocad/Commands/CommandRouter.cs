@@ -56,7 +56,9 @@ namespace AECAgent.AutoCAD.Commands
                 // Raster Design commands (sync - use Transaction)
                 { "raster_attach_image", _rasterCommands.AttachImage },
                 { "raster_get_status", _rasterCommands.GetRasterStatus },
-                { "raster_get_entity_count", _rasterCommands.GetEntityCount }
+                { "raster_get_entity_count", _rasterCommands.GetEntityCount },
+                { "extract_all_entities", _rasterCommands.ExtractAllEntities },
+                { "raster_fade_image", _rasterCommands.FadeImage }
             };
 
             // Async commands use SendStringToExecute and do not need a Transaction.

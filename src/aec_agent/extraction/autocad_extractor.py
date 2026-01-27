@@ -203,6 +203,9 @@ class AutoCADExtractor(BaseExtractor):
         """
         Stream entities in batches from the sidecar.
 
+        Uses the extract_all_entities command which returns paginated
+        results with full geometry for PostgreSQL storage.
+
         Args:
             batch_size: Override default batch size
 
@@ -224,7 +227,7 @@ class AutoCADExtractor(BaseExtractor):
                 params["layer_filter"] = self.config.layer_filter
 
             try:
-                response = await call_autocad_command("extract_batch", params)
+                response = await call_autocad_command("extract_all_entities", params)
 
                 if not response.get("success"):
                     error = response.get("error", {})

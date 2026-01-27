@@ -248,4 +248,28 @@ namespace AECAgent.AutoCAD.Models
         [JsonProperty("layer")]
         public string Layer { get; set; }
     }
+
+    public class ExtractAllEntitiesParams
+    {
+        [JsonProperty("offset")]
+        public int Offset { get; set; }
+
+        [JsonProperty("limit")]
+        public int Limit { get; set; } = 500;
+
+        [JsonProperty("layer_filter")]
+        public string LayerFilter { get; set; }
+
+        [JsonProperty("include_geometry")]
+        public bool IncludeGeometry { get; set; } = true;
+
+        [JsonProperty("include_xdata")]
+        public bool IncludeXdata { get; set; }
+    }
+
+    public class FadeImageParams
+    {
+        [JsonProperty("fade_percent")]
+        public int FadePercent { get; set; } = 70;
+    }
 }
