@@ -11,16 +11,25 @@ namespace AECAgent.AutoCAD.Commands
         private readonly DrawingCommands _drawingCommands;
         private readonly QueryCommands _queryCommands;
         private readonly LayerCommands _layerCommands;
+        private readonly RasterDesignCommands _rasterCommands;
         private readonly Dictionary<string, Func<object, Document, Transaction, object>> _handlers;
+
+        /// <summary>
+        /// Commands that use SendStringToExecute instead of Transaction.
+        /// These are executed outside the transaction in OnIdle (tr passed as null).
+        /// </summary>
+        private readonly HashSet<string> _asyncCommands;
 
         public CommandRouter()
         {
             _drawingCommands = new DrawingCommands();
             _queryCommands = new QueryCommands();
             _layerCommands = new LayerCommands();
+            _rasterCommands = new RasterDesignCommands();
 
             _handlers = new Dictionary<string, Func<object, Document, Transaction, object>>(StringComparer.OrdinalIgnoreCase)
             {
+                // Drawing commands
                 { "draw_polyline", _drawingCommands.DrawPolyline },
                 { "draw_line", _drawingCommands.DrawLine },
                 { "draw_circle", _drawingCommands.DrawCircle },
@@ -28,16 +37,46 @@ namespace AECAgent.AutoCAD.Commands
                 { "draw_text", _drawingCommands.DrawText },
                 { "modify_entity", _drawingCommands.ModifyEntity },
                 { "delete_entity", _drawingCommands.DeleteEntity },
+                // Query commands
                 { "get_entities", _queryCommands.GetEntities },
                 { "get_entity", _queryCommands.GetEntity },
                 { "get_drawing_info", _queryCommands.GetDrawingInfo },
                 { "audit_layers", _queryCommands.AuditLayers },
+                // Layer commands
                 { "create_layer", _layerCommands.CreateLayer },
                 { "modify_layer", _layerCommands.ModifyLayer },
                 { "delete_layer", _layerCommands.DeleteLayer },
                 { "set_current_layer", _layerCommands.SetCurrentLayer },
-                { "zoom_extents", (p, d, t) => _queryCommands.ZoomExtents(p, d, t) }
+                { "zoom_extents", (p, d, t) => _queryCommands.ZoomExtents(p, d, t) },
+                // Raster Design commands (async - use SendStringToExecute)
+                { "raster_import_pdf", _rasterCommands.ImportPdf },
+                { "raster_cleanup", _rasterCommands.Cleanup },
+                { "raster_vectorize", _rasterCommands.Vectorize },
+                { "raster_ocr", _rasterCommands.OcrExtract },
+                // Raster Design commands (sync - use Transaction)
+                { "raster_attach_image", _rasterCommands.AttachImage },
+                { "raster_get_status", _rasterCommands.GetRasterStatus },
+                { "raster_get_entity_count", _rasterCommands.GetEntityCount }
             };
+
+            // Async commands use SendStringToExecute and do not need a Transaction.
+            // The OnIdle handler should execute these with DocumentLock but no Transaction.
+            _asyncCommands = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            {
+                "raster_import_pdf",
+                "raster_cleanup",
+                "raster_vectorize",
+                "raster_ocr"
+            };
+        }
+
+        /// <summary>
+        /// Returns true if the command uses SendStringToExecute and should be
+        /// executed outside a Transaction (only DocumentLock required).
+        /// </summary>
+        public bool IsAsyncCommand(string command)
+        {
+            return !string.IsNullOrWhiteSpace(command) && _asyncCommands.Contains(command);
         }
 
         public object Execute(string command, object parameters, Document doc, Transaction tr)

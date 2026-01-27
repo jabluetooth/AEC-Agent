@@ -151,4 +151,101 @@ namespace AECAgent.AutoCAD.Models
         [JsonProperty("name")]
         public string Name { get; set; }
     }
+
+    // =========================================================================
+    // Raster Design Parameters
+    // =========================================================================
+
+    public class ImportPdfParams
+    {
+        [JsonProperty("file_path")]
+        public string FilePath { get; set; }
+
+        [JsonProperty("page")]
+        public int Page { get; set; } = 1;
+
+        [JsonProperty("insertion_point")]
+        public double[] InsertionPoint { get; set; }
+
+        [JsonProperty("scale")]
+        public double Scale { get; set; } = 1.0;
+
+        [JsonProperty("rotation")]
+        public double Rotation { get; set; }
+
+        [JsonProperty("target_layer")]
+        public string TargetLayer { get; set; }
+    }
+
+    public class AttachImageParams
+    {
+        [JsonProperty("file_path")]
+        public string FilePath { get; set; }
+
+        [JsonProperty("image_name")]
+        public string ImageName { get; set; }
+
+        [JsonProperty("insertion_point")]
+        public double[] InsertionPoint { get; set; }
+
+        [JsonProperty("scale")]
+        public double Scale { get; set; } = 1.0;
+
+        [JsonProperty("target_layer")]
+        public string TargetLayer { get; set; }
+    }
+
+    public class RasterCleanupParams
+    {
+        [JsonProperty("operation")]
+        public string Operation { get; set; } = "despeckle";
+
+        [JsonProperty("blob_size")]
+        public int BlobSize { get; set; } = 3;
+
+        [JsonProperty("threshold_value")]
+        public int ThresholdValue { get; set; } = 128;
+
+        [JsonProperty("brightness")]
+        public int Brightness { get; set; }
+
+        [JsonProperty("contrast")]
+        public int Contrast { get; set; }
+    }
+
+    public class RasterVectorizeParams
+    {
+        [JsonProperty("method")]
+        public string Method { get; set; } = "auto";
+
+        [JsonProperty("target_layer")]
+        public string TargetLayer { get; set; }
+
+        [JsonProperty("detect_polygons")]
+        public bool DetectPolygons { get; set; } = true;
+
+        [JsonProperty("detect_arcs")]
+        public bool DetectArcs { get; set; } = true;
+
+        [JsonProperty("gap_tolerance")]
+        public double GapTolerance { get; set; } = 0.5;
+    }
+
+    public class RasterOcrParams
+    {
+        [JsonProperty("target_layer")]
+        public string TargetLayer { get; set; }
+
+        [JsonProperty("text_height")]
+        public double TextHeight { get; set; }
+
+        [JsonProperty("language")]
+        public string Language { get; set; } = "eng";
+    }
+
+    public class GetEntityCountParams
+    {
+        [JsonProperty("layer")]
+        public string Layer { get; set; }
+    }
 }

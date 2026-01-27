@@ -186,28 +186,51 @@ namespace AECAgent.AutoCAD
                     return;
                 }
 
-                using (var docLock = doc.LockDocument())
+                // Async commands use SendStringToExecute and run outside a Transaction.
+                // They only need a DocumentLock, not a Transaction.
+                if (_commandRouter.IsAsyncCommand(job.Command))
                 {
-                    using (var tr = doc.TransactionManager.StartTransaction())
+                    using (var docLock = doc.LockDocument())
                     {
                         try
                         {
-                            var result = _commandRouter.Execute(job.Command, job.Parameters, doc, tr);
-                            tr.Commit();
+                            var result = _commandRouter.Execute(job.Command, job.Parameters, doc, null);
                             job.SetResult(result);
                             MetricsCollector.RecordExecution(job.Command, DateTime.UtcNow - startTime, true);
                         }
-                        catch (Autodesk.AutoCAD.Runtime.Exception acEx)
-                        {
-                            tr.Abort();
-                            job.SetError($"AutoCAD error {acEx.ErrorStatus}: {acEx.Message}");
-                            MetricsCollector.RecordExecution(job.Command, DateTime.UtcNow - startTime, false);
-                        }
                         catch (System.Exception ex)
                         {
-                            tr.Abort();
                             job.SetError($"Error: {ex.Message}");
                             MetricsCollector.RecordExecution(job.Command, DateTime.UtcNow - startTime, false);
+                        }
+                    }
+                }
+                else
+                {
+                    // Standard transactional commands
+                    using (var docLock = doc.LockDocument())
+                    {
+                        using (var tr = doc.TransactionManager.StartTransaction())
+                        {
+                            try
+                            {
+                                var result = _commandRouter.Execute(job.Command, job.Parameters, doc, tr);
+                                tr.Commit();
+                                job.SetResult(result);
+                                MetricsCollector.RecordExecution(job.Command, DateTime.UtcNow - startTime, true);
+                            }
+                            catch (Autodesk.AutoCAD.Runtime.Exception acEx)
+                            {
+                                tr.Abort();
+                                job.SetError($"AutoCAD error {acEx.ErrorStatus}: {acEx.Message}");
+                                MetricsCollector.RecordExecution(job.Command, DateTime.UtcNow - startTime, false);
+                            }
+                            catch (System.Exception ex)
+                            {
+                                tr.Abort();
+                                job.SetError($"Error: {ex.Message}");
+                                MetricsCollector.RecordExecution(job.Command, DateTime.UtcNow - startTime, false);
+                            }
                         }
                     }
                 }

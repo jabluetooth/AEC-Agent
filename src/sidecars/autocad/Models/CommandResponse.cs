@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Newtonsoft.Json;
 
 namespace AECAgent.AutoCAD.Models
@@ -174,5 +175,111 @@ namespace AECAgent.AutoCAD.Models
 
         [JsonProperty("z")]
         public double Z { get; set; }
+    }
+
+    // =========================================================================
+    // Raster Design Results
+    // =========================================================================
+
+    public class RasterOperationResult
+    {
+        [JsonProperty("operation")]
+        public string Operation { get; set; }
+
+        [JsonProperty("status")]
+        public string Status { get; set; }
+
+        [JsonProperty("file_path")]
+        public string FilePath { get; set; }
+
+        [JsonProperty("message")]
+        public string Message { get; set; }
+
+        [JsonProperty("details")]
+        public Dictionary<string, object> Details { get; set; }
+    }
+
+    public class RasterImageAttachResult
+    {
+        [JsonProperty("handle")]
+        public string Handle { get; set; }
+
+        [JsonProperty("object_id")]
+        public string ObjectId { get; set; }
+
+        [JsonProperty("image_name")]
+        public string ImageName { get; set; }
+
+        [JsonProperty("file_path")]
+        public string FilePath { get; set; }
+
+        [JsonProperty("width_pixels")]
+        public int WidthPixels { get; set; }
+
+        [JsonProperty("height_pixels")]
+        public int HeightPixels { get; set; }
+
+        [JsonProperty("scale")]
+        public double Scale { get; set; }
+
+        [JsonProperty("insertion_point")]
+        public double[] InsertionPoint { get; set; }
+
+        [JsonProperty("attached")]
+        public bool Attached { get; set; }
+    }
+
+    public class RasterStatusResult
+    {
+        [JsonProperty("image_count")]
+        public int ImageCount { get; set; }
+
+        [JsonProperty("images")]
+        public List<RasterImageInfo> Images { get; set; }
+
+        [JsonProperty("has_raster_design")]
+        public bool HasRasterDesign { get; set; }
+    }
+
+    public class RasterImageInfo
+    {
+        [JsonProperty("name")]
+        public string Name { get; set; }
+
+        [JsonProperty("file_path")]
+        public string FilePath { get; set; }
+
+        [JsonProperty("width_pixels")]
+        public int WidthPixels { get; set; }
+
+        [JsonProperty("height_pixels")]
+        public int HeightPixels { get; set; }
+
+        [JsonProperty("is_loaded")]
+        public bool IsLoaded { get; set; }
+
+        [JsonProperty("file_found")]
+        public bool FileFound { get; set; }
+
+        [JsonProperty("resolution_x_dpi")]
+        public int ResolutionX { get; set; }
+
+        [JsonProperty("resolution_y_dpi")]
+        public int ResolutionY { get; set; }
+    }
+
+    public class EntityCountResult
+    {
+        [JsonProperty("total_entities")]
+        public int TotalEntities { get; set; }
+
+        [JsonProperty("by_type")]
+        public Dictionary<string, int> ByType { get; set; }
+
+        [JsonProperty("by_layer")]
+        public Dictionary<string, int> ByLayer { get; set; }
+
+        [JsonProperty("filtered_by_layer")]
+        public string FilteredByLayer { get; set; }
     }
 }

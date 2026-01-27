@@ -68,30 +68,61 @@ async def check_sidecar(sidecar_type: str = "revit") -> dict:
 
 
 @mcp.tool()
-async def sync_cache(categories: list[str] = None) -> dict:
+async def sync_cache(
+    sidecar_type: str = "autocad",
+    categories: list[str] = None,
+    file_path: str = None,
+    force: bool = False,
+) -> dict:
     """
-    Trigger a cache sync from the sidecar.
+    Trigger a cache sync to refresh cached data from the active CAD application.
+
+    For AutoCAD: triggers PostgreSQL metadata extraction from the current drawing.
+    For Revit: calls the Revit sidecar cache endpoint for rooms, levels, walls.
 
     Args:
-        categories: List of categories to sync (e.g., ["rooms", "levels"]).
-                   Default syncs all.
+        sidecar_type: "autocad" or "revit" (default "autocad")
+        categories: Revit only — categories to sync (e.g., ["rooms", "levels"]).
+        file_path: AutoCAD only — path to DWG file (optional, uses active doc if omitted).
+        force: Force re-extraction even if file hasn't changed (default False).
 
     Returns:
-        Sync results with counts
+        Sync results or queued status
     """
-    from aec_agent.mcp.sidecar_client import call_sidecar, SidecarError
+    from aec_agent.mcp.sidecar_client import call_sidecar, call_autocad_command, SidecarError
 
-    if categories is None:
-        categories = ["rooms", "levels", "walls"]
+    if sidecar_type not in ("autocad", "revit"):
+        return error_result(4002, f"Invalid sidecar_type: {sidecar_type}. Use 'autocad' or 'revit'")
 
     try:
-        result = await call_sidecar(
-            endpoint="/mcp/cache/sync",
-            method="POST",
-            payload={"categories": categories},
-            sidecar_type="revit"
-        )
-        return result
+        if sidecar_type == "autocad":
+            # AutoCAD: get drawing info then trigger PostgreSQL sync
+            if file_path:
+                result = await trigger_background_sync("autocad", file_path, force=force)
+                return success_result(data=result, message="AutoCAD cache sync triggered")
+            else:
+                # Get current drawing path from sidecar, then sync
+                drawing_info = await call_autocad_command("get_drawing_info")
+                if drawing_info.get("success") and drawing_info.get("data"):
+                    dwg_path = drawing_info["data"].get("file_path", "")
+                    if dwg_path:
+                        result = await trigger_background_sync("autocad", dwg_path, force=force)
+                        return success_result(data=result, message=f"AutoCAD cache sync triggered for {dwg_path}")
+                return success_result(
+                    data={"status": "no_file", "drawing_info": drawing_info},
+                    message="No active drawing file path found"
+                )
+        else:
+            # Revit: call sidecar cache endpoint
+            if categories is None:
+                categories = ["rooms", "levels", "walls"]
+            result = await call_sidecar(
+                endpoint="/mcp/cache/sync",
+                method="POST",
+                payload={"categories": categories},
+                sidecar_type="revit"
+            )
+            return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
 

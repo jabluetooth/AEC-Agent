@@ -21,7 +21,7 @@ from aec_agent.utils.logging import setup_logging
 from aec_agent.mcp.server import mcp, trigger_background_sync
 
 # Import tools to register them with the MCP server
-from aec_agent.mcp.tools import common, autocad, revit, metadata, mep_tools  # noqa: F401
+from aec_agent.mcp.tools import common, autocad, revit, metadata, mep_tools, raster_design  # noqa: F401
 
 logger = structlog.get_logger(__name__)
 

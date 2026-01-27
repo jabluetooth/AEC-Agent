@@ -131,7 +131,8 @@ class DatabasePool:
 
     async def _verify_extensions(self) -> None:
         """Verify PostGIS and pgvector extensions are installed."""
-        async with self.acquire() as conn:
+        # Use pool directly (not self.acquire) because _initialized is not yet True
+        async with self._pool.acquire() as conn:
             # Check PostGIS
             result = await conn.fetchval(
                 "SELECT EXISTS(SELECT 1 FROM pg_extension WHERE extname = 'postgis')"
