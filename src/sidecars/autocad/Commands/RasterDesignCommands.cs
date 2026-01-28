@@ -286,86 +286,343 @@ namespace AECAgent.AutoCAD.Commands
         }
 
         // =====================================================================
-        // Vectorize (async - uses SendStringToExecute)
+        // Vectorize — VTools (async - uses SendStringToExecute)
+        //
+        // AutoCAD Raster Design VTools: vline, vpline, varc, vcircle, vrect
+        // These convert raster entities to native AutoCAD vector entities.
+        // Each tool supports one-pick (1p) or multi-pick (2p) methods.
         // =====================================================================
 
         /// <summary>
-        /// Vectorize a raster image to AutoCAD vector entities using Raster Design.
-        /// Converts raster lines/arcs/text to AutoCAD lines, arcs, circles, and polylines.
+        /// Vectorize raster entities using VTools (vline, vpline, varc, vcircle, vrect).
+        /// These are the actual Raster Design vectorization commands that create
+        /// AutoCAD lines, polylines, arcs, circles, and rectangles from raster data.
+        ///
         /// Requires AutoCAD Raster Design to be installed.
+        /// Requires a bitonal raster image to be attached.
         /// </summary>
         public object Vectorize(object parameters, Document doc, Transaction tr)
         {
-            var param = Deserialize<RasterVectorizeParams>(parameters);
+            var param = Deserialize<VToolParams>(parameters);
 
-            string method = (param.Method ?? "auto").ToLowerInvariant();
-            var validMethods = new HashSet<string> { "auto", "outline", "centerline", "contour" };
-            if (!validMethods.Contains(method))
-                throw new ArgumentException($"Invalid vectorization method: {method}. Valid: {string.Join(", ", validMethods)}");
+            string tool = (param.Tool ?? "vpline").ToLowerInvariant();
+            var validTools = new HashSet<string> { "vline", "vpline", "varc", "vcircle", "vrect" };
+            if (!validTools.Contains(tool))
+                throw new ArgumentException($"Invalid VTool: {tool}. Valid: {string.Join(", ", validTools)}");
 
-            // Build vectorization command
-            // IVECTORIZE settings can be configured before running
+            string method = (param.Method ?? "1p").ToLowerInvariant();
+            if (method != "1p" && method != "2p")
+                throw new ArgumentException($"Invalid method: {method}. Valid: 1p, 2p");
+
+            // Set target layer if specified
             string setupCmds = "";
-
-            // Set vectorization options if specified
             if (!string.IsNullOrEmpty(param.TargetLayer))
             {
                 setupCmds += $"-LAYER\nS\n{param.TargetLayer}\n\n";
             }
 
-            string vectorizeCmd;
-            switch (method)
+            // Build VTool command
+            // Format: <tool>\n[method]\n[points...]\n
+            string vtoolCmd = $"{tool}\n";
+
+            // Add method selection (2p = multi-pick)
+            if (method == "2p")
             {
-                case "outline":
-                    // Outline vectorization - traces outer edges
-                    vectorizeCmd = "IVECTORIZE\nAll\nO\n";
-                    break;
-
-                case "centerline":
-                    // Centerline vectorization - finds center of lines
-                    vectorizeCmd = "IVECTORIZE\nAll\nC\n";
-                    break;
-
-                case "contour":
-                    // Contour vectorization
-                    vectorizeCmd = "IVECTORIZE\nAll\nN\n";
-                    break;
-
-                case "auto":
-                default:
-                    // Auto method - let Raster Design choose
-                    vectorizeCmd = "IVECTORIZE\nAll\n\n";
-                    break;
+                vtoolCmd += "2p\n";
             }
 
-            // Apply polygon detection if requested
-            if (param.DetectPolygons)
+            // Add click points if provided
+            if (param.Points != null && param.Points.Length > 0)
             {
-                vectorizeCmd += "Y\n"; // Yes to polygon detection
+                foreach (var pt in param.Points)
+                {
+                    if (pt != null && pt.Length >= 2)
+                    {
+                        vtoolCmd += $"{pt[0]},{pt[1]}\n";
+                    }
+                }
+                vtoolCmd += "\n"; // Enter to confirm
             }
 
-            // Apply arc detection if requested
-            if (param.DetectArcs)
-            {
-                vectorizeCmd += "Y\n"; // Yes to arc detection
-            }
-
-            string fullCmd = setupCmds + vectorizeCmd;
-            Logger.Info($"Queuing vectorization: method={method}");
+            string fullCmd = setupCmds + vtoolCmd;
+            Logger.Info($"Queuing VTool: {tool} (method={method})");
             doc.SendStringToExecute(fullCmd, false, false, true);
 
             return new RasterOperationResult
             {
-                Operation = "vectorize",
+                Operation = $"vtool_{tool}",
                 Status = "queued",
-                Message = $"Vectorization queued: method={method}",
+                Message = $"VTool '{tool}' queued (method={method})",
+                Details = new Dictionary<string, object>
+                {
+                    { "tool", tool },
+                    { "method", method },
+                    { "target_layer", param.TargetLayer ?? "(current)" },
+                    { "points_provided", param.Points?.Length ?? 0 }
+                }
+            };
+        }
+
+        // =====================================================================
+        // Follower VTools (async - uses SendStringToExecute)
+        //
+        // vfpline: follows raster polylines semi-automatically
+        // vfcontour: follows raster contours semi-automatically
+        // vf3dpoly: creates 3D polylines from raster
+        // =====================================================================
+
+        /// <summary>
+        /// Semi-automatic follower for tracing raster lines and contours.
+        /// The follower traces along raster data from a starting point,
+        /// automatically following the path and creating vector entities.
+        /// </summary>
+        public object Follower(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<FollowerParams>(parameters);
+
+            string followerType = (param.FollowerType ?? "polyline").ToLowerInvariant();
+            string cmd;
+            switch (followerType)
+            {
+                case "polyline":
+                    cmd = "vfpline";
+                    break;
+                case "contour":
+                    cmd = "vfcontour";
+                    break;
+                case "3dpoly":
+                    cmd = "vf3dpoly";
+                    break;
+                default:
+                    throw new ArgumentException($"Invalid follower type: {followerType}. Valid: polyline, contour, 3dpoly");
+            }
+
+            // Set target layer if specified
+            string setupCmds = "";
+            if (!string.IsNullOrEmpty(param.TargetLayer))
+            {
+                setupCmds += $"-LAYER\nS\n{param.TargetLayer}\n\n";
+            }
+
+            string followerCmd = $"{cmd}\n";
+
+            // Add start point if provided
+            if (param.StartPoint != null && param.StartPoint.Length >= 2)
+            {
+                followerCmd += $"{param.StartPoint[0]},{param.StartPoint[1]}\n";
+            }
+
+            string fullCmd = setupCmds + followerCmd;
+            Logger.Info($"Queuing follower: {cmd}");
+            doc.SendStringToExecute(fullCmd, false, false, true);
+
+            return new RasterOperationResult
+            {
+                Operation = $"follower_{followerType}",
+                Status = "queued",
+                Message = $"Follower '{cmd}' queued",
+                Details = new Dictionary<string, object>
+                {
+                    { "follower_type", followerType },
+                    { "command", cmd },
+                    { "target_layer", param.TargetLayer ?? "(current)" },
+                    { "start_point_provided", param.StartPoint != null }
+                }
+            };
+        }
+
+        // =====================================================================
+        // Process Image — ibfilter (async - uses SendStringToExecute)
+        //
+        // Bitonal image filters: smooth, thin, thicken, separate, skeletonize
+        // Critical for preparing bitonal images for vectorization.
+        // "Skeletonize" thins lines to 1px width for optimal VTool detection.
+        // =====================================================================
+
+        /// <summary>
+        /// Apply bitonal image filter using ibfilter.
+        /// Filters: smooth, thin, thicken, separate, skeletonize.
+        /// Skeletonize reduces lines to 1px width, which improves VTool accuracy.
+        /// </summary>
+        public object ProcessImage(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<ProcessImageParams>(parameters);
+
+            string filterType = (param.FilterType ?? "skeletonize").ToLowerInvariant();
+            var validFilters = new HashSet<string> { "smooth", "thin", "thicken", "separate", "skeletonize" };
+            if (!validFilters.Contains(filterType))
+                throw new ArgumentException($"Invalid filter type: {filterType}. Valid: {string.Join(", ", validFilters)}");
+
+            // ibfilter command with filter type
+            // Format: ibfilter <filter_type>
+            string cmdString = $"ibfilter\n{filterType}\n";
+
+            Logger.Info($"Queuing image processing: ibfilter {filterType}");
+            doc.SendStringToExecute(cmdString, false, false, true);
+
+            return new RasterOperationResult
+            {
+                Operation = $"process_image_{filterType}",
+                Status = "queued",
+                Message = $"Image filter '{filterType}' queued",
+                Details = new Dictionary<string, object>
+                {
+                    { "filter_type", filterType }
+                }
+            };
+        }
+
+        // =====================================================================
+        // REM Primitives — isline, isarc, iscircle, issmart
+        //
+        // Raster Entity Manipulation: detects raster entities and creates
+        // overlay primitives (line, arc, circle) from them.
+        // issmart auto-detects the most applicable primitive type.
+        // =====================================================================
+
+        /// <summary>
+        /// Create REM primitive from raster entity.
+        /// Types: smart (auto-detect), line, arc, circle.
+        /// Optionally provide a click point to target a specific raster entity.
+        /// </summary>
+        public object CreatePrimitive(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<CreatePrimitiveParams>(parameters);
+
+            string primitiveType = (param.PrimitiveType ?? "smart").ToLowerInvariant();
+            string cmd;
+            switch (primitiveType)
+            {
+                case "smart":
+                    cmd = "issmart";
+                    break;
+                case "line":
+                    cmd = "isline";
+                    break;
+                case "arc":
+                    cmd = "isarc";
+                    break;
+                case "circle":
+                    cmd = "iscircle";
+                    break;
+                default:
+                    throw new ArgumentException($"Invalid primitive type: {primitiveType}. Valid: smart, line, arc, circle");
+            }
+
+            string cmdString = $"{cmd}\n";
+
+            // Add click point if provided
+            if (param.Point != null && param.Point.Length >= 2)
+            {
+                cmdString += $"{param.Point[0]},{param.Point[1]}\n";
+            }
+
+            Logger.Info($"Queuing REM primitive creation: {cmd}");
+            doc.SendStringToExecute(cmdString, false, false, true);
+
+            return new RasterOperationResult
+            {
+                Operation = $"create_primitive_{primitiveType}",
+                Status = "queued",
+                Message = $"REM primitive '{cmd}' queued",
+                Details = new Dictionary<string, object>
+                {
+                    { "primitive_type", primitiveType },
+                    { "command", cmd },
+                    { "point_provided", param.Point != null }
+                }
+            };
+        }
+
+        // =====================================================================
+        // Select Raster Entities — isebrcon, isebrsmart
+        //
+        // Select complete raster entities within a bitonal region.
+        // isebrcon: selects by rectangular region crossing
+        // isebrsmart: uses smart detection within a region
+        // =====================================================================
+
+        /// <summary>
+        /// Select raster entities in a rectangular region.
+        /// Selected entities become REM objects that can be converted to primitives.
+        /// </summary>
+        public object SelectRasterEntities(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<SelectRasterEntitiesParams>(parameters);
+
+            string method = (param.Method ?? "smart").ToLowerInvariant();
+            string cmd;
+            switch (method)
+            {
+                case "smart":
+                    cmd = "isebrsmart";
+                    break;
+                case "crossing":
+                    cmd = "isebrcon";
+                    break;
+                default:
+                    throw new ArgumentException($"Invalid selection method: {method}. Valid: smart, crossing");
+            }
+
+            string cmdString = $"{cmd}\n";
+
+            // Add region corners if provided
+            if (param.Corner1 != null && param.Corner1.Length >= 2 &&
+                param.Corner2 != null && param.Corner2.Length >= 2)
+            {
+                cmdString += $"{param.Corner1[0]},{param.Corner1[1]}\n";
+                cmdString += $"{param.Corner2[0]},{param.Corner2[1]}\n";
+            }
+
+            Logger.Info($"Queuing raster entity selection: {cmd}");
+            doc.SendStringToExecute(cmdString, false, false, true);
+
+            return new RasterOperationResult
+            {
+                Operation = $"select_raster_{method}",
+                Status = "queued",
+                Message = $"Raster entity selection '{cmd}' queued",
                 Details = new Dictionary<string, object>
                 {
                     { "method", method },
-                    { "target_layer", param.TargetLayer ?? "(current)" },
-                    { "detect_polygons", param.DetectPolygons },
-                    { "detect_arcs", param.DetectArcs },
-                    { "gap_tolerance", param.GapTolerance }
+                    { "command", cmd },
+                    { "region_provided", param.Corner1 != null && param.Corner2 != null }
+                }
+            };
+        }
+
+        // =====================================================================
+        // Text Recognition — irectext (async - uses SendStringToExecute)
+        // =====================================================================
+
+        /// <summary>
+        /// Convert raster text to AutoCAD TEXT entities using irectext.
+        /// Uses the Raster Design text recognition engine.
+        /// Configure settings first with irecsetup if needed.
+        /// </summary>
+        public object RecognizeText(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<RecognizeTextParams>(parameters);
+
+            string setupCmds = "";
+            if (!string.IsNullOrEmpty(param.TargetLayer))
+            {
+                setupCmds += $"-LAYER\nS\n{param.TargetLayer}\n\n";
+            }
+
+            string cmdString = setupCmds + "irectext\n";
+
+            Logger.Info("Queuing raster text recognition: irectext");
+            doc.SendStringToExecute(cmdString, false, false, true);
+
+            return new RasterOperationResult
+            {
+                Operation = "recognize_text",
+                Status = "queued",
+                Message = "Raster text recognition (irectext) queued",
+                Details = new Dictionary<string, object>
+                {
+                    { "target_layer", param.TargetLayer ?? "(current)" }
                 }
             };
         }
@@ -383,8 +640,8 @@ namespace AECAgent.AutoCAD.Commands
         {
             var param = Deserialize<RasterOcrParams>(parameters);
 
-            // Build OCR command
-            // IOCR recognizes text in raster images and converts to AutoCAD text
+            // Build text recognition command using irectext
+            // (Raster Design command for converting raster text to AutoCAD text)
             string targetLayer = !string.IsNullOrEmpty(param.TargetLayer)
                 ? param.TargetLayer
                 : "";
@@ -395,20 +652,18 @@ namespace AECAgent.AutoCAD.Commands
                 setupCmds += $"-LAYER\nS\n{targetLayer}\n\n";
             }
 
-            // Set text height if specified
-            string textHeight = param.TextHeight > 0 ? param.TextHeight.ToString("F2") : "";
-
-            string ocrCmd = "IOCR\nAll\n";
+            // irectext: Converts raster text to AutoCAD text entities
+            string ocrCmd = "irectext\n";
 
             string fullCmd = setupCmds + ocrCmd;
-            Logger.Info("Queuing OCR text extraction");
+            Logger.Info("Queuing raster text recognition: irectext");
             doc.SendStringToExecute(fullCmd, false, false, true);
 
             return new RasterOperationResult
             {
                 Operation = "ocr_extract",
                 Status = "queued",
-                Message = "OCR text extraction queued",
+                Message = "Raster text recognition (irectext) queued",
                 Details = new Dictionary<string, object>
                 {
                     { "target_layer", targetLayer },

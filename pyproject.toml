@@ -43,6 +43,9 @@ dependencies = [
     "alembic>=1.13.0",
     # Semantic search
     "sentence-transformers>=2.2.0",
+    # PDF-to-image conversion (raster design pipeline)
+    "PyMuPDF>=1.24.0",
+    "Pillow>=10.0.0",
 ]
 
 [project.optional-dependencies]

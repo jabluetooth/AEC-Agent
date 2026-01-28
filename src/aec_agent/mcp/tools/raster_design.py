@@ -2,15 +2,20 @@
 MCP tools for AutoCAD Raster Design integration.
 
 Provides PDF-to-DWG conversion pipeline:
-1. Import PDF into AutoCAD (vector PDFs)
-2. Attach raster images (scanned PDFs / images)
-3. Cleanup raster images (despeckle, deskew, threshold)
-4. Vectorize raster to AutoCAD entities
-5. OCR text extraction
+1. Convert PDF to bitonal TIFF (Python-side, via PyMuPDF + Pillow)
+2. Import PDF into AutoCAD (vector PDFs via -PDFIMPORT)
+3. Attach raster images (scanned PDFs converted to TIFF / raw images)
+4. Cleanup raster images (despeckle, deskew, threshold)
+5. Vectorize raster to AutoCAD entities
+6. OCR text extraction
 
 Async commands (import_pdf, cleanup, vectorize, ocr) use SendStringToExecute
 on the sidecar and return a "queued" status immediately. Use
 raster_get_status / raster_get_entity_count to check results after execution.
+
+IMPORTANT: AutoCAD Raster Design cannot attach PDF files directly. PDFs must
+be converted to a supported raster format (bitonal TIFF) first using
+raster_convert_pdf or the raster_pdf_to_vector_pipeline.
 """
 
 from typing import Optional, List
@@ -19,6 +24,7 @@ from aec_agent.mcp.server import mcp, get_lock
 from aec_agent.mcp.concurrency import with_tool_lock
 from aec_agent.mcp.sidecar_client import call_autocad_command, SidecarError
 from .base import success_result, error_result, ErrorCode
+from .pdf_converter import convert_pdf_to_bitonal_tiff
 
 import structlog
 
@@ -91,6 +97,83 @@ async def raster_import_pdf(
         return error_result(e.code, e.message, e.details)
     except Exception as e:
         logger.error("Unexpected error in raster_import_pdf", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+# =============================================================================
+# PDF to Bitonal TIFF Conversion (Python-side)
+# =============================================================================
+
+@mcp.tool()
+async def raster_convert_pdf(
+    file_path: str,
+    page: int = 1,
+    dpi: int = 300,
+    threshold: int = 128,
+    output_dir: Optional[str] = None,
+) -> dict:
+    """
+    Convert a PDF file to a bitonal (1-bit black & white) TIFF image.
+
+    AutoCAD Raster Design cannot attach PDF files directly. This tool converts
+    a PDF page to a bitonal TIFF that can be attached via raster_attach_image
+    and processed with Raster Design tools (cleanup, vectorize, OCR).
+
+    The conversion runs on the Python server (no AutoCAD needed). Use the
+    returned file path with raster_attach_image to load it into AutoCAD.
+
+    Args:
+        file_path: Absolute path to the PDF file
+        page: PDF page number to convert (1-based, default 1)
+        dpi: Render resolution (default 300 — good for construction drawings)
+        threshold: Grayscale-to-bitonal threshold 0-255 (default 128).
+                   Pixels darker than threshold become black.
+        output_dir: Directory for output TIFF (default: same folder as PDF)
+
+    Returns:
+        Conversion result with output TIFF path, dimensions, and file size
+
+    Example:
+        result = raster_convert_pdf("C:/plans/floor1.pdf", page=1, dpi=300)
+        tiff_path = result["data"]["tiff_path"]
+        raster_attach_image(tiff_path, scale=1.0)
+    """
+    if not file_path or not file_path.strip():
+        return error_result(ErrorCode.INVALID_PARAMS, "file_path is required")
+
+    try:
+        import os
+
+        tiff_path = convert_pdf_to_bitonal_tiff(
+            pdf_path=file_path.strip(),
+            page=page,
+            dpi=dpi,
+            threshold=threshold,
+            output_dir=output_dir,
+        )
+
+        file_size = os.path.getsize(tiff_path)
+
+        return success_result(
+            data={
+                "tiff_path": tiff_path,
+                "source_pdf": file_path.strip(),
+                "page": page,
+                "dpi": dpi,
+                "threshold": threshold,
+                "file_size_bytes": file_size,
+            },
+            message=f"Converted PDF page {page} to bitonal TIFF: {tiff_path}",
+        )
+
+    except FileNotFoundError as e:
+        return error_result(ErrorCode.INVALID_PARAMS, str(e))
+    except ValueError as e:
+        return error_result(ErrorCode.INVALID_PARAMS, str(e))
+    except RuntimeError as e:
+        return error_result(ErrorCode.INTERNAL_ERROR, str(e))
+    except Exception as e:
+        logger.error("Unexpected error in raster_convert_pdf", error=str(e), exc_info=True)
         return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
 
 
@@ -224,56 +307,63 @@ async def raster_cleanup(
 
 
 # =============================================================================
-# Vectorize
+# VTools — Vectorize Raster Entities (vline, vpline, varc, vcircle, vrect)
 # =============================================================================
 
 @mcp.tool()
 @with_tool_lock(get_lock())
 async def raster_vectorize(
-    method: str = "auto",
+    tool: str = "vpline",
+    method: str = "1p",
+    points: Optional[List[List[float]]] = None,
     target_layer: Optional[str] = None,
-    detect_polygons: bool = True,
-    detect_arcs: bool = True,
-    gap_tolerance: float = 0.5
 ) -> dict:
     """
-    Vectorize raster images to AutoCAD vector entities using Raster Design.
+    Vectorize raster entities to AutoCAD vector objects using Raster Design VTools.
 
-    Converts raster lines, arcs, and shapes into native AutoCAD entities
-    (lines, arcs, circles, polylines). Requires AutoCAD Raster Design.
+    Uses the actual Raster Design vectorization commands (vline, vpline, varc,
+    vcircle, vrect) to convert bitonal raster entities into native AutoCAD
+    lines, polylines, arcs, circles, and rectangles.
 
+    Requires AutoCAD Raster Design and a bitonal raster image to be attached.
     This operation is queued — use raster_get_entity_count to verify results.
 
     Args:
-        method: Vectorization method. Options:
-            - "auto": Let Raster Design choose the best method (default)
-            - "outline": Trace outer edges of raster lines
-            - "centerline": Find centerlines of raster lines (best for drawings)
-            - "contour": Contour-based vectorization
+        tool: VTool to use. Options:
+            - "vline": Convert raster line to vector line
+            - "vpline": Convert raster line to vector polyline (default)
+            - "varc": Convert raster arc to vector arc
+            - "vcircle": Convert raster circle to vector circle
+            - "vrect": Convert raster rectangle to vector rectangle
+        method: Pick method. Options:
+            - "1p": One-pick — single click on raster entity (default)
+            - "2p": Multi-pick — click multiple points to define entity
+        points: Click points as [[x, y], ...]. If omitted, AutoCAD
+                prompts for interactive picking.
         target_layer: Layer to place vectorized entities on (optional)
-        detect_polygons: Detect and create closed polygons (default True)
-        detect_arcs: Detect and create arcs/circles (default True)
-        gap_tolerance: Gap tolerance for closing lines, in drawing units (default 0.5)
 
     Returns:
-        Queued operation status with vectorization parameters
+        Queued operation status
 
     Example:
-        raster_vectorize("centerline", target_layer="Vectorized")
+        raster_vectorize("vpline", method="1p", points=[[100, 200]])
     """
-    valid_methods = {"auto", "outline", "centerline", "contour"}
-    if method not in valid_methods:
+    valid_tools = {"vline", "vpline", "varc", "vcircle", "vrect"}
+    if tool not in valid_tools:
         return error_result(
             ErrorCode.INVALID_PARAMS,
-            f"Invalid method: {method}. Valid: {', '.join(sorted(valid_methods))}"
+            f"Invalid tool: {tool}. Valid: {', '.join(sorted(valid_tools))}"
         )
 
+    if method not in ("1p", "2p"):
+        return error_result(ErrorCode.INVALID_PARAMS, "method must be '1p' or '2p'")
+
     params = {
+        "tool": tool,
         "method": method,
-        "detect_polygons": detect_polygons,
-        "detect_arcs": detect_arcs,
-        "gap_tolerance": float(gap_tolerance),
     }
+    if points:
+        params["points"] = points
     if target_layer:
         params["target_layer"] = target_layer.strip()
 
@@ -432,6 +522,273 @@ async def raster_fade_image(
 
 
 # =============================================================================
+# Process Image — ibfilter (bitonal image filtering)
+# =============================================================================
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def raster_process_image(
+    filter_type: str = "skeletonize",
+) -> dict:
+    """
+    Apply bitonal image filter using AutoCAD Raster Design ibfilter.
+
+    Prepares bitonal raster images for vectorization by processing pixel data.
+    "Skeletonize" reduces all lines to 1px width, which significantly improves
+    VTool detection accuracy for vline/vpline/varc/vcircle.
+
+    Requires AutoCAD Raster Design and a bitonal raster image.
+    This operation is queued.
+
+    Args:
+        filter_type: Filter to apply. Options:
+            - "smooth": Smooth jagged edges on lines
+            - "thin": Reduce line width by one pixel per side
+            - "thicken": Increase line width by one pixel per side
+            - "separate": Separate touching lines at junctions
+            - "skeletonize": Reduce all lines to 1px centerlines (default, best for vectorization)
+
+    Returns:
+        Queued operation status
+
+    Example:
+        raster_process_image("skeletonize")
+    """
+    valid_filters = {"smooth", "thin", "thicken", "separate", "skeletonize"}
+    if filter_type not in valid_filters:
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"Invalid filter_type: {filter_type}. Valid: {', '.join(sorted(valid_filters))}"
+        )
+
+    try:
+        result = await call_autocad_command("raster_process_image", {
+            "filter_type": filter_type,
+        })
+        return result
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in raster_process_image", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+# =============================================================================
+# REM Primitives — isline, isarc, iscircle, issmart
+# =============================================================================
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def raster_create_primitive(
+    primitive_type: str = "smart",
+    point_x: Optional[float] = None,
+    point_y: Optional[float] = None,
+) -> dict:
+    """
+    Create a REM (Raster Entity Manipulation) primitive from raster data.
+
+    Detects a raster entity (line, arc, or circle) and creates an overlay
+    primitive that represents it as a vector object. Use "smart" to
+    auto-detect the best primitive type.
+
+    Provide coordinates to target a specific raster entity. If omitted,
+    AutoCAD prompts for interactive picking.
+
+    Args:
+        primitive_type: Primitive type. Options:
+            - "smart": Auto-detect best type (issmart, default)
+            - "line": Line primitive (isline)
+            - "arc": Arc primitive (isarc)
+            - "circle": Circle primitive (iscircle)
+        point_x: X coordinate of raster entity to convert (optional)
+        point_y: Y coordinate of raster entity to convert (optional)
+
+    Returns:
+        Queued operation status
+
+    Example:
+        raster_create_primitive("smart", point_x=100.0, point_y=200.0)
+    """
+    valid_types = {"smart", "line", "arc", "circle"}
+    if primitive_type not in valid_types:
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"Invalid primitive_type: {primitive_type}. Valid: {', '.join(sorted(valid_types))}"
+        )
+
+    params = {"primitive_type": primitive_type}
+    if point_x is not None and point_y is not None:
+        params["point"] = [float(point_x), float(point_y)]
+
+    try:
+        result = await call_autocad_command("raster_create_primitive", params)
+        return result
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in raster_create_primitive", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+# =============================================================================
+# Select Raster Entities — isebrcon, isebrsmart
+# =============================================================================
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def raster_select_entities(
+    method: str = "smart",
+    corner1_x: Optional[float] = None,
+    corner1_y: Optional[float] = None,
+    corner2_x: Optional[float] = None,
+    corner2_y: Optional[float] = None,
+) -> dict:
+    """
+    Select raster entities within a rectangular region.
+
+    Uses Raster Design's bitonal region selection to identify and select
+    complete raster entities. Selected entities become REM objects that
+    can be converted to primitives with raster_create_primitive.
+
+    Args:
+        method: Selection method. Options:
+            - "smart": Smart entity detection (isebrsmart, default)
+            - "crossing": Crossing rectangle selection (isebrcon)
+        corner1_x: First corner X coordinate (optional)
+        corner1_y: First corner Y coordinate (optional)
+        corner2_x: Opposite corner X coordinate (optional)
+        corner2_y: Opposite corner Y coordinate (optional)
+
+    Returns:
+        Queued operation status
+
+    Example:
+        raster_select_entities("smart", 0, 0, 1000, 1000)
+    """
+    valid_methods = {"smart", "crossing"}
+    if method not in valid_methods:
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"Invalid method: {method}. Valid: {', '.join(sorted(valid_methods))}"
+        )
+
+    params = {"method": method}
+    if (corner1_x is not None and corner1_y is not None and
+            corner2_x is not None and corner2_y is not None):
+        params["corner1"] = [float(corner1_x), float(corner1_y)]
+        params["corner2"] = [float(corner2_x), float(corner2_y)]
+
+    try:
+        result = await call_autocad_command("raster_select_entities", params)
+        return result
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in raster_select_entities", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+# =============================================================================
+# Follower VTools — vfpline, vfcontour, vf3dpoly
+# =============================================================================
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def raster_follower(
+    follower_type: str = "polyline",
+    start_point_x: Optional[float] = None,
+    start_point_y: Optional[float] = None,
+    target_layer: Optional[str] = None,
+) -> dict:
+    """
+    Semi-automatic follower for tracing raster lines and contours.
+
+    The follower traces along raster data from a starting point,
+    automatically following the raster path and creating vector entities.
+    Useful for complex geometry like contour lines and winding paths.
+
+    Provide a starting point to begin tracing. If omitted, AutoCAD
+    prompts for interactive picking.
+
+    Args:
+        follower_type: Follower type. Options:
+            - "polyline": Follow raster polyline path (vfpline, default)
+            - "contour": Follow raster contour line (vfcontour)
+            - "3dpoly": Create 3D polyline from raster (vf3dpoly)
+        start_point_x: X coordinate to start following from (optional)
+        start_point_y: Y coordinate to start following from (optional)
+        target_layer: Layer to place followed entities on (optional)
+
+    Returns:
+        Queued operation status
+
+    Example:
+        raster_follower("polyline", start_point_x=50.0, start_point_y=100.0)
+    """
+    valid_types = {"polyline", "contour", "3dpoly"}
+    if follower_type not in valid_types:
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"Invalid follower_type: {follower_type}. Valid: {', '.join(sorted(valid_types))}"
+        )
+
+    params = {"follower_type": follower_type}
+    if start_point_x is not None and start_point_y is not None:
+        params["start_point"] = [float(start_point_x), float(start_point_y)]
+    if target_layer:
+        params["target_layer"] = target_layer.strip()
+
+    try:
+        result = await call_autocad_command("raster_follower", params)
+        return result
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in raster_follower", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+# =============================================================================
+# Text Recognition — irectext
+# =============================================================================
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def raster_recognize_text(
+    target_layer: Optional[str] = None,
+) -> dict:
+    """
+    Recognize and convert raster text to AutoCAD TEXT entities.
+
+    Uses Raster Design's irectext command to detect text in bitonal
+    raster images and create native AutoCAD text entities.
+
+    Configure recognition settings first with AutoCAD's irecsetup if needed.
+
+    Args:
+        target_layer: Layer to place recognized text entities on (optional)
+
+    Returns:
+        Queued operation status
+
+    Example:
+        raster_recognize_text(target_layer="OCR_Text")
+    """
+    params = {}
+    if target_layer:
+        params["target_layer"] = target_layer.strip()
+
+    try:
+        result = await call_autocad_command("raster_recognize_text", params)
+        return result
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in raster_recognize_text", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+# =============================================================================
 # PostgreSQL Storage
 # =============================================================================
 
@@ -541,7 +898,7 @@ async def raster_pdf_to_vector_pipeline(
     page: int = 1,
     scale: float = 1.0,
     mode: str = "auto",
-    vectorize_method: str = "centerline",
+    vectorize_method: str = "vpline",
     target_layer: Optional[str] = None,
     skip_ocr: bool = False,
     fade_percent: int = 70,
@@ -553,8 +910,14 @@ async def raster_pdf_to_vector_pipeline(
     Orchestrates the full Raster Design workflow:
     1. Auto-detects PDF type (vector vs scanned)
     2. For vector PDFs: imports directly via PDFIMPORT
-    3. For scanned PDFs: attaches image, converts to bitonal, despeckles,
-       deskews, vectorizes centerlines, runs OCR text extraction
+    3. For scanned PDFs:
+       a. Converts PDF to bitonal TIFF (Python-side, 300 DPI)
+       b. Attaches bitonal TIFF to AutoCAD
+       c. Despeckles (removes scan noise)
+       d. Deskews (straightens rotation)
+       e. Skeletonizes via ibfilter (thins lines to 1px for VTool detection)
+       f. Vectorizes using VTools (vpline for polylines)
+       g. Recognizes text via irectext
     4. Fades original raster image for background reference
     5. Extracts all entities and stores in PostgreSQL with geometry and embeddings
 
@@ -565,9 +928,9 @@ async def raster_pdf_to_vector_pipeline(
         page: PDF page to import (default 1)
         scale: Import scale factor (default 1.0)
         mode: Detection mode — "auto", "vector", or "scanned" (default "auto")
-        vectorize_method: Vectorization method — "centerline", "outline", "auto" (default "centerline")
+        vectorize_method: VTool to use — "vpline", "vline", "varc", "vcircle" (default "vpline")
         target_layer: Layer for vectorized entities (optional)
-        skip_ocr: Skip OCR text extraction (default False)
+        skip_ocr: Skip text recognition (default False)
         fade_percent: Raster fade percentage 0-100 (default 70)
         store_in_db: Store results in PostgreSQL (default True)
 
@@ -583,8 +946,12 @@ async def raster_pdf_to_vector_pipeline(
     if mode not in ("auto", "vector", "scanned"):
         return error_result(ErrorCode.INVALID_PARAMS, "mode must be 'auto', 'vector', or 'scanned'")
 
-    if vectorize_method not in ("auto", "outline", "centerline", "contour"):
-        return error_result(ErrorCode.INVALID_PARAMS, "Invalid vectorize_method")
+    valid_vtools = ("vpline", "vline", "varc", "vcircle", "vrect")
+    if vectorize_method not in valid_vtools:
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"Invalid vectorize_method: {vectorize_method}. Valid: {', '.join(valid_vtools)}"
+        )
 
     steps_completed = []
     step_errors = []
@@ -643,9 +1010,37 @@ async def raster_pdf_to_vector_pipeline(
         if detected_mode == "scanned":
             # ---- Scanned PDF: Raster Design pipeline ----
 
-            # Attach PDF as raster image
+            # Step A: Convert PDF to bitonal TIFF (Python-side)
+            # AutoCAD Raster Design cannot attach PDF files directly.
+            # We render the PDF page to a high-DPI bitonal TIFF first.
+            try:
+                tiff_path = convert_pdf_to_bitonal_tiff(
+                    pdf_path=file_path.strip(),
+                    page=page,
+                    dpi=300,
+                    threshold=128,
+                )
+                steps_completed.append({
+                    "step": "convert_pdf_to_bitonal_tiff",
+                    "success": True,
+                    "tiff_path": tiff_path,
+                })
+            except Exception as e:
+                logger.error("PDF to TIFF conversion failed", error=str(e), exc_info=True)
+                steps_completed.append({
+                    "step": "convert_pdf_to_bitonal_tiff",
+                    "success": False,
+                    "error": str(e),
+                })
+                return error_result(
+                    ErrorCode.INTERNAL_ERROR,
+                    f"PDF to bitonal TIFF conversion failed: {e}",
+                    f"Steps completed: {[s['step'] for s in steps_completed]}",
+                )
+
+            # Step B: Attach the bitonal TIFF as a raster image in AutoCAD
             attach_params = {
-                "file_path": file_path.strip(),
+                "file_path": tiff_path,
                 "insertion_point": [0.0, 0.0],
                 "scale": float(scale),
             }
@@ -654,22 +1049,10 @@ async def raster_pdf_to_vector_pipeline(
 
             attach_result = await call_autocad_command("raster_attach_image", attach_params)
             steps_completed.append({
-                "step": "attach_image",
+                "step": "attach_bitonal_tiff",
                 "success": attach_result.get("success", False),
+                "tiff_path": tiff_path,
             })
-
-            # Threshold: convert to bitonal (black & white)
-            threshold_result = await call_autocad_command("raster_cleanup", {
-                "operation": "threshold",
-                "threshold_value": 128,
-            })
-            steps_completed.append({
-                "step": "threshold_bitonal",
-                "success": threshold_result.get("success", False),
-            })
-
-            # Barrier: wait for threshold to complete
-            await call_autocad_command("raster_get_entity_count")
 
             # Despeckle: remove noise spots
             despeckle_result = await call_autocad_command("raster_cleanup", {
@@ -696,21 +1079,32 @@ async def raster_pdf_to_vector_pipeline(
             # Barrier
             await call_autocad_command("raster_get_entity_count")
 
-            # Vectorize: trace lines from raster
+            # Process Image: skeletonize (thin all lines to 1px for VTool detection)
+            skeletonize_result = await call_autocad_command("raster_process_image", {
+                "filter_type": "skeletonize",
+            })
+            steps_completed.append({
+                "step": "process_image_skeletonize",
+                "success": skeletonize_result.get("success", False),
+            })
+
+            # Barrier
+            await call_autocad_command("raster_get_entity_count")
+
+            # Vectorize: use VTool to convert raster entities to vectors
+            # Uses the actual Raster Design VTool commands (vpline, vline, etc.)
             vectorize_params = {
-                "method": vectorize_method,
-                "detect_polygons": True,
-                "detect_arcs": True,
-                "gap_tolerance": 0.5,
+                "tool": vectorize_method,
+                "method": "1p",
             }
             if target_layer:
                 vectorize_params["target_layer"] = target_layer.strip()
 
             vectorize_result = await call_autocad_command("raster_vectorize", vectorize_params)
             steps_completed.append({
-                "step": "vectorize",
+                "step": "vectorize_vtool",
                 "success": vectorize_result.get("success", False),
-                "method": vectorize_method,
+                "vtool": vectorize_method,
             })
 
             # Barrier: get post-vectorize count
@@ -724,16 +1118,16 @@ async def raster_pdf_to_vector_pipeline(
                 "new_entities": post_vectorize_count - baseline_count,
             })
 
-            # OCR: extract text from raster
+            # Text Recognition: irectext (convert raster text to AutoCAD text)
             if not skip_ocr:
-                ocr_params = {"language": "eng"}
+                text_params = {}
                 if target_layer:
-                    ocr_params["target_layer"] = target_layer.strip()
+                    text_params["target_layer"] = target_layer.strip()
 
-                ocr_result = await call_autocad_command("raster_ocr", ocr_params)
+                text_result = await call_autocad_command("raster_recognize_text", text_params)
                 steps_completed.append({
-                    "step": "ocr",
-                    "success": ocr_result.get("success", False),
+                    "step": "recognize_text",
+                    "success": text_result.get("success", False),
                 })
 
                 # Barrier

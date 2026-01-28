@@ -53,6 +53,12 @@ namespace AECAgent.AutoCAD.Commands
                 { "raster_cleanup", _rasterCommands.Cleanup },
                 { "raster_vectorize", _rasterCommands.Vectorize },
                 { "raster_ocr", _rasterCommands.OcrExtract },
+                // Raster Design — VTools, Followers, Primitives, Processing (async)
+                { "raster_process_image", _rasterCommands.ProcessImage },
+                { "raster_create_primitive", _rasterCommands.CreatePrimitive },
+                { "raster_select_entities", _rasterCommands.SelectRasterEntities },
+                { "raster_follower", _rasterCommands.Follower },
+                { "raster_recognize_text", _rasterCommands.RecognizeText },
                 // Raster Design commands (sync - use Transaction)
                 { "raster_attach_image", _rasterCommands.AttachImage },
                 { "raster_get_status", _rasterCommands.GetRasterStatus },
@@ -68,7 +74,12 @@ namespace AECAgent.AutoCAD.Commands
                 "raster_import_pdf",
                 "raster_cleanup",
                 "raster_vectorize",
-                "raster_ocr"
+                "raster_ocr",
+                "raster_process_image",
+                "raster_create_primitive",
+                "raster_select_entities",
+                "raster_follower",
+                "raster_recognize_text"
             };
         }
 

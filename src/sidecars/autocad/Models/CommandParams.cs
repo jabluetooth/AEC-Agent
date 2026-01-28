@@ -272,4 +272,90 @@ namespace AECAgent.AutoCAD.Models
         [JsonProperty("fade_percent")]
         public int FadePercent { get; set; } = 70;
     }
+
+    // =========================================================================
+    // Raster Design — Image Processing, Primitives, VTools, Followers
+    // =========================================================================
+
+    /// <summary>
+    /// Parameters for ibfilter (image processing filters for bitonal images).
+    /// Filters: smooth, thin, thicken, separate, skeletonize.
+    /// </summary>
+    public class ProcessImageParams
+    {
+        [JsonProperty("filter_type")]
+        public string FilterType { get; set; } = "skeletonize";
+    }
+
+    /// <summary>
+    /// Parameters for REM primitive creation (isline, isarc, iscircle, issmart).
+    /// Creates overlay primitives from detected raster entities.
+    /// </summary>
+    public class CreatePrimitiveParams
+    {
+        [JsonProperty("primitive_type")]
+        public string PrimitiveType { get; set; } = "smart";
+
+        [JsonProperty("point")]
+        public double[] Point { get; set; }
+    }
+
+    /// <summary>
+    /// Parameters for VTools vectorization (vline, vpline, varc, vcircle, vrect).
+    /// Converts raster entities to native AutoCAD vector entities.
+    /// </summary>
+    public class VToolParams
+    {
+        [JsonProperty("tool")]
+        public string Tool { get; set; } = "vpline";
+
+        [JsonProperty("method")]
+        public string Method { get; set; } = "1p";
+
+        [JsonProperty("points")]
+        public double[][] Points { get; set; }
+
+        [JsonProperty("target_layer")]
+        public string TargetLayer { get; set; }
+    }
+
+    /// <summary>
+    /// Parameters for VTools followers (vfpline, vfcontour, vf3dpoly).
+    /// Semi-automatic tracing of raster lines and contours.
+    /// </summary>
+    public class FollowerParams
+    {
+        [JsonProperty("follower_type")]
+        public string FollowerType { get; set; } = "polyline";
+
+        [JsonProperty("start_point")]
+        public double[] StartPoint { get; set; }
+
+        [JsonProperty("target_layer")]
+        public string TargetLayer { get; set; }
+    }
+
+    /// <summary>
+    /// Parameters for raster text recognition (irectext).
+    /// </summary>
+    public class RecognizeTextParams
+    {
+        [JsonProperty("target_layer")]
+        public string TargetLayer { get; set; }
+    }
+
+    /// <summary>
+    /// Parameters for selecting raster entities in a region (isebrcon, isebrsmart).
+    /// </summary>
+    public class SelectRasterEntitiesParams
+    {
+        [JsonProperty("method")]
+        public string Method { get; set; } = "smart";
+
+        [JsonProperty("corner1")]
+        public double[] Corner1 { get; set; }
+
+        [JsonProperty("corner2")]
+        public double[] Corner2 { get; set; }
+    }
 }
