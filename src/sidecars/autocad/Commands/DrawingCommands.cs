@@ -22,7 +22,12 @@ namespace AECAgent.AutoCAD.Commands
             using (Polyline pline = new Polyline())
             {
                 for (int i = 0; i < param.Points.Length; i++)
-                    pline.AddVertexAt(i, new Point2d(param.Points[i][0], param.Points[i].Length > 1 ? param.Points[i][1] : 0), 0, 0, 0);
+                {
+                    double bulge = 0;
+                    if (param.Bulges != null && i < param.Bulges.Length)
+                        bulge = param.Bulges[i];
+                    pline.AddVertexAt(i, new Point2d(param.Points[i][0], param.Points[i].Length > 1 ? param.Points[i][1] : 0), bulge, 0, 0);
+                }
 
                 pline.Closed = param.Closed;
                 if (!string.IsNullOrEmpty(param.Layer)) SetLayer(pline, param.Layer, db, tr);
@@ -72,6 +77,102 @@ namespace AECAgent.AutoCAD.Commands
                 ObjectId id = btr.AppendEntity(circle);
                 tr.AddNewlyCreatedDBObject(circle, true);
                 return new EntityCreatedResult { Handle = circle.Handle.ToString(), ObjectId = id.ToString(), Type = "Circle", Layer = circle.Layer, Created = true };
+            }
+        }
+
+        public object DrawArc(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<DrawArcParams>(parameters);
+            if (param.Center == null || param.Center.Length < 2) throw new ArgumentException("Center required");
+            if (param.Radius <= 0) throw new ArgumentException("Radius must be > 0");
+
+            Database db = doc.Database;
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+
+            // AutoCAD Arc constructor expects angles in radians
+            double startRad = param.StartAngle * (Math.PI / 180);
+            double endRad = param.EndAngle * (Math.PI / 180);
+
+            using (Arc arc = new Arc(ToPoint3d(param.Center), param.Radius, startRad, endRad))
+            {
+                if (!string.IsNullOrEmpty(param.Layer)) SetLayer(arc, param.Layer, db, tr);
+                ObjectId id = btr.AppendEntity(arc);
+                tr.AddNewlyCreatedDBObject(arc, true);
+                return new EntityCreatedResult { Handle = arc.Handle.ToString(), ObjectId = id.ToString(), Type = "Arc", Layer = arc.Layer, Created = true };
+            }
+        }
+
+        public object DrawEllipse(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<DrawEllipseParams>(parameters);
+            if (param.Center == null || param.Center.Length < 2) throw new ArgumentException("Center required");
+            if (param.MajorAxisEndpoint == null || param.MajorAxisEndpoint.Length < 2) throw new ArgumentException("MajorAxisEndpoint required");
+            if (param.AxisRatio <= 0 || param.AxisRatio > 1) throw new ArgumentException("AxisRatio must be > 0 and <= 1");
+
+            Database db = doc.Database;
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+
+            Point3d center = ToPoint3d(param.Center);
+            Vector3d majorAxis = new Vector3d(
+                param.MajorAxisEndpoint[0],
+                param.MajorAxisEndpoint.Length > 1 ? param.MajorAxisEndpoint[1] : 0,
+                param.MajorAxisEndpoint.Length > 2 ? param.MajorAxisEndpoint[2] : 0
+            );
+
+            // Convert angles: degrees to radians
+            // For a full ellipse: start=0, end=2*PI
+            double startRad = param.StartAngle * (Math.PI / 180);
+            double endRad = param.EndAngle * (Math.PI / 180);
+            // AutoCAD Ellipse uses 0..2PI for full, partial for arcs
+            if (Math.Abs(param.EndAngle - param.StartAngle) >= 359.9)
+            {
+                startRad = 0;
+                endRad = 2 * Math.PI;
+            }
+
+            using (Ellipse ellipse = new Ellipse(center, Vector3d.ZAxis, majorAxis, param.AxisRatio, startRad, endRad))
+            {
+                if (!string.IsNullOrEmpty(param.Layer)) SetLayer(ellipse, param.Layer, db, tr);
+                ObjectId id = btr.AppendEntity(ellipse);
+                tr.AddNewlyCreatedDBObject(ellipse, true);
+                return new EntityCreatedResult { Handle = ellipse.Handle.ToString(), ObjectId = id.ToString(), Type = "Ellipse", Layer = ellipse.Layer, Created = true };
+            }
+        }
+
+        public object DrawSpline(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<DrawSplineParams>(parameters);
+            if (param.FitPoints == null || param.FitPoints.Length < 2)
+                throw new ArgumentException("At least 2 fit points required");
+
+            Database db = doc.Database;
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+
+            // Build Point3dCollection for fit points
+            Point3dCollection fitPts = new Point3dCollection();
+            foreach (var pt in param.FitPoints)
+                fitPts.Add(ToPoint3d(pt));
+
+            // For closed splines, duplicate the first point at the end to
+            // create a loop.  Spline.Closed is read-only in the AutoCAD API.
+            if (param.Closed && fitPts.Count >= 2)
+            {
+                Point3d first = fitPts[0];
+                Point3d last = fitPts[fitPts.Count - 1];
+                if (first.DistanceTo(last) > 1e-6)
+                    fitPts.Add(first);
+            }
+
+            // Create spline through fit points (order 4 = cubic, tolerance 1e-6)
+            using (Spline spline = new Spline(fitPts, 4, 1e-6))
+            {
+                if (!string.IsNullOrEmpty(param.Layer)) SetLayer(spline, param.Layer, db, tr);
+                ObjectId id = btr.AppendEntity(spline);
+                tr.AddNewlyCreatedDBObject(spline, true);
+                return new EntityCreatedResult { Handle = spline.Handle.ToString(), ObjectId = id.ToString(), Type = "Spline", Layer = spline.Layer, Created = true };
             }
         }
 

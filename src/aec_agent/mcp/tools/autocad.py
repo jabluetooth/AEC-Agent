@@ -327,3 +327,202 @@ async def autocad_get_entities(
         return result
     except SidecarError as e:
         return error_result(e.code, e.message, e.details)
+
+
+# =============================================================================
+# Entity Management
+# =============================================================================
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def autocad_delete_entity(handle: str) -> dict:
+    """
+    Delete an entity from the AutoCAD drawing by its handle.
+
+    Use autocad_get_entities to find entity handles first.
+
+    Args:
+        handle: Entity handle (hex string, e.g. "1A3")
+
+    Returns:
+        Deletion confirmation with entity type
+
+    Example:
+        autocad_delete_entity("1A3") - Delete entity with handle 1A3
+    """
+    if not handle or not handle.strip():
+        return error_result(ErrorCode.INVALID_PARAMS, "handle is required")
+
+    try:
+        result = await call_autocad_command("delete_entity", {"handle": handle.strip()})
+        return result
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in autocad_delete_entity", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+# =============================================================================
+# Advanced Drawing Operations (Arc, Ellipse, Spline)
+# =============================================================================
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def autocad_draw_arc(
+    center_x: float,
+    center_y: float,
+    radius: float,
+    start_angle: float,
+    end_angle: float,
+    layer: Optional[str] = None
+) -> dict:
+    """
+    Draw a circular arc in AutoCAD.
+
+    Args:
+        center_x: Center X coordinate
+        center_y: Center Y coordinate
+        radius: Arc radius
+        start_angle: Start angle in degrees (0 = +X axis, counter-clockwise)
+        end_angle: End angle in degrees
+        layer: Layer name to draw on (optional)
+
+    Returns:
+        Created arc entity details
+
+    Example:
+        autocad_draw_arc(50, 50, 25, 0, 90) - Quarter circle arc
+    """
+    if radius <= 0:
+        return error_result(ErrorCode.INVALID_PARAMS, "Radius must be positive")
+
+    params = {
+        "center": [float(center_x), float(center_y), 0.0],
+        "radius": float(radius),
+        "start_angle": float(start_angle),
+        "end_angle": float(end_angle),
+    }
+    if layer:
+        params["layer"] = layer.strip()
+
+    try:
+        result = await call_autocad_command("draw_arc", params)
+        return result
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in autocad_draw_arc", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def autocad_draw_ellipse(
+    center_x: float,
+    center_y: float,
+    major_end_x: float,
+    major_end_y: float,
+    axis_ratio: float,
+    start_angle: float = 0.0,
+    end_angle: float = 360.0,
+    layer: Optional[str] = None
+) -> dict:
+    """
+    Draw an ellipse (or elliptical arc) in AutoCAD.
+
+    The major axis is defined by the vector from center to major_end.
+    The minor axis length is major_length * axis_ratio.
+
+    For a full ellipse, use start_angle=0, end_angle=360.
+    For an elliptical arc, specify the angular range.
+
+    Args:
+        center_x: Center X coordinate
+        center_y: Center Y coordinate
+        major_end_x: Major axis endpoint X (relative to center)
+        major_end_y: Major axis endpoint Y (relative to center)
+        axis_ratio: Minor-to-major axis ratio (0 < ratio <= 1)
+        start_angle: Start angle in degrees (default 0, full ellipse)
+        end_angle: End angle in degrees (default 360, full ellipse)
+        layer: Layer name to draw on (optional)
+
+    Returns:
+        Created ellipse entity details
+
+    Example:
+        autocad_draw_ellipse(50, 50, 30, 0, 0.5) - Ellipse with 2:1 ratio
+    """
+    if axis_ratio <= 0 or axis_ratio > 1:
+        return error_result(ErrorCode.INVALID_PARAMS, "axis_ratio must be > 0 and <= 1")
+
+    params = {
+        "center": [float(center_x), float(center_y), 0.0],
+        "major_axis_endpoint": [float(major_end_x), float(major_end_y), 0.0],
+        "axis_ratio": float(axis_ratio),
+        "start_angle": float(start_angle),
+        "end_angle": float(end_angle),
+    }
+    if layer:
+        params["layer"] = layer.strip()
+
+    try:
+        result = await call_autocad_command("draw_ellipse", params)
+        return result
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in autocad_draw_ellipse", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def autocad_draw_spline(
+    points: List[List[float]],
+    closed: bool = False,
+    layer: Optional[str] = None
+) -> dict:
+    """
+    Draw a spline (smooth curve) through fit points in AutoCAD.
+
+    Creates a NURBS spline that passes through the given fit points.
+    Useful for complex curves that cannot be represented as arcs or ellipses.
+
+    Args:
+        points: List of fit points as [[x, y], ...] or [[x, y, z], ...]
+                At least 2 points required.
+        closed: Whether the spline is closed (default False)
+        layer: Layer name to draw on (optional)
+
+    Returns:
+        Created spline entity details
+
+    Example:
+        autocad_draw_spline([[0,0], [10,20], [30,10], [50,25]]) - Smooth curve
+    """
+    if not points or len(points) < 2:
+        return error_result(ErrorCode.INVALID_PARAMS, "At least 2 fit points required")
+
+    # Ensure 3D points
+    pts_3d = []
+    for pt in points:
+        if len(pt) < 2:
+            return error_result(ErrorCode.INVALID_PARAMS, "Each point must have at least x and y")
+        pts_3d.append([float(pt[0]), float(pt[1]), float(pt[2]) if len(pt) > 2 else 0.0])
+
+    params = {
+        "fit_points": pts_3d,
+        "closed": closed,
+    }
+    if layer:
+        params["layer"] = layer.strip()
+
+    try:
+        result = await call_autocad_command("draw_spline", params)
+        return result
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in autocad_draw_spline", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")

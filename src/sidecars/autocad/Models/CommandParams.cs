@@ -10,6 +10,14 @@ namespace AECAgent.AutoCAD.Models
         [JsonProperty("closed")]
         public bool Closed { get; set; }
 
+        /// <summary>
+        /// Optional bulge values per vertex. A bulge of 0 means a straight
+        /// segment; non-zero creates an arc between this vertex and the next.
+        /// bulge = tan(included_angle / 4). Positive = CCW, negative = CW.
+        /// </summary>
+        [JsonProperty("bulges")]
+        public double[] Bulges { get; set; }
+
         [JsonProperty("layer")]
         public string Layer { get; set; }
 
@@ -36,6 +44,67 @@ namespace AECAgent.AutoCAD.Models
 
         [JsonProperty("radius")]
         public double Radius { get; set; }
+
+        [JsonProperty("layer")]
+        public string Layer { get; set; }
+    }
+
+    public class DrawArcParams
+    {
+        [JsonProperty("center")]
+        public double[] Center { get; set; }
+
+        [JsonProperty("radius")]
+        public double Radius { get; set; }
+
+        /// <summary>Start angle in degrees (0 = +X axis, CCW positive).</summary>
+        [JsonProperty("start_angle")]
+        public double StartAngle { get; set; }
+
+        /// <summary>End angle in degrees.</summary>
+        [JsonProperty("end_angle")]
+        public double EndAngle { get; set; }
+
+        [JsonProperty("layer")]
+        public string Layer { get; set; }
+    }
+
+    public class DrawEllipseParams
+    {
+        [JsonProperty("center")]
+        public double[] Center { get; set; }
+
+        /// <summary>
+        /// Major axis endpoint as a vector from the center.
+        /// E.g. [30, 0, 0] means the major semi-axis is 30 units along +X.
+        /// </summary>
+        [JsonProperty("major_axis_endpoint")]
+        public double[] MajorAxisEndpoint { get; set; }
+
+        /// <summary>Minor-to-major axis ratio (0 &lt; ratio &lt;= 1).</summary>
+        [JsonProperty("axis_ratio")]
+        public double AxisRatio { get; set; } = 1.0;
+
+        /// <summary>Start angle in degrees (0 = full ellipse).</summary>
+        [JsonProperty("start_angle")]
+        public double StartAngle { get; set; }
+
+        /// <summary>End angle in degrees (360 = full ellipse).</summary>
+        [JsonProperty("end_angle")]
+        public double EndAngle { get; set; } = 360.0;
+
+        [JsonProperty("layer")]
+        public string Layer { get; set; }
+    }
+
+    public class DrawSplineParams
+    {
+        /// <summary>Fit points that the spline passes through.</summary>
+        [JsonProperty("fit_points")]
+        public double[][] FitPoints { get; set; }
+
+        [JsonProperty("closed")]
+        public bool Closed { get; set; }
 
         [JsonProperty("layer")]
         public string Layer { get; set; }

@@ -802,47 +802,50 @@ async def raster_recognize_text(
 async def raster_auto_vectorize(
     image_path: str,
     dpi: int = 300,
+    scale: float = 1.0,
     target_layer: Optional[str] = None,
-    min_line_length: int = 50,
+    min_line_length: int = 100,
     max_line_gap: int = 10,
-    hough_threshold: int = 80,
-    min_circle_radius: int = 10,
+    hough_threshold: int = 150,
+    min_circle_radius: int = 20,
     max_circle_radius: int = 500,
-    contour_epsilon_factor: float = 0.005,
+    contour_epsilon_factor: float = 0.01,
     min_contour_points: int = 5,
-    min_contour_area: float = 100.0,
+    min_contour_area: float = 2000.0,
 ) -> dict:
     """
     Automatically vectorize a bitonal image to AutoCAD entities using OpenCV.
 
-    Detects lines (HoughLinesP), circles (HoughCircles), and polylines
-    (contour detection) from a bitonal TIFF image, then creates native
-    AutoCAD entities (Line, Circle, Polyline) via the sidecar draw commands.
+    Detects lines, circles, arcs, ellipses, and polylines (with bulge for
+    rounded corners) from a bitonal TIFF image, then creates native AutoCAD
+    entities via the sidecar draw commands.
 
     This replaces the interactive Raster Design VTools (vline, vpline, etc.)
     which cannot be automated via SendStringToExecute.
 
-    Coordinates are converted from pixel space to drawing units using the
-    image DPI: 1 drawing unit = 1 inch, so x_dwg = px_x / dpi.
+    IMPORTANT: The ``scale`` parameter must match the scale used when attaching
+    the raster image via ``raster_attach_image``.  Default ``scale=1.0`` means
+    1 pixel = 1 drawing unit (matching ``raster_attach_image`` at scale 1.0).
 
     Args:
         image_path: Absolute path to the bitonal TIFF image
         dpi: Image resolution in DPI (default 300)
+        scale: Coordinate scale factor — must match the raster attach scale (default 1.0)
         target_layer: Layer for created entities (optional)
-        min_line_length: Min line length in pixels (default 50)
+        min_line_length: Min line length in pixels (default 100)
         max_line_gap: Max gap to merge line segments in pixels (default 10)
-        hough_threshold: Line detection sensitivity — lower = more lines (default 80)
-        min_circle_radius: Min circle radius in pixels (default 10)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 150)
+        min_circle_radius: Min circle radius in pixels (default 20)
         max_circle_radius: Max circle radius in pixels, 0=unlimited (default 500)
-        contour_epsilon_factor: Polyline simplification factor (default 0.005)
+        contour_epsilon_factor: Polyline simplification factor (default 0.01)
         min_contour_points: Min points per polyline (default 5)
-        min_contour_area: Min contour area in pixels to filter noise (default 100)
+        min_contour_area: Min contour area in pixels to filter noise (default 2000)
 
     Returns:
         Vectorization summary with entity counts and creation results
 
     Example:
-        raster_auto_vectorize("C:/plans/floor1_page1_bitonal.tif", dpi=300)
+        raster_auto_vectorize("C:/plans/floor1_page1_bitonal.tif", dpi=300, scale=1.0)
     """
     from .image_vectorizer import vectorize_bitonal_image
 
@@ -854,6 +857,7 @@ async def raster_auto_vectorize(
         detection = vectorize_bitonal_image(
             image_path=image_path.strip(),
             dpi=dpi,
+            scale=scale,
             min_line_length=min_line_length,
             max_line_gap=max_line_gap,
             hough_threshold=hough_threshold,
@@ -864,7 +868,7 @@ async def raster_auto_vectorize(
             min_contour_area=min_contour_area,
         )
 
-        created = {"lines": 0, "circles": 0, "polylines": 0, "errors": 0}
+        created = {"lines": 0, "circles": 0, "arcs": 0, "ellipses": 0, "polylines": 0, "errors": 0}
 
         # Step 2: Create AutoCAD line entities
         for line in detection.lines:
@@ -896,7 +900,46 @@ async def raster_auto_vectorize(
                 logger.warning("Failed to create circle", error=str(e))
                 created["errors"] += 1
 
-        # Step 4: Create AutoCAD polyline entities
+        # Step 4: Create AutoCAD arc entities
+        for arc in detection.arcs:
+            try:
+                params = {
+                    "center": [arc.center[0], arc.center[1], 0.0],
+                    "radius": arc.radius,
+                    "start_angle": arc.start_angle,
+                    "end_angle": arc.end_angle,
+                }
+                if target_layer:
+                    params["layer"] = target_layer.strip()
+                await call_autocad_command("draw_arc", params)
+                created["arcs"] += 1
+            except Exception as e:
+                logger.warning("Failed to create arc", error=str(e))
+                created["errors"] += 1
+
+        # Step 5: Create AutoCAD ellipse entities
+        for ellipse in detection.ellipses:
+            try:
+                params = {
+                    "center": [ellipse.center[0], ellipse.center[1], 0.0],
+                    "major_axis_endpoint": [
+                        ellipse.major_axis_endpoint[0],
+                        ellipse.major_axis_endpoint[1],
+                        0.0,
+                    ],
+                    "axis_ratio": ellipse.axis_ratio,
+                    "start_angle": ellipse.start_angle,
+                    "end_angle": ellipse.end_angle,
+                }
+                if target_layer:
+                    params["layer"] = target_layer.strip()
+                await call_autocad_command("draw_ellipse", params)
+                created["ellipses"] += 1
+            except Exception as e:
+                logger.warning("Failed to create ellipse", error=str(e))
+                created["errors"] += 1
+
+        # Step 6: Create AutoCAD polyline entities (with bulge for curved segments)
         for pline in detection.polylines:
             try:
                 pts = [[p[0], p[1], 0.0] for p in pline.points]
@@ -904,6 +947,8 @@ async def raster_auto_vectorize(
                     "points": pts,
                     "closed": pline.closed,
                 }
+                if pline.bulges and any(b != 0.0 for b in pline.bulges):
+                    params["bulges"] = pline.bulges
                 if target_layer:
                     params["layer"] = target_layer.strip()
                 await call_autocad_command("draw_polyline", params)
@@ -912,16 +957,22 @@ async def raster_auto_vectorize(
                 logger.warning("Failed to create polyline", error=str(e))
                 created["errors"] += 1
 
-        total_created = created["lines"] + created["circles"] + created["polylines"]
+        total_created = (
+            created["lines"] + created["circles"] + created["arcs"]
+            + created["ellipses"] + created["polylines"]
+        )
 
         return success_result(
             data={
                 "image_path": image_path,
                 "image_size_px": [detection.image_width_px, detection.image_height_px],
                 "dpi": dpi,
+                "scale": scale,
                 "detected": {
                     "lines": len(detection.lines),
                     "circles": len(detection.circles),
+                    "arcs": len(detection.arcs),
+                    "ellipses": len(detection.ellipses),
                     "polylines": len(detection.polylines),
                 },
                 "created": created,
@@ -931,6 +982,7 @@ async def raster_auto_vectorize(
             message=(
                 f"Auto-vectorized: {total_created} entities created "
                 f"({created['lines']} lines, {created['circles']} circles, "
+                f"{created['arcs']} arcs, {created['ellipses']} ellipses, "
                 f"{created['polylines']} polylines)"
             ),
         )
@@ -1059,9 +1111,9 @@ async def raster_pdf_to_vector_pipeline(
     target_layer: Optional[str] = None,
     fade_percent: int = 70,
     store_in_db: bool = True,
-    min_line_length: int = 50,
-    hough_threshold: int = 80,
-    min_contour_area: float = 100.0,
+    min_line_length: int = 100,
+    hough_threshold: int = 150,
+    min_contour_area: float = 2000.0,
 ) -> dict:
     """
     Complete PDF-to-DWG pipeline with PostgreSQL storage.
@@ -1074,14 +1126,14 @@ async def raster_pdf_to_vector_pipeline(
        b. Attaches bitonal TIFF to AutoCAD
        c. Despeckles (removes scan noise)
        d. Deskews (straightens rotation)
-       e. Detects features via OpenCV (lines, circles, polylines)
+       e. Detects features via OpenCV (lines, circles, arcs, ellipses, polylines)
        f. Creates AutoCAD entities via draw commands
     4. Fades original raster image for background reference
     5. Extracts all entities and stores in PostgreSQL with geometry and embeddings
 
     Vectorization uses Python-side OpenCV (HoughLinesP, HoughCircles,
-    findContours) instead of Raster Design VTools, which are interactive
-    and cannot be automated via SendStringToExecute.
+    findContours + fitEllipse) instead of Raster Design VTools, which are
+    interactive and cannot be automated via SendStringToExecute.
 
     Args:
         file_path: Absolute path to the PDF file
@@ -1091,9 +1143,9 @@ async def raster_pdf_to_vector_pipeline(
         target_layer: Layer for vectorized entities (optional)
         fade_percent: Raster fade percentage 0-100 (default 70)
         store_in_db: Store results in PostgreSQL (default True)
-        min_line_length: Min line length in pixels for detection (default 50)
-        hough_threshold: Line detection sensitivity — lower = more lines (default 80)
-        min_contour_area: Min contour area in pixels to filter noise (default 100)
+        min_line_length: Min line length in pixels for detection (default 100)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 150)
+        min_contour_area: Min contour area in pixels to filter noise (default 2000)
 
     Returns:
         Pipeline results with step details, entity counts, and PostgreSQL project info
@@ -1237,12 +1289,16 @@ async def raster_pdf_to_vector_pipeline(
             # Raster Design VTools (vline, vpline) are interactive and cannot
             # be automated. Instead, we detect features from the bitonal TIFF
             # using OpenCV and create AutoCAD entities via draw commands.
+            #
+            # IMPORTANT: pass the same ``scale`` used for image attachment so
+            # that vectorized entity coordinates match the raster image.
             from .image_vectorizer import vectorize_bitonal_image
 
             try:
                 detection = vectorize_bitonal_image(
                     image_path=tiff_path,
                     dpi=300,
+                    scale=scale,
                     min_line_length=min_line_length,
                     hough_threshold=hough_threshold,
                     min_contour_area=min_contour_area,
@@ -1252,6 +1308,8 @@ async def raster_pdf_to_vector_pipeline(
                     "success": True,
                     "lines": len(detection.lines),
                     "circles": len(detection.circles),
+                    "arcs": len(detection.arcs),
+                    "ellipses": len(detection.ellipses),
                     "polylines": len(detection.polylines),
                 })
             except Exception as e:
@@ -1264,7 +1322,10 @@ async def raster_pdf_to_vector_pipeline(
                 detection = None
 
             # Create AutoCAD entities from detected features
-            created_counts = {"lines": 0, "circles": 0, "polylines": 0, "errors": 0}
+            created_counts = {
+                "lines": 0, "circles": 0, "arcs": 0,
+                "ellipses": 0, "polylines": 0, "errors": 0,
+            }
 
             if detection:
                 # Create lines
@@ -1295,7 +1356,44 @@ async def raster_pdf_to_vector_pipeline(
                     except Exception:
                         created_counts["errors"] += 1
 
-                # Create polylines
+                # Create arcs
+                for arc in detection.arcs:
+                    try:
+                        params = {
+                            "center": [arc.center[0], arc.center[1], 0.0],
+                            "radius": arc.radius,
+                            "start_angle": arc.start_angle,
+                            "end_angle": arc.end_angle,
+                        }
+                        if target_layer:
+                            params["layer"] = target_layer.strip()
+                        await call_autocad_command("draw_arc", params)
+                        created_counts["arcs"] += 1
+                    except Exception:
+                        created_counts["errors"] += 1
+
+                # Create ellipses
+                for ellipse in detection.ellipses:
+                    try:
+                        params = {
+                            "center": [ellipse.center[0], ellipse.center[1], 0.0],
+                            "major_axis_endpoint": [
+                                ellipse.major_axis_endpoint[0],
+                                ellipse.major_axis_endpoint[1],
+                                0.0,
+                            ],
+                            "axis_ratio": ellipse.axis_ratio,
+                            "start_angle": ellipse.start_angle,
+                            "end_angle": ellipse.end_angle,
+                        }
+                        if target_layer:
+                            params["layer"] = target_layer.strip()
+                        await call_autocad_command("draw_ellipse", params)
+                        created_counts["ellipses"] += 1
+                    except Exception:
+                        created_counts["errors"] += 1
+
+                # Create polylines (with bulge for rounded corners)
                 for pline in detection.polylines:
                     try:
                         pts = [[p[0], p[1], 0.0] for p in pline.points]
@@ -1303,6 +1401,8 @@ async def raster_pdf_to_vector_pipeline(
                             "points": pts,
                             "closed": pline.closed,
                         }
+                        if pline.bulges and any(b != 0.0 for b in pline.bulges):
+                            params["bulges"] = pline.bulges
                         if target_layer:
                             params["layer"] = target_layer.strip()
                         await call_autocad_command("draw_polyline", params)
@@ -1311,7 +1411,9 @@ async def raster_pdf_to_vector_pipeline(
                         created_counts["errors"] += 1
 
             total_created = (
-                created_counts["lines"] + created_counts["circles"] + created_counts["polylines"]
+                created_counts["lines"] + created_counts["circles"]
+                + created_counts["arcs"] + created_counts["ellipses"]
+                + created_counts["polylines"]
             )
             steps_completed.append({
                 "step": "create_autocad_entities",
