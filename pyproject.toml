@@ -46,6 +46,9 @@ dependencies = [
     # PDF-to-image conversion (raster design pipeline)
     "PyMuPDF>=1.24.0",
     "Pillow>=10.0.0",
+    # Image vectorization (raster-to-vector via OpenCV)
+    "opencv-python-headless>=4.8.0",
+    "numpy>=1.24.0",
 ]
 
 [project.optional-dependencies]

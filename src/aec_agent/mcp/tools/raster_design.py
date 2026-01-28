@@ -6,12 +6,17 @@ Provides PDF-to-DWG conversion pipeline:
 2. Import PDF into AutoCAD (vector PDFs via -PDFIMPORT)
 3. Attach raster images (scanned PDFs converted to TIFF / raw images)
 4. Cleanup raster images (despeckle, deskew, threshold)
-5. Vectorize raster to AutoCAD entities
-6. OCR text extraction
+5. Vectorize raster to AutoCAD entities (Python-side OpenCV detection)
+6. Create entities in AutoCAD via draw commands
 
-Async commands (import_pdf, cleanup, vectorize, ocr) use SendStringToExecute
-on the sidecar and return a "queued" status immediately. Use
-raster_get_status / raster_get_entity_count to check results after execution.
+Vectorization uses Python-side OpenCV (HoughLinesP, HoughCircles,
+findContours) rather than Raster Design VTools (vline, vpline, etc.),
+because VTools are interactive and cannot be automated via
+SendStringToExecute.
+
+Async commands (import_pdf, cleanup) use SendStringToExecute on the sidecar
+and return a "queued" status immediately. Use raster_get_status /
+raster_get_entity_count to check results after execution.
 
 IMPORTANT: AutoCAD Raster Design cannot attach PDF files directly. PDFs must
 be converted to a supported raster format (bitonal TIFF) first using
@@ -789,6 +794,159 @@ async def raster_recognize_text(
 
 
 # =============================================================================
+# Automated Vectorization (Python OpenCV → AutoCAD draw commands)
+# =============================================================================
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def raster_auto_vectorize(
+    image_path: str,
+    dpi: int = 300,
+    target_layer: Optional[str] = None,
+    min_line_length: int = 50,
+    max_line_gap: int = 10,
+    hough_threshold: int = 80,
+    min_circle_radius: int = 10,
+    max_circle_radius: int = 500,
+    contour_epsilon_factor: float = 0.005,
+    min_contour_points: int = 5,
+    min_contour_area: float = 100.0,
+) -> dict:
+    """
+    Automatically vectorize a bitonal image to AutoCAD entities using OpenCV.
+
+    Detects lines (HoughLinesP), circles (HoughCircles), and polylines
+    (contour detection) from a bitonal TIFF image, then creates native
+    AutoCAD entities (Line, Circle, Polyline) via the sidecar draw commands.
+
+    This replaces the interactive Raster Design VTools (vline, vpline, etc.)
+    which cannot be automated via SendStringToExecute.
+
+    Coordinates are converted from pixel space to drawing units using the
+    image DPI: 1 drawing unit = 1 inch, so x_dwg = px_x / dpi.
+
+    Args:
+        image_path: Absolute path to the bitonal TIFF image
+        dpi: Image resolution in DPI (default 300)
+        target_layer: Layer for created entities (optional)
+        min_line_length: Min line length in pixels (default 50)
+        max_line_gap: Max gap to merge line segments in pixels (default 10)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 80)
+        min_circle_radius: Min circle radius in pixels (default 10)
+        max_circle_radius: Max circle radius in pixels, 0=unlimited (default 500)
+        contour_epsilon_factor: Polyline simplification factor (default 0.005)
+        min_contour_points: Min points per polyline (default 5)
+        min_contour_area: Min contour area in pixels to filter noise (default 100)
+
+    Returns:
+        Vectorization summary with entity counts and creation results
+
+    Example:
+        raster_auto_vectorize("C:/plans/floor1_page1_bitonal.tif", dpi=300)
+    """
+    from .image_vectorizer import vectorize_bitonal_image
+
+    if not image_path or not image_path.strip():
+        return error_result(ErrorCode.INVALID_PARAMS, "image_path is required")
+
+    try:
+        # Step 1: Detect features from the bitonal image using OpenCV
+        detection = vectorize_bitonal_image(
+            image_path=image_path.strip(),
+            dpi=dpi,
+            min_line_length=min_line_length,
+            max_line_gap=max_line_gap,
+            hough_threshold=hough_threshold,
+            min_circle_radius=min_circle_radius,
+            max_circle_radius=max_circle_radius,
+            contour_epsilon_factor=contour_epsilon_factor,
+            min_contour_points=min_contour_points,
+            min_contour_area=min_contour_area,
+        )
+
+        created = {"lines": 0, "circles": 0, "polylines": 0, "errors": 0}
+
+        # Step 2: Create AutoCAD line entities
+        for line in detection.lines:
+            try:
+                params = {
+                    "start": [line.start[0], line.start[1], 0.0],
+                    "end": [line.end[0], line.end[1], 0.0],
+                }
+                if target_layer:
+                    params["layer"] = target_layer.strip()
+                await call_autocad_command("draw_line", params)
+                created["lines"] += 1
+            except Exception as e:
+                logger.warning("Failed to create line", error=str(e))
+                created["errors"] += 1
+
+        # Step 3: Create AutoCAD circle entities
+        for circle in detection.circles:
+            try:
+                params = {
+                    "center": [circle.center[0], circle.center[1], 0.0],
+                    "radius": circle.radius,
+                }
+                if target_layer:
+                    params["layer"] = target_layer.strip()
+                await call_autocad_command("draw_circle", params)
+                created["circles"] += 1
+            except Exception as e:
+                logger.warning("Failed to create circle", error=str(e))
+                created["errors"] += 1
+
+        # Step 4: Create AutoCAD polyline entities
+        for pline in detection.polylines:
+            try:
+                pts = [[p[0], p[1], 0.0] for p in pline.points]
+                params = {
+                    "points": pts,
+                    "closed": pline.closed,
+                }
+                if target_layer:
+                    params["layer"] = target_layer.strip()
+                await call_autocad_command("draw_polyline", params)
+                created["polylines"] += 1
+            except Exception as e:
+                logger.warning("Failed to create polyline", error=str(e))
+                created["errors"] += 1
+
+        total_created = created["lines"] + created["circles"] + created["polylines"]
+
+        return success_result(
+            data={
+                "image_path": image_path,
+                "image_size_px": [detection.image_width_px, detection.image_height_px],
+                "dpi": dpi,
+                "detected": {
+                    "lines": len(detection.lines),
+                    "circles": len(detection.circles),
+                    "polylines": len(detection.polylines),
+                },
+                "created": created,
+                "total_entities_created": total_created,
+                "target_layer": target_layer,
+            },
+            message=(
+                f"Auto-vectorized: {total_created} entities created "
+                f"({created['lines']} lines, {created['circles']} circles, "
+                f"{created['polylines']} polylines)"
+            ),
+        )
+
+    except FileNotFoundError as e:
+        return error_result(ErrorCode.INVALID_PARAMS, str(e))
+    except RuntimeError as e:
+        return error_result(ErrorCode.INTERNAL_ERROR, str(e))
+    except SidecarError as e:
+        return error_result(e.code, e.message, e.details)
+    except Exception as e:
+        logger.error("Unexpected error in raster_auto_vectorize", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Unexpected error: {str(e)}")
+
+
+# =============================================================================
 # PostgreSQL Storage
 # =============================================================================
 
@@ -898,16 +1056,17 @@ async def raster_pdf_to_vector_pipeline(
     page: int = 1,
     scale: float = 1.0,
     mode: str = "auto",
-    vectorize_method: str = "vpline",
     target_layer: Optional[str] = None,
-    skip_ocr: bool = False,
     fade_percent: int = 70,
     store_in_db: bool = True,
+    min_line_length: int = 50,
+    hough_threshold: int = 80,
+    min_contour_area: float = 100.0,
 ) -> dict:
     """
     Complete PDF-to-DWG pipeline with PostgreSQL storage.
 
-    Orchestrates the full Raster Design workflow:
+    Orchestrates the full workflow:
     1. Auto-detects PDF type (vector vs scanned)
     2. For vector PDFs: imports directly via PDFIMPORT
     3. For scanned PDFs:
@@ -915,24 +1074,26 @@ async def raster_pdf_to_vector_pipeline(
        b. Attaches bitonal TIFF to AutoCAD
        c. Despeckles (removes scan noise)
        d. Deskews (straightens rotation)
-       e. Skeletonizes via ibfilter (thins lines to 1px for VTool detection)
-       f. Vectorizes using VTools (vpline for polylines)
-       g. Recognizes text via irectext
+       e. Detects features via OpenCV (lines, circles, polylines)
+       f. Creates AutoCAD entities via draw commands
     4. Fades original raster image for background reference
     5. Extracts all entities and stores in PostgreSQL with geometry and embeddings
 
-    Each async step blocks until the previous one completes via OnIdle barrier.
+    Vectorization uses Python-side OpenCV (HoughLinesP, HoughCircles,
+    findContours) instead of Raster Design VTools, which are interactive
+    and cannot be automated via SendStringToExecute.
 
     Args:
         file_path: Absolute path to the PDF file
         page: PDF page to import (default 1)
         scale: Import scale factor (default 1.0)
         mode: Detection mode — "auto", "vector", or "scanned" (default "auto")
-        vectorize_method: VTool to use — "vpline", "vline", "varc", "vcircle" (default "vpline")
         target_layer: Layer for vectorized entities (optional)
-        skip_ocr: Skip text recognition (default False)
         fade_percent: Raster fade percentage 0-100 (default 70)
         store_in_db: Store results in PostgreSQL (default True)
+        min_line_length: Min line length in pixels for detection (default 50)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 80)
+        min_contour_area: Min contour area in pixels to filter noise (default 100)
 
     Returns:
         Pipeline results with step details, entity counts, and PostgreSQL project info
@@ -945,13 +1106,6 @@ async def raster_pdf_to_vector_pipeline(
 
     if mode not in ("auto", "vector", "scanned"):
         return error_result(ErrorCode.INVALID_PARAMS, "mode must be 'auto', 'vector', or 'scanned'")
-
-    valid_vtools = ("vpline", "vline", "varc", "vcircle", "vrect")
-    if vectorize_method not in valid_vtools:
-        return error_result(
-            ErrorCode.INVALID_PARAMS,
-            f"Invalid vectorize_method: {vectorize_method}. Valid: {', '.join(valid_vtools)}"
-        )
 
     steps_completed = []
     step_errors = []
@@ -1079,35 +1233,94 @@ async def raster_pdf_to_vector_pipeline(
             # Barrier
             await call_autocad_command("raster_get_entity_count")
 
-            # Process Image: skeletonize (thin all lines to 1px for VTool detection)
-            skeletonize_result = await call_autocad_command("raster_process_image", {
-                "filter_type": "skeletonize",
-            })
+            # Vectorize: Python-side OpenCV detection → AutoCAD draw commands
+            # Raster Design VTools (vline, vpline) are interactive and cannot
+            # be automated. Instead, we detect features from the bitonal TIFF
+            # using OpenCV and create AutoCAD entities via draw commands.
+            from .image_vectorizer import vectorize_bitonal_image
+
+            try:
+                detection = vectorize_bitonal_image(
+                    image_path=tiff_path,
+                    dpi=300,
+                    min_line_length=min_line_length,
+                    hough_threshold=hough_threshold,
+                    min_contour_area=min_contour_area,
+                )
+                steps_completed.append({
+                    "step": "opencv_detect_features",
+                    "success": True,
+                    "lines": len(detection.lines),
+                    "circles": len(detection.circles),
+                    "polylines": len(detection.polylines),
+                })
+            except Exception as e:
+                logger.error("OpenCV vectorization failed", error=str(e), exc_info=True)
+                steps_completed.append({
+                    "step": "opencv_detect_features",
+                    "success": False,
+                    "error": str(e),
+                })
+                detection = None
+
+            # Create AutoCAD entities from detected features
+            created_counts = {"lines": 0, "circles": 0, "polylines": 0, "errors": 0}
+
+            if detection:
+                # Create lines
+                for line in detection.lines:
+                    try:
+                        params = {
+                            "start": [line.start[0], line.start[1], 0.0],
+                            "end": [line.end[0], line.end[1], 0.0],
+                        }
+                        if target_layer:
+                            params["layer"] = target_layer.strip()
+                        await call_autocad_command("draw_line", params)
+                        created_counts["lines"] += 1
+                    except Exception:
+                        created_counts["errors"] += 1
+
+                # Create circles
+                for circle in detection.circles:
+                    try:
+                        params = {
+                            "center": [circle.center[0], circle.center[1], 0.0],
+                            "radius": circle.radius,
+                        }
+                        if target_layer:
+                            params["layer"] = target_layer.strip()
+                        await call_autocad_command("draw_circle", params)
+                        created_counts["circles"] += 1
+                    except Exception:
+                        created_counts["errors"] += 1
+
+                # Create polylines
+                for pline in detection.polylines:
+                    try:
+                        pts = [[p[0], p[1], 0.0] for p in pline.points]
+                        params = {
+                            "points": pts,
+                            "closed": pline.closed,
+                        }
+                        if target_layer:
+                            params["layer"] = target_layer.strip()
+                        await call_autocad_command("draw_polyline", params)
+                        created_counts["polylines"] += 1
+                    except Exception:
+                        created_counts["errors"] += 1
+
+            total_created = (
+                created_counts["lines"] + created_counts["circles"] + created_counts["polylines"]
+            )
             steps_completed.append({
-                "step": "process_image_skeletonize",
-                "success": skeletonize_result.get("success", False),
+                "step": "create_autocad_entities",
+                "success": total_created > 0,
+                "created": created_counts,
+                "total": total_created,
             })
 
-            # Barrier
-            await call_autocad_command("raster_get_entity_count")
-
-            # Vectorize: use VTool to convert raster entities to vectors
-            # Uses the actual Raster Design VTool commands (vpline, vline, etc.)
-            vectorize_params = {
-                "tool": vectorize_method,
-                "method": "1p",
-            }
-            if target_layer:
-                vectorize_params["target_layer"] = target_layer.strip()
-
-            vectorize_result = await call_autocad_command("raster_vectorize", vectorize_params)
-            steps_completed.append({
-                "step": "vectorize_vtool",
-                "success": vectorize_result.get("success", False),
-                "vtool": vectorize_method,
-            })
-
-            # Barrier: get post-vectorize count
+            # Post-vectorize entity count
             post_vectorize = await call_autocad_command("raster_get_entity_count")
             post_vectorize_count = 0
             if post_vectorize.get("success") and post_vectorize.get("data"):
@@ -1117,21 +1330,6 @@ async def raster_pdf_to_vector_pipeline(
                 "count": post_vectorize_count,
                 "new_entities": post_vectorize_count - baseline_count,
             })
-
-            # Text Recognition: irectext (convert raster text to AutoCAD text)
-            if not skip_ocr:
-                text_params = {}
-                if target_layer:
-                    text_params["target_layer"] = target_layer.strip()
-
-                text_result = await call_autocad_command("raster_recognize_text", text_params)
-                steps_completed.append({
-                    "step": "recognize_text",
-                    "success": text_result.get("success", False),
-                })
-
-                # Barrier
-                await call_autocad_command("raster_get_entity_count")
 
             # Fade raster image for background reference
             fade_result = await call_autocad_command("raster_fade_image", {
