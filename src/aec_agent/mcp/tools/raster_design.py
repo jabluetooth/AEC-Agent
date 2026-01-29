@@ -804,47 +804,72 @@ async def raster_auto_vectorize(
     dpi: int = 300,
     scale: float = 1.0,
     target_layer: Optional[str] = None,
-    min_line_length: int = 100,
+    min_line_length: int = 300,
     max_line_gap: int = 10,
-    hough_threshold: int = 150,
+    hough_threshold: int = 250,
     min_circle_radius: int = 20,
     max_circle_radius: int = 500,
+    hough_circles_dp: float = 1.2,
+    hough_circles_param1: float = 200.0,
+    hough_circles_param2: float = 100.0,
+    hough_circles_min_dist: int = 100,
     contour_epsilon_factor: float = 0.01,
     min_contour_points: int = 5,
-    min_contour_area: float = 2000.0,
+    min_contour_area: float = 3000.0,
+    ellipse_fit_threshold: float = 0.85,
+    arc_coverage_min: float = 30.0,
+    arc_coverage_max: float = 350.0,
+    line_merge_angle_tol: float = 5.0,
+    line_merge_dist_tol: float = 15.0,
+    circle_merge_center_tol: float = 30.0,
+    circle_merge_radius_tol: float = 20.0,
 ) -> dict:
     """
-    Automatically vectorize a bitonal image to AutoCAD entities using OpenCV.
+    LOW-LEVEL: OpenCV vectorization step only. DO NOT call this directly for
+    PDF or image files — use ``raster_pdf_to_vector_pipeline`` instead, which
+    handles the complete workflow (convert, attach, cleanup, vectorize, fade,
+    store).
 
-    Detects lines, circles, arcs, ellipses, and polylines (with bulge for
-    rounded corners) from a bitonal TIFF image, then creates native AutoCAD
-    entities via the sidecar draw commands.
+    This tool ONLY runs the OpenCV detection on an already-processed bitonal
+    TIFF and creates AutoCAD entities. It does NOT convert PDFs, attach images,
+    despeckle, deskew, fade, or store to PostgreSQL.
 
-    This replaces the interactive Raster Design VTools (vline, vpline, etc.)
-    which cannot be automated via SendStringToExecute.
-
-    IMPORTANT: The ``scale`` parameter must match the scale used when attaching
-    the raster image via ``raster_attach_image``.  Default ``scale=1.0`` means
-    1 pixel = 1 drawing unit (matching ``raster_attach_image`` at scale 1.0).
+    Prerequisites before calling this tool:
+    1. Image must already be a bitonal TIFF (use raster_convert_pdf for PDFs)
+    2. Image must already be attached in AutoCAD (use raster_attach_image)
+    3. Image should already be cleaned (despeckle/deskew via raster_cleanup)
 
     Args:
-        image_path: Absolute path to the bitonal TIFF image
+        image_path: Absolute path to an already-processed bitonal TIFF image
         dpi: Image resolution in DPI (default 300)
-        scale: Coordinate scale factor — must match the raster attach scale (default 1.0)
+        scale: Coordinate scale factor — must match raster_attach_image scale (default 1.0)
         target_layer: Layer for created entities (optional)
-        min_line_length: Min line length in pixels (default 100)
+        min_line_length: Min line length in pixels (default 300)
         max_line_gap: Max gap to merge line segments in pixels (default 10)
-        hough_threshold: Line detection sensitivity — lower = more lines (default 150)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 250)
         min_circle_radius: Min circle radius in pixels (default 20)
         max_circle_radius: Max circle radius in pixels, 0=unlimited (default 500)
+        hough_circles_dp: Accumulator resolution ratio — lower = finer (default 1.2)
+        hough_circles_param1: Canny high threshold inside HoughCircles (default 200)
+        hough_circles_param2: Circle center accumulator threshold — higher = fewer
+                              but more confident circles (default 100)
+        hough_circles_min_dist: Min distance between circle centers in pixels (default 100)
         contour_epsilon_factor: Polyline simplification factor (default 0.01)
         min_contour_points: Min points per polyline (default 5)
-        min_contour_area: Min contour area in pixels to filter noise (default 2000)
+        min_contour_area: Min contour area in pixels to filter noise (default 3000)
+        ellipse_fit_threshold: Goodness-of-fit for ellipse/arc detection 0-1 (default 0.85)
+        arc_coverage_min: Min arc coverage in degrees to accept as arc (default 30)
+        arc_coverage_max: Max arc coverage degrees before full ellipse (default 350)
+        line_merge_angle_tol: Max angle diff in degrees to merge duplicate lines (default 5)
+        line_merge_dist_tol: Max perpendicular distance in pixels to merge lines (default 15)
+        circle_merge_center_tol: Max center distance in pixels to merge circles (default 30)
+        circle_merge_radius_tol: Max radius diff in pixels to merge circles (default 20)
 
     Returns:
         Vectorization summary with entity counts and creation results
 
     Example:
+        # Prefer raster_pdf_to_vector_pipeline instead of calling this directly
         raster_auto_vectorize("C:/plans/floor1_page1_bitonal.tif", dpi=300, scale=1.0)
     """
     from .image_vectorizer import vectorize_bitonal_image
@@ -863,9 +888,20 @@ async def raster_auto_vectorize(
             hough_threshold=hough_threshold,
             min_circle_radius=min_circle_radius,
             max_circle_radius=max_circle_radius,
+            hough_circles_dp=hough_circles_dp,
+            hough_circles_param1=hough_circles_param1,
+            hough_circles_param2=hough_circles_param2,
+            hough_circles_min_dist=hough_circles_min_dist,
             contour_epsilon_factor=contour_epsilon_factor,
             min_contour_points=min_contour_points,
             min_contour_area=min_contour_area,
+            ellipse_fit_threshold=ellipse_fit_threshold,
+            arc_coverage_min=arc_coverage_min,
+            arc_coverage_max=arc_coverage_max,
+            line_merge_angle_tol=line_merge_angle_tol,
+            line_merge_dist_tol=line_merge_dist_tol,
+            circle_merge_center_tol=circle_merge_center_tol,
+            circle_merge_radius_tol=circle_merge_radius_tol,
         )
 
         created = {"lines": 0, "circles": 0, "arcs": 0, "ellipses": 0, "polylines": 0, "errors": 0}
@@ -1106,23 +1142,46 @@ async def raster_store_vectorized(
 async def raster_pdf_to_vector_pipeline(
     file_path: str,
     page: int = 1,
+    dpi: int = 300,
     scale: float = 1.0,
     mode: str = "auto",
     target_layer: Optional[str] = None,
     fade_percent: int = 70,
     store_in_db: bool = True,
-    min_line_length: int = 100,
-    hough_threshold: int = 150,
-    min_contour_area: float = 2000.0,
+    min_line_length: int = 300,
+    max_line_gap: int = 10,
+    hough_threshold: int = 250,
+    min_circle_radius: int = 20,
+    max_circle_radius: int = 500,
+    hough_circles_dp: float = 1.2,
+    hough_circles_param1: float = 200.0,
+    hough_circles_param2: float = 100.0,
+    hough_circles_min_dist: int = 100,
+    contour_epsilon_factor: float = 0.01,
+    min_contour_points: int = 5,
+    min_contour_area: float = 3000.0,
+    ellipse_fit_threshold: float = 0.85,
+    arc_coverage_min: float = 30.0,
+    arc_coverage_max: float = 350.0,
+    line_merge_angle_tol: float = 5.0,
+    line_merge_dist_tol: float = 15.0,
+    circle_merge_center_tol: float = 30.0,
+    circle_merge_radius_tol: float = 20.0,
 ) -> dict:
     """
-    Complete PDF-to-DWG pipeline with PostgreSQL storage.
+    PRIMARY TOOL for converting any PDF or image file to AutoCAD vector
+    entities.  Accepts PDF, TIFF, PNG, JPG, and BMP files.  Use this tool
+    whenever the user wants to vectorize, trace, or convert a file to CAD
+    entities.  Do NOT call raster_auto_vectorize, raster_convert_pdf,
+    raster_attach_image, or raster_cleanup individually.
 
-    Orchestrates the full workflow:
-    1. Auto-detects PDF type (vector vs scanned)
-    2. For vector PDFs: imports directly via PDFIMPORT
-    3. For scanned PDFs:
-       a. Converts PDF to bitonal TIFF (Python-side, 300 DPI)
+    Pipeline steps (all automatic, all inside this one call):
+    1. Detects input type (PDF vs image file)
+    2. For image files (TIFF/PNG/JPG/BMP): skips PDF steps, goes
+       straight to attach → cleanup → vectorize
+    3. For vector PDFs: imports directly via PDFIMPORT
+    4. For scanned PDFs:
+       a. Converts PDF to bitonal TIFF (Python-side, at specified DPI)
        b. Attaches bitonal TIFF to AutoCAD
        c. Despeckles (removes scan noise)
        d. Deskews (straightens rotation)
@@ -1138,26 +1197,51 @@ async def raster_pdf_to_vector_pipeline(
     Args:
         file_path: Absolute path to the PDF file
         page: PDF page to import (default 1)
+        dpi: Render resolution for PDF-to-TIFF conversion (default 300)
         scale: Import scale factor (default 1.0)
         mode: Detection mode — "auto", "vector", or "scanned" (default "auto")
         target_layer: Layer for vectorized entities (optional)
         fade_percent: Raster fade percentage 0-100 (default 70)
         store_in_db: Store results in PostgreSQL (default True)
-        min_line_length: Min line length in pixels for detection (default 100)
-        hough_threshold: Line detection sensitivity — lower = more lines (default 150)
-        min_contour_area: Min contour area in pixels to filter noise (default 2000)
+        min_line_length: Min line length in pixels for detection (default 300)
+        max_line_gap: Max gap to merge line segments in pixels (default 10)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 250)
+        min_circle_radius: Min circle radius in pixels (default 20)
+        max_circle_radius: Max circle radius in pixels, 0=unlimited (default 500)
+        hough_circles_dp: Accumulator resolution ratio — lower = finer (default 1.2)
+        hough_circles_param1: Canny high threshold inside HoughCircles (default 200)
+        hough_circles_param2: Circle center accumulator threshold — higher = fewer
+                              but more confident circles (default 100)
+        hough_circles_min_dist: Min distance between circle centers in pixels (default 100)
+        contour_epsilon_factor: Polyline simplification factor (default 0.01)
+        min_contour_points: Min points per polyline (default 5)
+        min_contour_area: Min contour area in pixels to filter noise (default 3000)
+        ellipse_fit_threshold: Goodness-of-fit for ellipse/arc detection 0-1 (default 0.85)
+        arc_coverage_min: Min arc coverage in degrees to accept as arc (default 30)
+        arc_coverage_max: Max arc coverage degrees before full ellipse (default 350)
+        line_merge_angle_tol: Max angle diff in degrees to merge duplicate lines (default 5)
+        line_merge_dist_tol: Max perpendicular distance in pixels to merge lines (default 15)
+        circle_merge_center_tol: Max center distance in pixels to merge circles (default 30)
+        circle_merge_radius_tol: Max radius diff in pixels to merge circles (default 20)
 
     Returns:
         Pipeline results with step details, entity counts, and PostgreSQL project info
 
     Example:
         raster_pdf_to_vector_pipeline("C:/plans/floor1.pdf", mode="auto", store_in_db=True)
+        raster_pdf_to_vector_pipeline("C:/scans/bracket.png", mode="scanned")
     """
     if not file_path or not file_path.strip():
         return error_result(ErrorCode.INVALID_PARAMS, "file_path is required")
 
     if mode not in ("auto", "vector", "scanned"):
         return error_result(ErrorCode.INVALID_PARAMS, "mode must be 'auto', 'vector', or 'scanned'")
+
+    # Detect if input is an image file (not a PDF).
+    # If so, skip PDF-specific steps and go straight to attach/vectorize.
+    import os
+    file_ext = os.path.splitext(file_path.strip())[1].lower()
+    is_image_file = file_ext in (".tif", ".tiff", ".png", ".jpg", ".jpeg", ".bmp")
 
     steps_completed = []
     step_errors = []
@@ -1170,51 +1254,68 @@ async def raster_pdf_to_vector_pipeline(
             baseline_count = baseline["data"].get("total", 0)
         steps_completed.append({"step": "baseline_count", "count": baseline_count})
 
-        # Step 2: Determine PDF type
+        # Step 2: Determine input type and processing mode
         detected_mode = mode
-        if mode == "auto":
-            detected_mode = "vector"  # try vector first, fall back to scanned
 
-        if detected_mode == "vector":
-            # ---- Vector PDF: import via PDFIMPORT ----
-            import_params = {
-                "file_path": file_path.strip(),
-                "page": page,
-                "insertion_point": [0.0, 0.0],
-                "scale": float(scale),
-                "rotation": 0.0,
-            }
-            if target_layer:
-                import_params["target_layer"] = target_layer.strip()
-
-            import_result = await call_autocad_command("raster_import_pdf", import_params)
+        if is_image_file:
+            # ---- Image file: skip PDF steps, go straight to vectorize ----
+            detected_mode = "scanned"
+            tiff_path = file_path.strip()
             steps_completed.append({
-                "step": "pdf_import_vector",
-                "success": import_result.get("success", False),
+                "step": "detect_input_type",
+                "type": "image",
+                "extension": file_ext,
+                "skipped_pdf_steps": True,
             })
+            logger.info(
+                "Input is an image file, skipping PDF conversion",
+                file_ext=file_ext,
+            )
+        else:
+            # ---- PDF file: try vector import, fall back to scanned ----
+            if mode == "auto":
+                detected_mode = "vector"  # try vector first, fall back to scanned
 
-            # Barrier: entity count blocks until PDFIMPORT finishes in OnIdle
-            post_import = await call_autocad_command("raster_get_entity_count")
-            post_import_count = 0
-            if post_import.get("success") and post_import.get("data"):
-                post_import_count = post_import["data"].get("total", 0)
+            if detected_mode == "vector":
+                # ---- Vector PDF: import via PDFIMPORT ----
+                import_params = {
+                    "file_path": file_path.strip(),
+                    "page": page,
+                    "insertion_point": [0.0, 0.0],
+                    "scale": float(scale),
+                    "rotation": 0.0,
+                }
+                if target_layer:
+                    import_params["target_layer"] = target_layer.strip()
 
-            new_entities = post_import_count - baseline_count
-            steps_completed.append({
-                "step": "post_vector_import_count",
-                "count": post_import_count,
-                "new_entities": new_entities,
-            })
+                import_result = await call_autocad_command("raster_import_pdf", import_params)
+                steps_completed.append({
+                    "step": "pdf_import_vector",
+                    "success": import_result.get("success", False),
+                })
 
-            # Auto-detect fallback: if no entities added, switch to scanned
-            if mode == "auto" and new_entities <= 0:
-                detected_mode = "scanned"
-                logger.info(
-                    "Auto-detect: no vector entities from PDFIMPORT, switching to scanned pipeline"
-                )
+                # Barrier: entity count blocks until PDFIMPORT finishes in OnIdle
+                post_import = await call_autocad_command("raster_get_entity_count")
+                post_import_count = 0
+                if post_import.get("success") and post_import.get("data"):
+                    post_import_count = post_import["data"].get("total", 0)
 
-        if detected_mode == "scanned":
-            # ---- Scanned PDF: Raster Design pipeline ----
+                new_entities = post_import_count - baseline_count
+                steps_completed.append({
+                    "step": "post_vector_import_count",
+                    "count": post_import_count,
+                    "new_entities": new_entities,
+                })
+
+                # Auto-detect fallback: if no entities added, switch to scanned
+                if mode == "auto" and new_entities <= 0:
+                    detected_mode = "scanned"
+                    logger.info(
+                        "Auto-detect: no vector entities from PDFIMPORT, switching to scanned pipeline"
+                    )
+
+        if detected_mode == "scanned" and not is_image_file:
+            # ---- Scanned PDF: convert to TIFF first ----
 
             # Step A: Convert PDF to bitonal TIFF (Python-side)
             # AutoCAD Raster Design cannot attach PDF files directly.
@@ -1223,7 +1324,7 @@ async def raster_pdf_to_vector_pipeline(
                 tiff_path = convert_pdf_to_bitonal_tiff(
                     pdf_path=file_path.strip(),
                     page=page,
-                    dpi=300,
+                    dpi=dpi,
                     threshold=128,
                 )
                 steps_completed.append({
@@ -1297,11 +1398,27 @@ async def raster_pdf_to_vector_pipeline(
             try:
                 detection = vectorize_bitonal_image(
                     image_path=tiff_path,
-                    dpi=300,
+                    dpi=dpi,
                     scale=scale,
                     min_line_length=min_line_length,
+                    max_line_gap=max_line_gap,
                     hough_threshold=hough_threshold,
+                    min_circle_radius=min_circle_radius,
+                    max_circle_radius=max_circle_radius,
+                    hough_circles_dp=hough_circles_dp,
+                    hough_circles_param1=hough_circles_param1,
+                    hough_circles_param2=hough_circles_param2,
+                    hough_circles_min_dist=hough_circles_min_dist,
+                    contour_epsilon_factor=contour_epsilon_factor,
+                    min_contour_points=min_contour_points,
                     min_contour_area=min_contour_area,
+                    ellipse_fit_threshold=ellipse_fit_threshold,
+                    arc_coverage_min=arc_coverage_min,
+                    arc_coverage_max=arc_coverage_max,
+                    line_merge_angle_tol=line_merge_angle_tol,
+                    line_merge_dist_tol=line_merge_dist_tol,
+                    circle_merge_center_tol=circle_merge_center_tol,
+                    circle_merge_radius_tol=circle_merge_radius_tol,
                 )
                 steps_completed.append({
                     "step": "opencv_detect_features",

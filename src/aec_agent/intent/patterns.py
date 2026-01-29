@@ -376,7 +376,8 @@ ACTION_PATTERNS: dict[str, list[str]] = {
     ],
     "create": [
         "draw", "create", "add", "place", "insert", "make", "new",
-        "generate", "build",
+        "generate", "build", "vectorize", "trace", "convert to cad",
+        "convert to dwg", "import", "digitize",
     ],
     "modify": [
         "edit", "change", "update", "modify", "move", "resize", "adjust",
@@ -406,6 +407,8 @@ APP_CONTEXT_PATTERNS: dict[str, list[str]] = {
     "autocad": [
         "autocad", "acad", "dwg", "drawing", "layer", "polyline", "block",
         "xref", "entity", "handle", "model space", "paper space",
+        "vectorize", "raster", "scan", "scanned", "tiff", "tif", "pdf",
+        "image to cad", "convert to cad", "trace", "digitize",
     ],
     "revit": [
         "revit", "rvt", "family", "type", "level", "workset", "element",

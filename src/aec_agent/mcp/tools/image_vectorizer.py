@@ -86,14 +86,18 @@ def vectorize_bitonal_image(
     image_path: str,
     dpi: int = 300,
     scale: float = 1.0,
-    min_line_length: int = 100,
+    min_line_length: int = 300,
     max_line_gap: int = 10,
-    hough_threshold: int = 150,
+    hough_threshold: int = 250,
     min_circle_radius: int = 20,
     max_circle_radius: int = 500,
+    hough_circles_dp: float = 1.2,
+    hough_circles_param1: float = 200.0,
+    hough_circles_param2: float = 100.0,
+    hough_circles_min_dist: int = 100,
     contour_epsilon_factor: float = 0.01,
     min_contour_points: int = 5,
-    min_contour_area: float = 2000.0,
+    min_contour_area: float = 3000.0,
     ellipse_fit_threshold: float = 0.85,
     arc_coverage_min: float = 30.0,
     arc_coverage_max: float = 350.0,
@@ -115,15 +119,26 @@ def vectorize_bitonal_image(
         scale: Coordinate scale factor. Pixel coords are multiplied by this value.
                Must match the scale used for raster_attach_image in AutoCAD.
                Default 1.0 means 1 pixel = 1 drawing unit.
-        min_line_length: Minimum line length in pixels for HoughLinesP (default 100).
+        min_line_length: Minimum line length in pixels for HoughLinesP (default 300).
         max_line_gap: Maximum gap between line segments to merge (default 10).
-        hough_threshold: Accumulator threshold for HoughLinesP (default 150).
+        hough_threshold: Accumulator threshold for HoughLinesP (default 250).
         min_circle_radius: Minimum circle radius in pixels (default 20).
         max_circle_radius: Maximum circle radius in pixels, 0=unlimited (default 500).
+        hough_circles_dp: Inverse ratio of accumulator resolution to image
+                          resolution. Lower = finer detection (default 1.2).
+        hough_circles_param1: Canny high threshold used internally by
+                              HoughCircles. Higher = fewer edges = fewer false
+                              circles (default 200).
+        hough_circles_param2: Accumulator threshold for circle centers.
+                              Higher = fewer but more confident circles.
+                              This is the most important param for reducing
+                              false positives (default 100).
+        hough_circles_min_dist: Minimum distance in pixels between detected
+                                circle centers (default 100).
         contour_epsilon_factor: Polyline approximation tolerance as fraction
                                 of contour perimeter (default 0.01).
         min_contour_points: Minimum points for a contour to be kept (default 5).
-        min_contour_area: Minimum contour area in pixels to filter noise (default 2000).
+        min_contour_area: Minimum contour area in pixels to filter noise (default 3000).
         ellipse_fit_threshold: Goodness-of-fit threshold (0-1) for ellipse/arc
                                detection. Higher = stricter matching (default 0.85).
         arc_coverage_min: Minimum arc coverage in degrees to accept as arc (default 30).
@@ -168,46 +183,68 @@ def vectorize_bitonal_image(
         # =================================================================
         # PRE-PROCESSING: Clean the image to isolate line work from fills,
         # text, gradients, and scan noise.
+        #
+        # Tuned for SCANNED documents: assumes scan grain, speckles,
+        # uneven lighting, faint text, and edge fuzz.  Real geometry
+        # lines are ≥2-3 px wide at 300 DPI; everything thinner is
+        # noise.
         # =================================================================
 
-        # 1. Adaptive threshold handles uneven lighting and gradients better
-        #    than a simple global threshold.  It binarizes based on local
-        #    pixel neighbourhood, so gradient fills (which change slowly)
-        #    become white while thin dark lines survive.
+        # 0. Gaussian blur: smooth scan grain and pixel noise BEFORE
+        #    thresholding.  A 5x5 kernel at σ=0 (auto) removes
+        #    high-frequency scan artifacts without blurring real geometry.
+        blurred_img = cv2.GaussianBlur(img, (5, 5), 0)
+
+        # 1. Adaptive threshold: binarize based on local pixel
+        #    neighbourhood.  blockSize=51 (large neighbourhood) and
+        #    C=15 (strong bias toward white) make it tolerant of uneven
+        #    scan lighting while requiring strong dark-on-light contrast
+        #    to produce a foreground pixel.
         binary = cv2.adaptiveThreshold(
-            img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV, blockSize=25, C=10,
+            blurred_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+            cv2.THRESH_BINARY_INV, blockSize=51, C=15,
         )
 
-        # 2. Morphological close: fill tiny gaps in lines so they connect
+        # 2. Morphological close: fill tiny gaps in lines so they connect.
+        #    A 3x3 rect kernel at 1 iteration bridges 1-2 px gaps.
         kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=1)
 
-        # 3. Morphological open: remove small blobs (text characters, speckles,
-        #    gradient dithering artifacts).  A 3x3 open removes features
-        #    thinner than ~3 px while keeping real geometry lines.
+        # 3. Morphological open: remove small blobs (speckles, text chars,
+        #    scan dithering).  A 3x3 kernel with 2 iterations erodes
+        #    features thinner than ~3 px then dilates back — real
+        #    geometry lines (≥2-3 px at 300 DPI) survive, single-pixel
+        #    noise does not.  NOTE: 5x5 was tested but destroys thin
+        #    ink lines from scanned documents.
         kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open, iterations=2)
 
-        # 4. Remove small connected components (text, dots, annotations).
-        #    This is the most effective filter for removing dimension text
-        #    and arrowheads while preserving large geometry.
+        # 4. Remove small connected components (text, dots, annotations,
+        #    scan artifacts).  Uses BOTH area AND bounding-box extent:
+        #    - Small area AND small bbox → noise (dots, speckles) → remove
+        #    - Small area BUT large bbox → thin line work → KEEP
+        #    This preserves long thin contour lines that have small pixel
+        #    area but span a significant distance across the drawing.
         min_component_area = max(min_contour_area, width * height * 0.001)
+        min_component_dim = max(50, min(width, height) * 0.03)  # 3% of shorter side
         n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
         for lbl in range(1, n_labels):
-            if stats[lbl, cv2.CC_STAT_AREA] < min_component_area:
+            comp_area = stats[lbl, cv2.CC_STAT_AREA]
+            comp_w = stats[lbl, cv2.CC_STAT_WIDTH]
+            comp_h = stats[lbl, cv2.CC_STAT_HEIGHT]
+            # Keep if large area OR large bounding box (thin line work)
+            if comp_area < min_component_area and max(comp_w, comp_h) < min_component_dim:
                 binary[labels == lbl] = 0
+
+        def _component_kept(lbl: int) -> bool:
+            return (stats[lbl, cv2.CC_STAT_AREA] >= min_component_area or
+                    max(stats[lbl, cv2.CC_STAT_WIDTH],
+                        stats[lbl, cv2.CC_STAT_HEIGHT]) >= min_component_dim)
 
         logger.info(
             "Pre-processing complete",
-            components_kept=sum(
-                1 for lbl in range(1, n_labels)
-                if stats[lbl, cv2.CC_STAT_AREA] >= min_component_area
-            ),
-            components_removed=sum(
-                1 for lbl in range(1, n_labels)
-                if stats[lbl, cv2.CC_STAT_AREA] < min_component_area
-            ),
+            components_kept=sum(1 for lbl in range(1, n_labels) if _component_kept(lbl)),
+            components_removed=sum(1 for lbl in range(1, n_labels) if not _component_kept(lbl)),
         )
 
         # Helper: convert pixel coords to drawing units.
@@ -248,14 +285,16 @@ def vectorize_bitonal_image(
         # =================================================================
         # CIRCLE DETECTION (HoughCircles) + Deduplication
         # =================================================================
-        blurred = cv2.medianBlur(img, 7)
+        # Use the pre-blurred image (Gaussian) with an additional median
+        # blur to suppress salt-and-pepper scan noise before circle detection.
+        circle_input = cv2.medianBlur(blurred_img, 7)
         raw_circles = cv2.HoughCircles(
-            blurred,
+            circle_input,
             cv2.HOUGH_GRADIENT,
-            dp=1.5,
-            minDist=max(50, min_circle_radius * 3),
-            param1=120,
-            param2=60,
+            dp=hough_circles_dp,
+            minDist=max(hough_circles_min_dist, min_circle_radius * 4),
+            param1=hough_circles_param1,
+            param2=hough_circles_param2,
             minRadius=min_circle_radius,
             maxRadius=max_circle_radius if max_circle_radius > 0 else 0,
         )
@@ -277,20 +316,33 @@ def vectorize_bitonal_image(
         # =================================================================
         # CONTOUR DETECTION → arcs, ellipses, polylines
         # =================================================================
-        # Use RETR_EXTERNAL to get only outermost contours (skip nested
-        # contours from gradient fill boundaries, hatches, etc.)
-        contours, _ = cv2.findContours(
-            binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE,
+        # Use RETR_CCOMP (two-level hierarchy) to capture both outer
+        # contours and inner features (holes, slots).  The hierarchy
+        # array lets us distinguish outer vs inner if needed later.
+        contours, hierarchy = cv2.findContours(
+            binary, cv2.RETR_CCOMP, cv2.CHAIN_APPROX_SIMPLE,
         )
 
-        # Track detected circle centers to avoid double-detection
+        # Track detected circle centers to avoid double-detection.
+        # Only suppress a contour if its fitted ellipse closely matches an
+        # already-detected circle (center within the circle radius AND
+        # contour size similar to circle size).  This prevents large outer
+        # contours from being killed by small interior circles.
         circle_centers_px: List[Tuple[float, float, float]] = []
         for (cx, cy, r) in deduped_circles:
             circle_centers_px.append((cx, cy, r))
 
-        def _is_near_detected_circle(cx: float, cy: float, tol: float = 30.0) -> bool:
-            for (px, py, _r) in circle_centers_px:
-                if abs(cx - px) < tol and abs(cy - py) < tol:
+        def _is_duplicate_of_detected_circle(
+            cx: float, cy: float, contour_area: float,
+        ) -> bool:
+            for (px, py, r) in circle_centers_px:
+                center_dist = math.sqrt((cx - px) ** 2 + (cy - py) ** 2)
+                circle_area = math.pi * r * r
+                # Center must be within half the circle radius AND
+                # contour area must be within 2x of the circle area
+                if (center_dist < r * 0.5 and
+                        circle_area > 0 and
+                        0.3 < contour_area / circle_area < 3.0):
                     return True
             return False
 
@@ -367,7 +419,7 @@ def vectorize_bitonal_image(
                 ellipse = cv2.fitEllipse(contour)
                 (cx, cy), (minor_axis, major_axis), angle = ellipse
 
-                if _is_near_detected_circle(cx, cy):
+                if _is_duplicate_of_detected_circle(cx, cy, area):
                     continue
 
                 fit_error = _ellipse_fit_error(contour, ellipse)
@@ -463,6 +515,96 @@ def vectorize_bitonal_image(
         logger.info(f"Detected {len(result.arcs)} arcs")
         logger.info(f"Detected {len(result.ellipses)} ellipses")
         logger.info(f"Detected {len(result.polylines)} polylines/contours")
+
+        # =================================================================
+        # POST-PROCESSING: Remove lines/circles that overlap with contours
+        # =================================================================
+        # HoughLinesP and HoughCircles detect features along contour edges,
+        # producing redundant geometry (lines on top of polylines, circles
+        # on curved contour sections).  Filter them out by checking whether
+        # sample points lie close to a detected contour edge.
+        #
+        # cv2.pointPolygonTest(contour, pt, measureDist=True) returns the
+        # signed distance from a point to the nearest contour edge.  If
+        # abs(distance) < tolerance, the point sits ON the contour.
+
+        overlap_tol = max(5.0, min_line_length * 0.05)  # pixels
+
+        # Collect significant contours for overlap testing (area > threshold)
+        significant_contours = [
+            c for c in contours
+            if cv2.contourArea(c) >= min_contour_area
+        ]
+
+        if significant_contours:
+            # --- Filter redundant lines ---
+            lines_before = len(result.lines)
+            kept_lines: List[DetectedLine] = []
+            for line in result.lines:
+                # Convert DWG coords back to pixel coords for testing
+                sx = line.start[0] / scale if scale else 0
+                sy = height - (line.start[1] / scale if scale else 0)
+                ex = line.end[0] / scale if scale else 0
+                ey = height - (line.end[1] / scale if scale else 0)
+                mx, my = (sx + ex) / 2.0, (sy + ey) / 2.0
+
+                on_contour = False
+                for contour in significant_contours:
+                    d_start = abs(cv2.pointPolygonTest(
+                        contour, (float(sx), float(sy)), True,
+                    ))
+                    d_end = abs(cv2.pointPolygonTest(
+                        contour, (float(ex), float(ey)), True,
+                    ))
+                    d_mid = abs(cv2.pointPolygonTest(
+                        contour, (float(mx), float(my)), True,
+                    ))
+                    # All three sample points near the contour edge → redundant
+                    if d_start < overlap_tol and d_end < overlap_tol and d_mid < overlap_tol:
+                        on_contour = True
+                        break
+                if not on_contour:
+                    kept_lines.append(line)
+
+            result.lines = kept_lines
+            logger.info(
+                f"Line overlap cleanup: {lines_before} → {len(result.lines)} "
+                f"(removed {lines_before - len(result.lines)} redundant lines)"
+            )
+
+            # --- Filter redundant circles ---
+            circles_before = len(result.circles)
+            kept_circles: List[DetectedCircle] = []
+            for circle in result.circles:
+                cx_px = circle.center[0] / scale if scale else 0
+                cy_px = height - (circle.center[1] / scale if scale else 0)
+                r_px = circle.radius / scale if scale else 0
+
+                on_contour = False
+                for contour in significant_contours:
+                    # Sample 8 points around the circle perimeter
+                    perimeter_on_contour = 0
+                    for angle_i in range(8):
+                        a = angle_i * (2 * math.pi / 8)
+                        px = cx_px + r_px * math.cos(a)
+                        py = cy_px + r_px * math.sin(a)
+                        d = abs(cv2.pointPolygonTest(
+                            contour, (float(px), float(py)), True,
+                        ))
+                        if d < overlap_tol:
+                            perimeter_on_contour += 1
+                    # If most of the perimeter lies on a contour → redundant
+                    if perimeter_on_contour >= 5:
+                        on_contour = True
+                        break
+                if not on_contour:
+                    kept_circles.append(circle)
+
+            result.circles = kept_circles
+            logger.info(
+                f"Circle overlap cleanup: {circles_before} → {len(result.circles)} "
+                f"(removed {circles_before - len(result.circles)} redundant circles)"
+            )
 
         total = (
             len(result.lines) + len(result.circles) + len(result.arcs)

@@ -249,6 +249,8 @@ TOOL_TIERS = {
         "autocad_set_layer_state",
         "autocad_get_drawing_info",
         "autocad_get_entities",
+        "autocad_delete_entity",
+        "raster_pdf_to_vector_pipeline",
         "revit_create_level",
         "revit_list_walls",
         "revit_list_rooms",
