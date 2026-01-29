@@ -804,9 +804,9 @@ async def raster_auto_vectorize(
     dpi: int = 300,
     scale: float = 1.0,
     target_layer: Optional[str] = None,
-    min_line_length: int = 300,
+    min_line_length: int = 80,
     max_line_gap: int = 10,
-    hough_threshold: int = 250,
+    hough_threshold: int = 150,
     min_circle_radius: int = 20,
     max_circle_radius: int = 500,
     hough_circles_dp: float = 1.2,
@@ -844,9 +844,9 @@ async def raster_auto_vectorize(
         dpi: Image resolution in DPI (default 300)
         scale: Coordinate scale factor — must match raster_attach_image scale (default 1.0)
         target_layer: Layer for created entities (optional)
-        min_line_length: Min line length in pixels (default 300)
+        min_line_length: Min line length in pixels (default 80)
         max_line_gap: Max gap to merge line segments in pixels (default 10)
-        hough_threshold: Line detection sensitivity — lower = more lines (default 250)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 150)
         min_circle_radius: Min circle radius in pixels (default 20)
         max_circle_radius: Max circle radius in pixels, 0=unlimited (default 500)
         hough_circles_dp: Accumulator resolution ratio — lower = finer (default 1.2)
@@ -1148,9 +1148,9 @@ async def raster_pdf_to_vector_pipeline(
     target_layer: Optional[str] = None,
     fade_percent: int = 70,
     store_in_db: bool = True,
-    min_line_length: int = 300,
+    min_line_length: int = 80,
     max_line_gap: int = 10,
-    hough_threshold: int = 250,
+    hough_threshold: int = 150,
     min_circle_radius: int = 20,
     max_circle_radius: int = 500,
     hough_circles_dp: float = 1.2,
@@ -1203,9 +1203,9 @@ async def raster_pdf_to_vector_pipeline(
         target_layer: Layer for vectorized entities (optional)
         fade_percent: Raster fade percentage 0-100 (default 70)
         store_in_db: Store results in PostgreSQL (default True)
-        min_line_length: Min line length in pixels for detection (default 300)
+        min_line_length: Min line length in pixels for detection (default 80)
         max_line_gap: Max gap to merge line segments in pixels (default 10)
-        hough_threshold: Line detection sensitivity — lower = more lines (default 250)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 150)
         min_circle_radius: Min circle radius in pixels (default 20)
         max_circle_radius: Max circle radius in pixels, 0=unlimited (default 500)
         hough_circles_dp: Accumulator resolution ratio — lower = finer (default 1.2)

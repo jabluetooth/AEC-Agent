@@ -86,9 +86,9 @@ def vectorize_bitonal_image(
     image_path: str,
     dpi: int = 300,
     scale: float = 1.0,
-    min_line_length: int = 300,
+    min_line_length: int = 80,
     max_line_gap: int = 10,
-    hough_threshold: int = 250,
+    hough_threshold: int = 150,
     min_circle_radius: int = 20,
     max_circle_radius: int = 500,
     hough_circles_dp: float = 1.2,
@@ -119,9 +119,9 @@ def vectorize_bitonal_image(
         scale: Coordinate scale factor. Pixel coords are multiplied by this value.
                Must match the scale used for raster_attach_image in AutoCAD.
                Default 1.0 means 1 pixel = 1 drawing unit.
-        min_line_length: Minimum line length in pixels for HoughLinesP (default 300).
+        min_line_length: Minimum line length in pixels for HoughLinesP (default 80).
         max_line_gap: Maximum gap between line segments to merge (default 10).
-        hough_threshold: Accumulator threshold for HoughLinesP (default 250).
+        hough_threshold: Accumulator threshold for HoughLinesP (default 150).
         min_circle_radius: Minimum circle radius in pixels (default 20).
         max_circle_radius: Maximum circle radius in pixels, 0=unlimited (default 500).
         hough_circles_dp: Inverse ratio of accumulator resolution to image
@@ -181,43 +181,50 @@ def vectorize_bitonal_image(
         )
 
         # =================================================================
-        # PRE-PROCESSING: Clean the image to isolate line work from fills,
-        # text, gradients, and scan noise.
+        # PRE-PROCESSING: Recover design intent from scanned geometry.
         #
-        # Tuned for SCANNED documents: assumes scan grain, speckles,
-        # uneven lighting, faint text, and edge fuzz.  Real geometry
-        # lines are ≥2-3 px wide at 300 DPI; everything thinner is
-        # noise.
+        # A scanned drawing is a degraded copy of precise geometry.
+        # The goal is to isolate the ink/line work so that Hough
+        # transforms can recover the INTENDED lines, circles, and arcs
+        # — not reproduce scan artifacts.  Every step must preserve
+        # the structural geometry (≥2 px wide at 300 DPI).
         # =================================================================
 
-        # 0. Gaussian blur: smooth scan grain and pixel noise BEFORE
+        # 0. Auto-detect image polarity.
+        #    Scanned blueprints are dark-on-light (ink on paper).
+        #    CAD screenshots and inverted scans are light-on-dark.
+        #    The adaptive threshold with BINARY_INV expects dark-on-light.
+        #    If the image is predominantly dark, invert it first.
+        mean_val = float(np.mean(img))
+        if mean_val < 128:
+            img = cv2.bitwise_not(img)
+            logger.info("Auto-inverted light-on-dark image", mean_value=mean_val)
+
+        # 1. Gaussian blur: smooth scan grain and pixel noise BEFORE
         #    thresholding.  A 5x5 kernel at σ=0 (auto) removes
         #    high-frequency scan artifacts without blurring real geometry.
         blurred_img = cv2.GaussianBlur(img, (5, 5), 0)
 
-        # 1. Adaptive threshold: binarize based on local pixel
-        #    neighbourhood.  blockSize=51 (large neighbourhood) and
-        #    C=15 (strong bias toward white) make it tolerant of uneven
-        #    scan lighting while requiring strong dark-on-light contrast
-        #    to produce a foreground pixel.
+        # 2. Adaptive threshold: binarize based on local pixel
+        #    neighbourhood.  blockSize=51 tolerates uneven scan lighting.
+        #    C=12 balances noise rejection vs line preservation — lower
+        #    than C=15 to keep faint scan lines that represent real
+        #    geometry.
         binary = cv2.adaptiveThreshold(
             blurred_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY_INV, blockSize=51, C=15,
+            cv2.THRESH_BINARY_INV, blockSize=51, C=12,
         )
 
-        # 2. Morphological close: fill tiny gaps in lines so they connect.
-        #    A 3x3 rect kernel at 1 iteration bridges 1-2 px gaps.
+        # 3. Morphological close: bridge tiny gaps in lines (1-2 px)
+        #    caused by scan artifacts or threshold edge effects.
         kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=1)
 
-        # 3. Morphological open: remove small blobs (speckles, text chars,
-        #    scan dithering).  A 3x3 kernel with 2 iterations erodes
-        #    features thinner than ~3 px then dilates back — real
-        #    geometry lines (≥2-3 px at 300 DPI) survive, single-pixel
-        #    noise does not.  NOTE: 5x5 was tested but destroys thin
-        #    ink lines from scanned documents.
+        # 4. Morphological open: remove single-pixel noise (speckles,
+        #    scan dithering).  ONE iteration only — two iterations
+        #    destroy 2px-wide ink lines which are common at 300 DPI.
         kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open, iterations=2)
+        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open, iterations=1)
 
         # 4. Remove small connected components (text, dots, annotations,
         #    scan artifacts).  Uses BOTH area AND bounding-box extent:
