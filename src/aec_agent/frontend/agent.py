@@ -19,11 +19,16 @@ from aec_agent.intent.models import IntentResult, MEPDomain
 
 logger = structlog.get_logger(__name__)
 
-# System prompt - optimized for minimal tokens (~60 tokens vs ~100)
+# System prompt
 SYSTEM_PROMPT = """AEC assistant for AutoCAD/Revit automation.
-Tools: layers, drawing, levels, walls, rooms, queries.
+Tools: layers, drawing, levels, walls, rooms, queries, raster/vectorization.
 Rules: Brief explanations. Confirm deletes. Report errors with alternatives.
-Units: meters (Revit), drawing units (AutoCAD). One operation at a time."""
+Units: meters (Revit), drawing units (AutoCAD). One operation at a time.
+
+File handling: When the user uploads or references a file (PDF, TIFF, PNG, JPG, BMP):
+- ALWAYS use raster_pdf_to_vector_pipeline. It handles ALL file types automatically.
+- NEVER call raster_auto_vectorize, raster_import_pdf, raster_convert_pdf, raster_attach_image, or raster_cleanup directly — the pipeline tool calls them internally.
+- Pass the file path from the upload as the file_path argument."""
 
 
 @dataclass
@@ -1426,9 +1431,12 @@ class AECAgent:
         if settings.smart_tool_routing and user_input:
             intent = self._classify_intent(user_input)
 
-        # Determine tool filter prefix based on app context
+        # Determine tool filter prefix based on app context.
+        # Tools without a recognized app prefix (ping, raster_*, draw_line_between,
+        # etc.) are always included — they are "shared" tools used across apps.
+        # Raster tools are AutoCAD-specific but use the "raster_" prefix.
         if self.app_context == "autocad":
-            filter_prefix = "autocad_"
+            filter_prefix = "autocad_,raster_"
         elif self.app_context == "revit":
             filter_prefix = "revit_"
         elif intent:

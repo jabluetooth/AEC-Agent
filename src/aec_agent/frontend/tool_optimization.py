@@ -70,8 +70,56 @@ MINIMAL_DESCRIPTIONS = {
     "draw_rectangle_around": "Draw rectangle around element. Args: element, padding (0.5m), layer.",
     "get_distance_between": "Get distance between elements. Args: element1, element2.",
 
+    # Raster / Vectorization tools
+    # IMPORTANT: raster_pdf_to_vector_pipeline is THE primary tool for all file-to-CAD conversions.
+    # Other raster_* tools are low-level building blocks — the LLM should NOT call them directly.
+    "raster_pdf_to_vector_pipeline": (
+        "PRIMARY TOOL: Convert any PDF or image (TIFF/PNG/JPG/BMP) to AutoCAD vector entities. "
+        "Use this for ALL vectorization requests. Handles the full pipeline automatically. "
+        "Args: file_path (str, required), page (int), dpi (int), scale (float), mode ('auto'/'raster'/'vector')."
+    ),
+    "raster_auto_vectorize": (
+        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "Runs OpenCV detection on an already-processed bitonal TIFF only."
+    ),
+    "raster_import_pdf": (
+        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "Imports vector PDF via PDFIMPORT. The pipeline tool calls this automatically."
+    ),
+    "raster_convert_pdf": (
+        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "Converts PDF page to bitonal TIFF. The pipeline tool calls this automatically."
+    ),
+    "raster_attach_image": (
+        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "Attaches a raster image to AutoCAD. The pipeline tool calls this automatically."
+    ),
+    "raster_cleanup": (
+        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "Despeckles/deskews raster image. The pipeline tool calls this automatically."
+    ),
+    "raster_vectorize": "LOW-LEVEL — use raster_pdf_to_vector_pipeline instead. VTools vectorization.",
+    "raster_ocr_extract": "Extract text from raster images using Raster Design OCR.",
+    "raster_get_status": "Get info about raster images in the current AutoCAD drawing.",
+    "raster_get_entity_count": "Count entities in drawing, optionally filtered by layer.",
+    "raster_fade_image": "Fade raster images to reduce opacity. Args: fade_percent (int).",
+    "raster_process_image": "Apply bitonal image filter via Raster Design ibfilter.",
+    "raster_create_primitive": "Create a REM primitive from raster data.",
+    "raster_select_entities": "Select raster entities within a rectangular region.",
+    "raster_follower": "Semi-automatic follower for tracing raster lines/contours.",
+    "raster_recognize_text": "Recognize and convert raster text to AutoCAD TEXT entities.",
+    "raster_store_vectorized": "Extract all entities from drawing and store in PostgreSQL.",
+    "raster_topology_cleanup": (
+        "Post-process vectorized geometry: merge fragmented lines and snap dangling endpoints. "
+        "Args: lines_json (list), snap_tolerance (float)."
+    ),
+
     # Common
     "ping": "Check server connectivity.",
+    "get_server_status": "Get server status, lock stats, cache info.",
+    "check_sidecar": "Check if AutoCAD/Revit sidecar is healthy. Args: sidecar_type.",
+    "get_file_context": "Get drawing summary (entities, layers, stats). Works without PostgreSQL.",
+    "get_cache_status": "Get cache status and active project info.",
 }
 
 

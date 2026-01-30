@@ -154,7 +154,7 @@ async def _show_tools_for_context(mcp_client: MCPClient, app_context: str):
     """Show tools available for the selected app context."""
     filter_prefix = None
     if app_context == "autocad":
-        filter_prefix = "autocad_"
+        filter_prefix = "autocad_,raster_"
     elif app_context == "revit":
         filter_prefix = "revit_"
 
@@ -176,6 +176,7 @@ async def on_message(message: cl.Message):
     Handle incoming user messages.
 
     Processes the message through the agent and streams back the response.
+    Supports file uploads (PDF, images) via Chainlit elements.
     """
     agent: AECAgent = cl.user_session.get("agent")
 
@@ -185,6 +186,26 @@ async def on_message(message: cl.Message):
         ).send()
         return
 
+    # Build the user message, including file upload info if present
+    user_text = message.content or ""
+    if message.elements:
+        import os
+        file_descriptions = []
+        for el in message.elements:
+            path = getattr(el, "path", None) or getattr(el, "url", None)
+            if not path:
+                continue
+            name = getattr(el, "name", os.path.basename(path))
+            ext = os.path.splitext(name)[1].lower()
+            mime = getattr(el, "mime", None) or ""
+            file_descriptions.append(
+                f"[Uploaded file: {name}, type: {ext or mime}, "
+                f"path: {path}] "
+                f"→ Use raster_pdf_to_vector_pipeline with file_path=\"{path}\" to vectorize."
+            )
+        if file_descriptions:
+            user_text = user_text + "\n\n" + "\n".join(file_descriptions)
+
     # Create response message for streaming
     response_msg = cl.Message(content="")
     await response_msg.send()
@@ -193,7 +214,7 @@ async def on_message(message: cl.Message):
     full_response = ""
 
     try:
-        async for chunk in agent.process_message(message.content):
+        async for chunk in agent.process_message(user_text):
             # Check if this is a tool execution marker
             if chunk.startswith("\n\n*Executing "):
                 # Extract tool name

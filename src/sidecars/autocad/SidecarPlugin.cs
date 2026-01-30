@@ -75,6 +75,21 @@ namespace AECAgent.AutoCAD
 
                 Logger.Info($"AEC Agent Sidecar initialized on port {_listenerPort}");
                 WriteToCommandLine($"[AEC Agent] Sidecar started on port {_listenerPort}");
+
+                // Check for already-open document (plugin loaded after drawing was opened)
+                try
+                {
+                    Document activeDoc = Application.DocumentManager.MdiActiveDocument;
+                    if (activeDoc != null && !string.IsNullOrEmpty(activeDoc.Name))
+                    {
+                        Logger.Info($"Existing document detected on init: {activeDoc.Name}");
+                        NotifyPostgresSync(activeDoc.Name, "autocad", false);
+                    }
+                }
+                catch (System.Exception ex)
+                {
+                    Logger.Debug($"Could not check for existing document: {ex.Message}");
+                }
             }
             catch (System.Exception ex)
             {
@@ -123,8 +138,7 @@ namespace AECAgent.AutoCAD
 
             var doc = e.Document;
             Logger.Info($"Document became current: {doc.Name}");
-            // Only notify on document switch (for caching purposes)
-            // NotifyPostgresSync(doc.Name, "autocad", false);
+            NotifyPostgresSync(doc.Name, "autocad", false);
         }
 
         private static void OnDocumentClosing(object sender, DocumentCollectionEventArgs e)

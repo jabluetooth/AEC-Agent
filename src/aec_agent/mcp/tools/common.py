@@ -138,7 +138,8 @@ async def notify_file_opened(
     Notify the server that a file was opened.
 
     Called by sidecar event hooks when AutoCAD/Revit opens a document.
-    Triggers background sync to PostgreSQL for caching.
+    Always stores active file context in SQLite cache.
+    Triggers background sync to PostgreSQL if available.
 
     Args:
         source: 'autocad' or 'revit'
@@ -155,7 +156,15 @@ async def notify_file_opened(
     if not file_path:
         return error_result(4002, "file_path is required")
 
-    # Trigger background sync
+    # Always store active file context in SQLite cache (works without PostgreSQL)
+    cache = get_cache()
+    if cache:
+        await cache.set_metadata("active_source", source)
+        await cache.set_metadata("active_file_path", file_path)
+        if document_title:
+            await cache.set_metadata("active_document_title", document_title)
+
+    # Trigger background sync to PostgreSQL (if available)
     result = await trigger_background_sync(source, file_path, force=force_sync)
 
     return success_result(

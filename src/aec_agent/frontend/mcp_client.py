@@ -316,6 +316,26 @@ def filter_tool_result(result: "ToolResult", preset: str = "standard") -> "ToolR
     )
 
 
+# All known app-specific tool prefixes.  Tools whose name does NOT start with
+# any of these are considered "shared" (e.g. ``ping``, ``find_elements``,
+# ``draw_line_between``) and are always included regardless of prefix filter.
+_APP_PREFIXES = ("autocad_", "revit_", "raster_")
+
+
+def _filter_by_prefix(tools: list, filter_prefix: str) -> list:
+    """Filter tools by comma-separated prefixes, always keeping shared tools.
+
+    A tool is included if:
+    - Its name starts with one of the requested prefixes, OR
+    - Its name does NOT start with any known app prefix (shared tool).
+    """
+    prefixes = tuple(p.strip() for p in filter_prefix.split(",") if p.strip())
+    return [
+        t for t in tools
+        if t.name.startswith(prefixes) or not t.name.startswith(_APP_PREFIXES)
+    ]
+
+
 class MCPClientError(Exception):
     """Base exception for MCP client errors."""
 
@@ -465,11 +485,15 @@ class MCPClient:
         """Get list of available tools.
 
         Args:
-            filter_prefix: If provided, only return tools starting with this prefix.
+            filter_prefix: If provided, only return tools matching one of these
+                          prefixes (comma-separated, e.g. ``"autocad_,raster_"``).
+                          Tools without any recognized app prefix (``autocad_``,
+                          ``revit_``, ``raster_``) are always included as shared
+                          tools (e.g. ``ping``, ``find_elements``).
         """
         tools = list(self._tools.values())
         if filter_prefix:
-            tools = [t for t in tools if t.name.startswith(filter_prefix)]
+            tools = _filter_by_prefix(tools, filter_prefix)
         return tools
 
     def get_tool(self, name: str) -> Optional[Tool]:
@@ -512,9 +536,9 @@ class MCPClient:
             }
             tools = [t for t in tools if t.name not in metadata_tools]
 
-        # Filter by prefix
+        # Filter by prefix (supports comma-separated, includes shared tools)
         if filter_prefix:
-            tools = [t for t in tools if t.name.startswith(filter_prefix)]
+            tools = _filter_by_prefix(tools, filter_prefix)
 
         return [
             tool.to_openai_format(compress=compress, compression_mode=compression_mode)
@@ -555,9 +579,9 @@ class MCPClient:
             }
             tools = [t for t in tools if t.name not in metadata_tools]
 
-        # Filter by prefix
+        # Filter by prefix (supports comma-separated, includes shared tools)
         if filter_prefix:
-            tools = [t for t in tools if t.name.startswith(filter_prefix)]
+            tools = _filter_by_prefix(tools, filter_prefix)
 
         return [
             tool.to_anthropic_format(compress=compress, compression_mode=compression_mode)

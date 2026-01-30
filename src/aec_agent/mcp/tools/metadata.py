@@ -49,6 +49,90 @@ async def _get_services():
     return pool, embeddings
 
 
+async def _get_file_context_from_sidecar(source: Optional[str] = None) -> dict:
+    """Fall back to direct sidecar query when PostgreSQL is not available."""
+    from aec_agent.mcp.sidecar_client import call_autocad_command, call_sidecar, SidecarError
+
+    # Determine which sidecar to query
+    if source is None:
+        # Try to read from cache which source is active
+        from aec_agent.mcp.server import get_cache
+        cache = get_cache()
+        if cache:
+            source = await cache.get_metadata("active_source")
+        if not source:
+            source = "autocad"  # default
+
+    if source == "autocad":
+        try:
+            drawing_info = await call_autocad_command("get_drawing_info", {})
+            if drawing_info.get("success"):
+                data = drawing_info.get("data", {})
+                return success_result(
+                    data={
+                        "project": {
+                            "name": data.get("file_name", "Unknown"),
+                            "source": "autocad",
+                            "file_path": data.get("file_path", ""),
+                        },
+                        "summary": {
+                            "total_elements": data.get("entity_count", 0),
+                            "layer_count": data.get("layer_count", 0),
+                        },
+                        "drawing_info": data,
+                        "note": "Direct sidecar query (PostgreSQL not available for cached metadata).",
+                    },
+                    message=(
+                        f"Drawing: {data.get('file_name', 'Unknown')} — "
+                        f"{data.get('entity_count', 0)} entities, "
+                        f"{data.get('layer_count', 0)} layers"
+                    ),
+                )
+            else:
+                return error_result(
+                    ErrorCode.SIDECAR_ERROR,
+                    drawing_info.get("error", {}).get("message", "Sidecar query failed"),
+                )
+        except SidecarError as e:
+            return error_result(e.code, e.message, e.details)
+        except Exception as e:
+            return error_result(
+                ErrorCode.SIDECAR_ERROR,
+                f"Could not reach AutoCAD sidecar: {e}. Is AutoCAD running with the AEC Agent plugin?",
+            )
+    elif source == "revit":
+        try:
+            status = await call_sidecar(
+                endpoint="/mcp/status", method="GET", sidecar_type="revit"
+            )
+            if status.get("success"):
+                data = status.get("data", {})
+                return success_result(
+                    data={
+                        "project": {
+                            "name": data.get("title", "Unknown"),
+                            "source": "revit",
+                            "file_path": data.get("path", ""),
+                        },
+                        "summary": data,
+                        "note": "Direct sidecar query (PostgreSQL not available for cached metadata).",
+                    },
+                    message=f"Revit model: {data.get('title', 'Unknown')}",
+                )
+            else:
+                return error_result(
+                    ErrorCode.SIDECAR_ERROR,
+                    status.get("error", {}).get("message", "Sidecar query failed"),
+                )
+        except Exception as e:
+            return error_result(
+                ErrorCode.SIDECAR_ERROR,
+                f"Could not reach Revit sidecar: {e}. Is Revit running with the AEC Agent extension?",
+            )
+
+    return error_result(ErrorCode.INVALID_PARAMS, f"Unknown source: {source}")
+
+
 async def _get_active_project_id() -> Optional[UUID]:
     """Get the currently active project ID from cache or recent sync."""
     from aec_agent.mcp.server import get_cache
@@ -493,13 +577,10 @@ async def get_file_context(
     source: Optional[str] = None,
 ) -> dict:
     """
-    Get a compact summary of the current drawing/model from cache.
+    Get a compact summary of the current drawing/model.
 
-    Returns element counts by type, layers, categories, and key stats
-    without loading full element data. This is the fastest way to
-    understand what's in the current file.
-
-    Use this before making queries to avoid expensive sidecar calls.
+    Returns element counts by type, layers, categories, and key stats.
+    Uses PostgreSQL cache if available, otherwise queries the sidecar directly.
 
     Args:
         source: Filter by source ("autocad" or "revit"), or None for all
@@ -510,17 +591,13 @@ async def get_file_context(
     pool, _ = await _get_services()
 
     if not pool:
-        return error_result(
-            MetadataErrorCode.DATABASE_NOT_CONFIGURED,
-            "Database not configured. Set DATABASE_URL for cached context."
-        )
+        # No PostgreSQL — fall back to direct sidecar query
+        return await _get_file_context_from_sidecar(source)
 
     project_id = await _get_active_project_id()
     if not project_id:
-        return error_result(
-            MetadataErrorCode.PROJECT_NOT_FOUND,
-            "No active project. Open a drawing/model first."
-        )
+        # No active project in cache — fall back to direct sidecar query
+        return await _get_file_context_from_sidecar(source)
 
     async with pool.acquire() as conn:
         # Project info
@@ -666,6 +743,27 @@ async def get_cache_status() -> dict:
     else:
         status["active_project_id"] = None
         status["cache_fresh"] = False
-        status["message"] = "No active project. Extract a drawing first."
+
+        # Check if we at least have an active file tracked in SQLite
+        from aec_agent.mcp.server import get_cache
+        cache = get_cache()
+        if cache:
+            active_file = await cache.get_metadata("active_file_path")
+            active_source = await cache.get_metadata("active_source")
+            if active_file:
+                status["active_file_path"] = active_file
+                status["active_source"] = active_source
+                status["message"] = (
+                    f"Drawing open: {active_file}. "
+                    "PostgreSQL not synced — use autocad_get_drawing_info or "
+                    "autocad_get_entities for direct access."
+                )
+            else:
+                status["message"] = (
+                    "No active project. Open a drawing in AutoCAD/Revit first, "
+                    "or use autocad_get_drawing_info to check the sidecar."
+                )
+        else:
+            status["message"] = "No active project. Open a drawing/model first."
 
     return success_result(data=status)
