@@ -823,6 +823,18 @@ async def raster_auto_vectorize(
     line_merge_dist_tol: float = 15.0,
     circle_merge_center_tol: float = 30.0,
     circle_merge_radius_tol: float = 20.0,
+    # Signal Restoration
+    signal_restore: bool = True,
+    signal_close_kernel_length: int = 15,
+    signal_close_angle_step: int = 15,
+    # Iterative Masking
+    mask_detected_circles: bool = True,
+    mask_detected_lines: bool = False,
+    mask_thickness: int = 5,
+    # Skeletonization & Topology
+    skeletonize: bool = False,
+    topology_cleanup: bool = False,
+    snap_tolerance: float = 5.0,
 ) -> dict:
     """
     LOW-LEVEL: OpenCV vectorization step only. DO NOT call this directly for
@@ -864,6 +876,15 @@ async def raster_auto_vectorize(
         line_merge_dist_tol: Max perpendicular distance in pixels to merge lines (default 15)
         circle_merge_center_tol: Max center distance in pixels to merge circles (default 30)
         circle_merge_radius_tol: Max radius diff in pixels to merge circles (default 20)
+        signal_restore: Bridge gaps in dashed/broken lines via directional closing (default True)
+        signal_close_kernel_length: Directional kernel length in pixels (default 15)
+        signal_close_angle_step: Degrees between directional passes (default 15)
+        mask_detected_circles: Erase detected circle pixels before contour pass (default True)
+        mask_detected_lines: Erase detected line pixels before contour pass (default False)
+        mask_thickness: Pixel thickness of the erasure mask (default 5)
+        skeletonize: Reduce thick lines to 1px centerlines before detection (default False)
+        topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default False)
+        snap_tolerance: Max distance in drawing units to snap endpoints (default 5.0)
 
     Returns:
         Vectorization summary with entity counts and creation results
@@ -902,6 +923,15 @@ async def raster_auto_vectorize(
             line_merge_dist_tol=line_merge_dist_tol,
             circle_merge_center_tol=circle_merge_center_tol,
             circle_merge_radius_tol=circle_merge_radius_tol,
+            signal_restore=signal_restore,
+            signal_close_kernel_length=signal_close_kernel_length,
+            signal_close_angle_step=signal_close_angle_step,
+            mask_detected_circles=mask_detected_circles,
+            mask_detected_lines=mask_detected_lines,
+            mask_thickness=mask_thickness,
+            skeletonize=skeletonize,
+            topology_cleanup=topology_cleanup,
+            snap_tolerance=snap_tolerance,
         )
 
         created = {"lines": 0, "circles": 0, "arcs": 0, "ellipses": 0, "polylines": 0, "errors": 0}
@@ -1167,6 +1197,18 @@ async def raster_pdf_to_vector_pipeline(
     line_merge_dist_tol: float = 15.0,
     circle_merge_center_tol: float = 30.0,
     circle_merge_radius_tol: float = 20.0,
+    # Signal Restoration
+    signal_restore: bool = True,
+    signal_close_kernel_length: int = 15,
+    signal_close_angle_step: int = 15,
+    # Iterative Masking
+    mask_detected_circles: bool = True,
+    mask_detected_lines: bool = False,
+    mask_thickness: int = 5,
+    # Skeletonization & Topology
+    skeletonize: bool = False,
+    topology_cleanup: bool = False,
+    snap_tolerance: float = 5.0,
 ) -> dict:
     """
     PRIMARY TOOL for converting any PDF or image file to AutoCAD vector
@@ -1223,6 +1265,15 @@ async def raster_pdf_to_vector_pipeline(
         line_merge_dist_tol: Max perpendicular distance in pixels to merge lines (default 15)
         circle_merge_center_tol: Max center distance in pixels to merge circles (default 30)
         circle_merge_radius_tol: Max radius diff in pixels to merge circles (default 20)
+        signal_restore: Bridge gaps in dashed/broken lines via directional closing (default True)
+        signal_close_kernel_length: Directional kernel length in pixels (default 15)
+        signal_close_angle_step: Degrees between directional passes (default 15)
+        mask_detected_circles: Erase detected circle pixels before contour pass (default True)
+        mask_detected_lines: Erase detected line pixels before contour pass (default False)
+        mask_thickness: Pixel thickness of the erasure mask (default 5)
+        skeletonize: Reduce thick lines to 1px centerlines before detection (default False)
+        topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default False)
+        snap_tolerance: Max distance in drawing units to snap endpoints (default 5.0)
 
     Returns:
         Pipeline results with step details, entity counts, and PostgreSQL project info
@@ -1419,6 +1470,15 @@ async def raster_pdf_to_vector_pipeline(
                     line_merge_dist_tol=line_merge_dist_tol,
                     circle_merge_center_tol=circle_merge_center_tol,
                     circle_merge_radius_tol=circle_merge_radius_tol,
+                    signal_restore=signal_restore,
+                    signal_close_kernel_length=signal_close_kernel_length,
+                    signal_close_angle_step=signal_close_angle_step,
+                    mask_detected_circles=mask_detected_circles,
+                    mask_detected_lines=mask_detected_lines,
+                    mask_thickness=mask_thickness,
+                    skeletonize=skeletonize,
+                    topology_cleanup=topology_cleanup,
+                    snap_tolerance=snap_tolerance,
                 )
                 steps_completed.append({
                     "step": "opencv_detect_features",
@@ -1648,3 +1708,110 @@ async def raster_pdf_to_vector_pipeline(
             f"Pipeline failed: {str(e)}",
             f"Steps completed: {[s['step'] for s in steps_completed]}"
         )
+
+
+# =============================================================================
+# Topology Cleanup (standalone post-processing)
+# =============================================================================
+
+@mcp.tool()
+@with_tool_lock(get_lock())
+async def raster_topology_cleanup(
+    lines_json: List[dict],
+    polylines_json: Optional[List[dict]] = None,
+    snap_tolerance: float = 5.0,
+) -> dict:
+    """
+    Post-process vectorized geometry by merging degree-2 breaks and snapping
+    dangling endpoints using a NetworkX graph.  Use this when previously
+    vectorized output has fragmented lines that should be continuous.
+
+    This tool operates on already-extracted geometry (JSON arrays of lines and
+    polylines) and returns cleaned geometry.  It does NOT read images or call
+    AutoCAD — it is a pure-Python graph operation.
+
+    Args:
+        lines_json: List of line dicts with "start" [x,y] and "end" [x,y].
+        polylines_json: Optional list of polyline dicts with "points" [[x,y],...] and "closed" bool.
+        snap_tolerance: Max distance in drawing units to snap dangling endpoints (default 5.0).
+
+    Returns:
+        Cleaned geometry with merged lines and snapped endpoints.
+
+    Example:
+        raster_topology_cleanup(
+            lines_json=[{"start": [0,0], "end": [10,0]}, {"start": [10.1,0], "end": [20,0]}],
+            snap_tolerance=1.0,
+        )
+    """
+    try:
+        from .topology import (
+            build_segment_graph,
+            merge_degree2_nodes,
+            snap_dangling_endpoints,
+            graph_to_vectorization_result,
+        )
+        from .image_vectorizer import (
+            DetectedLine,
+            DetectedPolyline,
+            VectorizationResult,
+        )
+    except ImportError as e:
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            f"Required dependency not installed: {e}. "
+            "Install with: pip install networkx>=3.0",
+        )
+
+    if not lines_json:
+        return error_result(ErrorCode.INVALID_PARAMS, "lines_json is required and must not be empty")
+
+    # Build VectorizationResult from JSON input
+    vr = VectorizationResult()
+    for ld in lines_json:
+        start = tuple(ld.get("start", [0, 0]))
+        end = tuple(ld.get("end", [0, 0]))
+        vr.lines.append(DetectedLine(start=start, end=end))
+
+    for pd in (polylines_json or []):
+        pts = [tuple(p) for p in pd.get("points", [])]
+        closed = pd.get("closed", False)
+        if len(pts) >= 2:
+            vr.polylines.append(DetectedPolyline(points=pts, closed=closed))
+
+    lines_before = len(vr.lines)
+    polylines_before = len(vr.polylines)
+
+    try:
+        graph = build_segment_graph(vr, snap_tolerance)
+        graph = merge_degree2_nodes(graph)
+        graph = snap_dangling_endpoints(graph, snap_tolerance)
+        cleaned = graph_to_vectorization_result(graph)
+
+        # Serialize back to JSON
+        cleaned_lines = [
+            {"start": list(l.start), "end": list(l.end)}
+            for l in cleaned.lines
+        ]
+        cleaned_polylines = [
+            {"points": [list(p) for p in pl.points], "closed": pl.closed}
+            for pl in cleaned.polylines
+        ]
+
+        return success_result(
+            data={
+                "lines_before": lines_before,
+                "lines_after": len(cleaned.lines),
+                "polylines_before": polylines_before,
+                "polylines_after": len(cleaned.polylines),
+                "lines": cleaned_lines,
+                "polylines": cleaned_polylines,
+            },
+            message=(
+                f"Topology cleanup: {lines_before} lines → {len(cleaned.lines)}, "
+                f"{polylines_before} polylines → {len(cleaned.polylines)}"
+            ),
+        )
+    except Exception as e:
+        logger.error("Topology cleanup failed", error=str(e), exc_info=True)
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Topology cleanup failed: {e}")

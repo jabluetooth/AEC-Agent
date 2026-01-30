@@ -63,8 +63,18 @@ poetry.lock
 # Windows
 Thumbs.db
 
+# Claude Code local state
 .claude/
 
-*.md
+# C# / .NET build artifacts (AutoCAD sidecar)
+bin/
+obj/
+*.dll
+*.pdb
+*.nupkg
 
-CLAUDE.md
+# Benchmarks
+.benchmarks/
+
+# Chainlit auto-generated (keep only root chainlit.md)
+.chainlit/

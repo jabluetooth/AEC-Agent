@@ -105,6 +105,22 @@ def vectorize_bitonal_image(
     line_merge_dist_tol: float = 15.0,
     circle_merge_center_tol: float = 30.0,
     circle_merge_radius_tol: float = 20.0,
+    # --- Signal Restoration parameters ---
+    signal_restore: bool = True,
+    signal_close_kernel_length: int = 15,
+    signal_close_angle_step: int = 15,
+    signal_close_iterations: int = 1,
+    signal_smooth_ksize: int = 3,
+    signal_adaptive_block: int = 15,
+    signal_adaptive_c: int = 2,
+    # --- Iterative Masking parameters ---
+    mask_detected_circles: bool = True,
+    mask_detected_lines: bool = False,
+    mask_thickness: int = 5,
+    # --- Skeletonization & Topology parameters ---
+    skeletonize: bool = False,
+    topology_cleanup: bool = False,
+    snap_tolerance: float = 5.0,
 ) -> VectorizationResult:
     """
     Detect geometric features from a bitonal image using OpenCV.
@@ -148,6 +164,44 @@ def vectorize_bitonal_image(
         line_merge_dist_tol: Max perpendicular distance (pixels) to merge lines (default 15).
         circle_merge_center_tol: Max center distance (pixels) to merge circles (default 30).
         circle_merge_radius_tol: Max radius difference (pixels) to merge circles (default 20).
+        signal_restore: Enable Signal Restoration phase to bridge gaps in
+                        dashed/broken lines before detection (default True).
+        signal_close_kernel_length: Length in pixels of the directional line
+                                    kernel used for morphological closing.
+                                    Larger values bridge wider gaps but risk
+                                    merging nearby parallel lines (default 15).
+        signal_close_angle_step: Angular step in degrees between directional
+                                 closing passes.  Smaller = more directions
+                                 tested = better isotropy but slower (default 15).
+        signal_close_iterations: Morphological close iterations per direction.
+                                 More iterations = more aggressive bridging
+                                 (default 1).
+        signal_smooth_ksize: Gaussian blur kernel size for post-close smoothing.
+                             Must be odd.  Removes jagged staircase edges left
+                             by the directional close (default 3).
+        signal_adaptive_block: Block size for the adaptive threshold that
+                               re-binarizes after smoothing (default 15).
+        signal_adaptive_c: Constant subtracted from the adaptive threshold
+                           mean (default 2).
+        mask_detected_circles: After detecting circles, erase their pixels
+                               from the binary image so the contour pass does
+                               not re-trace them as polylines (default True).
+        mask_detected_lines: After detecting lines, erase their pixels from
+                             the binary image.  Off by default — can remove
+                             too much on dense drawings (default False).
+        mask_thickness: Pixel thickness of the mask painted over detected
+                        features.  Larger values erase more aggressively
+                        (default 5).
+        skeletonize: Run morphological skeletonization (scikit-image) after
+                     signal restoration to reduce thick lines to 1px
+                     centerlines before Hough detection (default False).
+                     Requires ``scikit-image`` to be installed.
+        topology_cleanup: After all detection, build a NetworkX graph from
+                          detected lines/polylines, merge degree-2 nodes
+                          (artificial breaks), and snap dangling endpoints
+                          (default False).  Requires ``networkx``.
+        snap_tolerance: Maximum distance in drawing units to snap dangling
+                        endpoints during topology cleanup (default 5.0).
 
     Returns:
         VectorizationResult with detected lines, circles, arcs, ellipses,
@@ -226,6 +280,62 @@ def vectorize_bitonal_image(
         kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open, iterations=1)
 
+        # =================================================================
+        # SIGNAL RESTORATION: Bridge gaps in dashed / broken lines.
+        #
+        # Standard vectorizers trace exactly what they see: gaps in the
+        # raster pixels produce dashed output even when the design intent
+        # is a continuous line.  This phase applies directional
+        # morphological closing at multiple orientations to bridge those
+        # gaps, then re-smooths and re-binarizes so downstream Hough
+        # transforms see continuous geometry.
+        # =================================================================
+        if signal_restore:
+            # 5a. Directional morphological close.
+            #     A single isotropic (square) kernel cannot reliably bridge
+            #     gaps in lines at arbitrary angles without also merging
+            #     nearby parallel features.  Instead, we sweep a thin LINE
+            #     kernel across multiple orientations (0°, 15°, 30°, …, 165°)
+            #     and OR the results.  Each kernel bridges gaps only along
+            #     its direction, preserving perpendicular separation.
+            restored = np.zeros_like(binary)
+            for angle_deg in range(0, 180, signal_close_angle_step):
+                # Build a rotated line kernel of the requested length
+                k_len = signal_close_kernel_length
+                kern = np.zeros((k_len, k_len), dtype=np.uint8)
+                center = k_len // 2
+                angle_rad = math.radians(angle_deg)
+                dx = math.cos(angle_rad)
+                dy = math.sin(angle_rad)
+                for t in range(-center, center + 1):
+                    x = int(round(center + t * dx))
+                    y = int(round(center + t * dy))
+                    if 0 <= x < k_len and 0 <= y < k_len:
+                        kern[y, x] = 1
+
+                closed_dir = cv2.morphologyEx(
+                    binary, cv2.MORPH_CLOSE, kern,
+                    iterations=signal_close_iterations,
+                )
+                restored = cv2.bitwise_or(restored, closed_dir)
+
+            # 5b. Gaussian blur + adaptive threshold to smooth jagged
+            #     staircase edges introduced by the directional close and
+            #     to re-binarize the result cleanly.
+            sk = signal_smooth_ksize if signal_smooth_ksize % 2 == 1 else signal_smooth_ksize + 1
+            smoothed = cv2.GaussianBlur(restored, (sk, sk), 0)
+            binary = cv2.adaptiveThreshold(
+                smoothed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, blockSize=signal_adaptive_block, C=signal_adaptive_c,
+            )
+
+            logger.info(
+                "Signal restoration complete",
+                kernel_length=signal_close_kernel_length,
+                angle_step=signal_close_angle_step,
+                directions=180 // signal_close_angle_step,
+            )
+
         # 4. Remove small connected components (text, dots, annotations,
         #    scan artifacts).  Uses BOTH area AND bounding-box extent:
         #    - Small area AND small bbox → noise (dots, speckles) → remove
@@ -254,6 +364,22 @@ def vectorize_bitonal_image(
             components_removed=sum(1 for lbl in range(1, n_labels) if not _component_kept(lbl)),
         )
 
+        # =================================================================
+        # OPTIONAL: Skeletonization (reduce thick lines to 1px centers)
+        # =================================================================
+        if skeletonize:
+            try:
+                from skimage.morphology import skeletonize as _skeletonize
+                # skimage expects bool array (True = foreground)
+                skel = _skeletonize(binary > 0)
+                binary = (skel.astype(np.uint8)) * 255
+                logger.info("Skeletonization complete (lines reduced to 1px centerlines)")
+            except ImportError:
+                logger.warning(
+                    "scikit-image not installed — skipping skeletonization. "
+                    "Install with: pip install scikit-image>=0.21.0"
+                )
+
         # Helper: convert pixel coords to drawing units.
         def px_to_dwg(px_x: float, px_y: float) -> Tuple[float, float]:
             return (px_x * scale, (height - px_y) * scale)
@@ -262,38 +388,12 @@ def vectorize_bitonal_image(
             return px_dist * scale
 
         # =================================================================
-        # LINE DETECTION (HoughLinesP) + Deduplication
-        # =================================================================
-        edges = cv2.Canny(binary, 50, 150, apertureSize=3)
-        raw_lines = cv2.HoughLinesP(
-            edges,
-            rho=1,
-            theta=np.pi / 180,
-            threshold=hough_threshold,
-            minLineLength=min_line_length,
-            maxLineGap=max_line_gap,
-        )
-
-        # Deduplicate lines: merge nearly-parallel, closely-spaced segments
-        deduped_lines = _deduplicate_lines(
-            raw_lines, line_merge_angle_tol, line_merge_dist_tol,
-        )
-        for (x1, y1, x2, y2) in deduped_lines:
-            start = px_to_dwg(float(x1), float(y1))
-            end = px_to_dwg(float(x2), float(y2))
-            result.lines.append(DetectedLine(start=start, end=end))
-
-        logger.info(
-            f"Detected {len(result.lines)} lines "
-            f"(raw: {len(raw_lines) if raw_lines is not None else 0}, "
-            f"after dedup: {len(deduped_lines)})"
-        )
-
-        # =================================================================
         # CIRCLE DETECTION (HoughCircles) + Deduplication
         # =================================================================
-        # Use the pre-blurred image (Gaussian) with an additional median
-        # blur to suppress salt-and-pepper scan noise before circle detection.
+        # Circles are detected FIRST because they are the most "semantic"
+        # primitive and the most prone to fragmentation by contour tracers.
+        # After detection, their pixels can be masked out of the binary
+        # image so subsequent line and contour passes don't re-trace them.
         circle_input = cv2.medianBlur(blurred_img, 7)
         raw_circles = cv2.HoughCircles(
             circle_input,
@@ -319,6 +419,68 @@ def vectorize_bitonal_image(
             f"(raw: {len(raw_circles[0]) if raw_circles is not None else 0}, "
             f"after dedup: {len(deduped_circles)})"
         )
+
+        # --- Mask detected circles from binary image ---
+        if mask_detected_circles and deduped_circles:
+            circles_masked = 0
+            for (cx, cy, r) in deduped_circles:
+                cv2.circle(
+                    binary, (int(round(cx)), int(round(cy))),
+                    int(round(r)) + mask_thickness, 0, mask_thickness * 2,
+                )
+                circles_masked += 1
+            logger.info(
+                "Masked detected circles from binary",
+                circles_masked=circles_masked,
+                mask_thickness=mask_thickness,
+            )
+
+        # =================================================================
+        # LINE DETECTION (HoughLinesP) + Deduplication
+        # =================================================================
+        # Run on the (potentially circle-masked) binary image so line
+        # detection doesn't pick up circle edges as straight segments.
+        edges = cv2.Canny(binary, 50, 150, apertureSize=3)
+        raw_lines = cv2.HoughLinesP(
+            edges,
+            rho=1,
+            theta=np.pi / 180,
+            threshold=hough_threshold,
+            minLineLength=min_line_length,
+            maxLineGap=max_line_gap,
+        )
+
+        # Deduplicate lines: merge nearly-parallel, closely-spaced segments
+        deduped_lines = _deduplicate_lines(
+            raw_lines, line_merge_angle_tol, line_merge_dist_tol,
+        )
+        for (x1, y1, x2, y2) in deduped_lines:
+            start = px_to_dwg(float(x1), float(y1))
+            end = px_to_dwg(float(x2), float(y2))
+            result.lines.append(DetectedLine(start=start, end=end))
+
+        logger.info(
+            f"Detected {len(result.lines)} lines "
+            f"(raw: {len(raw_lines) if raw_lines is not None else 0}, "
+            f"after dedup: {len(deduped_lines)})"
+        )
+
+        # --- Mask detected lines from binary image ---
+        if mask_detected_lines and deduped_lines:
+            lines_masked = 0
+            for (x1, y1, x2, y2) in deduped_lines:
+                cv2.line(
+                    binary,
+                    (int(round(x1)), int(round(y1))),
+                    (int(round(x2)), int(round(y2))),
+                    0, mask_thickness * 2,
+                )
+                lines_masked += 1
+            logger.info(
+                "Masked detected lines from binary",
+                lines_masked=lines_masked,
+                mask_thickness=mask_thickness,
+            )
 
         # =================================================================
         # CONTOUR DETECTION → arcs, ellipses, polylines
@@ -612,6 +774,36 @@ def vectorize_bitonal_image(
                 f"Circle overlap cleanup: {circles_before} → {len(result.circles)} "
                 f"(removed {circles_before - len(result.circles)} redundant circles)"
             )
+
+        # =================================================================
+        # OPTIONAL: Topology cleanup (merge degree-2, snap endpoints)
+        # =================================================================
+        if topology_cleanup:
+            try:
+                from aec_agent.mcp.tools.topology import (
+                    build_segment_graph,
+                    merge_degree2_nodes,
+                    snap_dangling_endpoints,
+                    graph_to_vectorization_result,
+                )
+                graph = build_segment_graph(result, snap_tolerance)
+                graph = merge_degree2_nodes(graph)
+                graph = snap_dangling_endpoints(graph, snap_tolerance)
+                cleaned = graph_to_vectorization_result(graph)
+                # Replace lines and polylines with cleaned versions;
+                # preserve circles, arcs, and ellipses (graph doesn't touch those).
+                result.lines = cleaned.lines
+                result.polylines = cleaned.polylines
+                logger.info(
+                    "Topology cleanup complete",
+                    lines_after=len(result.lines),
+                    polylines_after=len(result.polylines),
+                )
+            except ImportError:
+                logger.warning(
+                    "networkx not installed — skipping topology cleanup. "
+                    "Install with: pip install networkx>=3.0"
+                )
 
         total = (
             len(result.lines) + len(result.circles) + len(result.arcs)
