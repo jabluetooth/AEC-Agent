@@ -440,6 +440,82 @@ RELATIONSHIP_DISTANCE_THRESHOLD=1.0
 
 ---
 
+## Phase 2: Vectorization Pipeline Architecture
+
+### Overview
+
+PDF-to-DWG vectorization pipeline using Python-side OpenCV (not AutoCAD Raster Design VTools, which are interactive and require mouse clicks).
+
+### Pipeline Flow
+
+```
+PDF File
+    ↓
+raster_convert_pdf (PyMuPDF + Pillow → 300 DPI bitonal TIFF, Group4)
+    ↓
+raster_attach_image (attach TIFF to AutoCAD drawing)
+    ↓
+raster_cleanup (despeckle + deskew via Raster Design ibfilter)
+    ↓
+image_vectorizer.py (OpenCV detection — lines-first order)
+    │
+    ├── FastLineDetector (FLD, opencv-contrib — primary)
+    │   └── Fallback: HoughLinesP (if opencv-contrib unavailable)
+    │
+    ├── HoughCircles (strict param2=200)
+    │   └── Circle pixel validation (36-point circumference sampling, 35% ink threshold)
+    │
+    └── findContours + approxPolyDP (polylines)
+    ↓
+Topology cleanup (NetworkX graph: merge degree-2 nodes, snap dangling endpoints)
+    ↓
+draw_line / draw_polyline / draw_circle (AutoCAD sidecar commands)
+    ↓
+raster_fade_image (fade raster for background reference)
+    ↓
+raster_store_vectorized (extract entities → PostgreSQL with embeddings)
+```
+
+### Key Design Decisions
+
+| Decision | Rationale |
+|----------|-----------|
+| Lines-first detection order | HoughCircles with lenient params detects false circles at line intersections; detecting lines first and masking them prevents this |
+| FastLineDetector over HoughLinesP alone | FLD preserves corners and straightness better for engineering drawings; HoughLinesP as fallback ensures compatibility |
+| Circle pixel validation | Sample 36 points around circumference, check 3×3 neighborhoods for ink; reject circles with <35% ink coverage to eliminate false positives |
+| Topology cleanup by default | NetworkX graph merges fragmented line segments (degree-2 nodes) and snaps dangling endpoints, producing cleaner vectorization |
+| Python-side OpenCV over Raster Design VTools | VTools (vline, vpline, varc, vcircle, vrect) are interactive — they require mouse clicks and CANNOT be automated via SendStringToExecute |
+
+### Tuned Parameters
+
+| Parameter | Old Value | New Value | Reason |
+|-----------|-----------|-----------|--------|
+| `min_line_length` | 80 | 50 | Detect shorter line segments in engineering drawings |
+| `max_line_gap` | 10 | 15 | Bridge gaps in dashed/broken lines |
+| `hough_threshold` | 150 | 80 | More sensitive line detection |
+| `hough_circles_param2` | 100 | 200 | Much stricter circle detection (fewer false positives) |
+| `mask_detected_lines` | False | True | Remove detected line pixels before circle detection |
+| `topology_cleanup` | False | True | Clean up fragmented segments by default |
+
+### Test Results (North.pdf)
+
+| Metric | Before | After | Change |
+|--------|--------|-------|--------|
+| Lines detected | 85 | 1,973 | +2,221% |
+| Circles detected | 205 | 6 | -97% |
+
+### Key Files
+
+| File | Purpose |
+|------|---------|
+| `src/aec_agent/mcp/tools/image_vectorizer.py` | OpenCV feature detection (FLD, HoughLinesP, HoughCircles, contours) |
+| `src/aec_agent/mcp/tools/raster_design.py` | MCP tools for Raster Design pipeline |
+| `src/aec_agent/mcp/tools/topology.py` | NetworkX graph-based topology cleanup |
+| `src/aec_agent/mcp/tools/pdf_converter.py` | PyMuPDF PDF-to-bitonal-TIFF conversion |
+| `docs/REFACTOR/1.md` - `5.md` | Refactoring plan documents (5 phases) |
+
+---
+
 ## Decision Log
 
 | Decision | Rationale |
@@ -450,3 +526,7 @@ RELATIONSHIP_DISTANCE_THRESHOLD=1.0
 | pgvector over dedicated vector DB | Single database, simpler ops, good enough for scale |
 | Extend sidecars vs new service | Reuse thread marshaling, single deployment |
 | Stream to DB vs file export | No intermediate files, real-time sync possible |
+| Lines-first detection order | Prevents false circle detection at line intersections |
+| FastLineDetector as primary | Better corner/straightness preservation for engineering drawings |
+| Circle pixel validation | Eliminates false circles that lack actual ink on circumference |
+| Python OpenCV over Raster Design VTools | VTools are interactive (mouse clicks), cannot be automated |

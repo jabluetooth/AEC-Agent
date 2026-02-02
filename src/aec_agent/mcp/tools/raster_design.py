@@ -804,14 +804,14 @@ async def raster_auto_vectorize(
     dpi: int = 300,
     scale: float = 1.0,
     target_layer: Optional[str] = None,
-    min_line_length: int = 80,
-    max_line_gap: int = 10,
-    hough_threshold: int = 150,
+    min_line_length: int = 50,
+    max_line_gap: int = 15,
+    hough_threshold: int = 80,
     min_circle_radius: int = 20,
     max_circle_radius: int = 500,
     hough_circles_dp: float = 1.2,
     hough_circles_param1: float = 200.0,
-    hough_circles_param2: float = 100.0,
+    hough_circles_param2: float = 200.0,
     hough_circles_min_dist: int = 100,
     contour_epsilon_factor: float = 0.01,
     min_contour_points: int = 5,
@@ -829,11 +829,11 @@ async def raster_auto_vectorize(
     signal_close_angle_step: int = 15,
     # Iterative Masking
     mask_detected_circles: bool = True,
-    mask_detected_lines: bool = False,
+    mask_detected_lines: bool = True,
     mask_thickness: int = 5,
     # Skeletonization & Topology
     skeletonize: bool = False,
-    topology_cleanup: bool = False,
+    topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
 ) -> dict:
     """
@@ -856,15 +856,15 @@ async def raster_auto_vectorize(
         dpi: Image resolution in DPI (default 300)
         scale: Coordinate scale factor — must match raster_attach_image scale (default 1.0)
         target_layer: Layer for created entities (optional)
-        min_line_length: Min line length in pixels (default 80)
-        max_line_gap: Max gap to merge line segments in pixels (default 10)
-        hough_threshold: Line detection sensitivity — lower = more lines (default 150)
+        min_line_length: Min line length in pixels (default 50)
+        max_line_gap: Max gap to merge line segments in pixels (default 15)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 80)
         min_circle_radius: Min circle radius in pixels (default 20)
         max_circle_radius: Max circle radius in pixels, 0=unlimited (default 500)
         hough_circles_dp: Accumulator resolution ratio — lower = finer (default 1.2)
         hough_circles_param1: Canny high threshold inside HoughCircles (default 200)
         hough_circles_param2: Circle center accumulator threshold — higher = fewer
-                              but more confident circles (default 100)
+                              but more confident circles (default 200)
         hough_circles_min_dist: Min distance between circle centers in pixels (default 100)
         contour_epsilon_factor: Polyline simplification factor (default 0.01)
         min_contour_points: Min points per polyline (default 5)
@@ -880,10 +880,11 @@ async def raster_auto_vectorize(
         signal_close_kernel_length: Directional kernel length in pixels (default 15)
         signal_close_angle_step: Degrees between directional passes (default 15)
         mask_detected_circles: Erase detected circle pixels before contour pass (default True)
-        mask_detected_lines: Erase detected line pixels before contour pass (default False)
+        mask_detected_lines: Erase detected line pixels before circle detection to
+                             prevent line intersections being misidentified (default True)
         mask_thickness: Pixel thickness of the erasure mask (default 5)
         skeletonize: Reduce thick lines to 1px centerlines before detection (default False)
-        topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default False)
+        topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default True)
         snap_tolerance: Max distance in drawing units to snap endpoints (default 5.0)
 
     Returns:
@@ -1178,14 +1179,14 @@ async def raster_pdf_to_vector_pipeline(
     target_layer: Optional[str] = None,
     fade_percent: int = 70,
     store_in_db: bool = True,
-    min_line_length: int = 80,
-    max_line_gap: int = 10,
-    hough_threshold: int = 150,
+    min_line_length: int = 50,
+    max_line_gap: int = 15,
+    hough_threshold: int = 80,
     min_circle_radius: int = 20,
     max_circle_radius: int = 500,
     hough_circles_dp: float = 1.2,
     hough_circles_param1: float = 200.0,
-    hough_circles_param2: float = 100.0,
+    hough_circles_param2: float = 200.0,
     hough_circles_min_dist: int = 100,
     contour_epsilon_factor: float = 0.01,
     min_contour_points: int = 5,
@@ -1203,11 +1204,11 @@ async def raster_pdf_to_vector_pipeline(
     signal_close_angle_step: int = 15,
     # Iterative Masking
     mask_detected_circles: bool = True,
-    mask_detected_lines: bool = False,
+    mask_detected_lines: bool = True,
     mask_thickness: int = 5,
     # Skeletonization & Topology
     skeletonize: bool = False,
-    topology_cleanup: bool = False,
+    topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
 ) -> dict:
     """
@@ -1245,15 +1246,15 @@ async def raster_pdf_to_vector_pipeline(
         target_layer: Layer for vectorized entities (optional)
         fade_percent: Raster fade percentage 0-100 (default 70)
         store_in_db: Store results in PostgreSQL (default True)
-        min_line_length: Min line length in pixels for detection (default 80)
-        max_line_gap: Max gap to merge line segments in pixels (default 10)
-        hough_threshold: Line detection sensitivity — lower = more lines (default 150)
+        min_line_length: Min line length in pixels for detection (default 50)
+        max_line_gap: Max gap to merge line segments in pixels (default 15)
+        hough_threshold: Line detection sensitivity — lower = more lines (default 80)
         min_circle_radius: Min circle radius in pixels (default 20)
         max_circle_radius: Max circle radius in pixels, 0=unlimited (default 500)
         hough_circles_dp: Accumulator resolution ratio — lower = finer (default 1.2)
         hough_circles_param1: Canny high threshold inside HoughCircles (default 200)
         hough_circles_param2: Circle center accumulator threshold — higher = fewer
-                              but more confident circles (default 100)
+                              but more confident circles (default 200)
         hough_circles_min_dist: Min distance between circle centers in pixels (default 100)
         contour_epsilon_factor: Polyline simplification factor (default 0.01)
         min_contour_points: Min points per polyline (default 5)
@@ -1269,10 +1270,11 @@ async def raster_pdf_to_vector_pipeline(
         signal_close_kernel_length: Directional kernel length in pixels (default 15)
         signal_close_angle_step: Degrees between directional passes (default 15)
         mask_detected_circles: Erase detected circle pixels before contour pass (default True)
-        mask_detected_lines: Erase detected line pixels before contour pass (default False)
+        mask_detected_lines: Erase detected line pixels before circle detection to
+                             prevent line intersections being misidentified (default True)
         mask_thickness: Pixel thickness of the erasure mask (default 5)
         skeletonize: Reduce thick lines to 1px centerlines before detection (default False)
-        topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default False)
+        topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default True)
         snap_tolerance: Max distance in drawing units to snap endpoints (default 5.0)
 
     Returns:

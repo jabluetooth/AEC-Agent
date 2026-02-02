@@ -2,11 +2,11 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Phase 2 Raster Design — COMPLETE (full Raster Design toolset + OpenCV auto-vectorization).
-**Last Action:** Replaced interactive Raster Design VTools with Python-side OpenCV vectorization. VTools (`vline`, `vpline`, etc.) require mouse clicks and cannot be automated via `SendStringToExecute`. Created `image_vectorizer.py` (OpenCV: HoughLinesP, HoughCircles, findContours) and `raster_auto_vectorize` MCP tool. Updated pipeline: PDF→bitonal TIFF→attach→despeckle→deskew→**OpenCV detect features**→**draw_line/draw_polyline/draw_circle**→fade→store. All Python compiles clean.
+**Objective:** Phase 2 Raster Design — COMPLETE (full Raster Design toolset + OpenCV auto-vectorization + vectorizer refactoring).
+**Last Action:** Refactored vectorization pipeline: reversed detection order (lines first, circles second), added FastLineDetector (FLD) as primary detector with HoughLinesP fallback, added circle pixel validation (36-point circumference sampling, 35% ink threshold), enabled topology cleanup by default, tuned thresholds (param2: 100→200, min_line_length: 80→50). Fixed Groq tool prefix bug (`raster_` tools now included in AutoCAD context). Test results on North.pdf: Lines 85→1,973 (+2,221%), Circles 205→6 (-97%). Fixed Unicode encoding in log messages. Added missing `autocad_delete_entity` to tool descriptions. All 179 tests passing.
 **Next Step:** End-to-end test with real PDF + running sidecar, then Phase 3 (Knowledge Base).
 
-## 📊 Repository Status (as of 2026-01-28)
+## 📊 Repository Status (as of 2026-02-02)
 
 ### What's Built & Working
 | Component | Files | Status |
@@ -101,9 +101,11 @@
 | Sidecar Files | 29 total (15 C#, 14 Python) |
 
 ## 🧠 Brain Dump (Context for Next Session)
-- **Phase 2 Raster Design is COMPLETE.** 17 MCP tools + 14 sidecar commands for full PDF-to-DWG-to-PostgreSQL pipeline.
+- **Phase 2 Raster Design is COMPLETE.** 17 MCP tools + 14 sidecar commands for full PDF-to-DWG-to-PostgreSQL pipeline. Vectorizer refactored with lines-first detection, FLD, circle validation, topology cleanup.
 - **Raster Design MCP tools (17):** `raster_convert_pdf`, `raster_import_pdf`, `raster_attach_image`, `raster_cleanup`, `raster_vectorize` (VTools: vline/vpline/varc/vcircle/vrect — interactive, for manual use), `raster_auto_vectorize` (**Python OpenCV — automated**), `raster_process_image` (ibfilter), `raster_create_primitive` (issmart/isline/isarc/iscircle), `raster_select_entities` (isebrsmart/isebrcon), `raster_follower` (vfpline/vfcontour/vf3dpoly), `raster_recognize_text` (irectext), `raster_ocr_extract`, `raster_get_status`, `raster_get_entity_count`, `raster_fade_image`, `raster_store_vectorized`, `raster_pdf_to_vector_pipeline`.
-- **OpenCV auto-vectorization (CRITICAL):** Raster Design VTools (`vline`, `vpline`, `varc`, `vcircle`, `vrect`) are **interactive** — they require mouse clicks and CANNOT be automated via `SendStringToExecute`. The pipeline uses Python-side OpenCV instead: `image_vectorizer.py` detects lines (HoughLinesP), circles (HoughCircles), and polylines (findContours + approxPolyDP) from the bitonal TIFF, then creates AutoCAD entities via `draw_line`/`draw_polyline`/`draw_circle` sidecar commands.
+- **OpenCV auto-vectorization (CRITICAL):** Raster Design VTools (`vline`, `vpline`, `varc`, `vcircle`, `vrect`) are **interactive** — they require mouse clicks and CANNOT be automated via `SendStringToExecute`. The pipeline uses Python-side OpenCV instead: `image_vectorizer.py` detects lines (FastLineDetector primary + HoughLinesP fallback), circles (HoughCircles with pixel validation), and polylines (findContours + approxPolyDP) from the bitonal TIFF, then creates AutoCAD entities via `draw_line`/`draw_polyline`/`draw_circle` sidecar commands.
+- **Vectorizer refactoring (2026-02-02):** Reversed detection order (lines first, mask, then circles). Added FastLineDetector (opencv-contrib) as primary with HoughLinesP fallback. Added `_validate_circles_by_ink()` — samples 36 points around circumference, rejects circles with <35% ink. Tuned: param2 100→200, min_line_length 80→50, max_line_gap 10→15, hough_threshold 150→80. Enabled mask_detected_lines + topology_cleanup by default. Test: Lines 85→1,973 (+2,221%), Circles 205→6 (-97%).
+- **Groq tool prefix fix (2026-02-02):** `AppContext.get_tool_prefix()` now returns `"autocad_,raster_"` for AUTOCAD context (was `"autocad_"` only). Without this, `raster_*` tools were filtered out when intent detected AutoCAD, causing Groq 400 error.
 - **Coordinate conversion:** pixel → drawing units: `x_dwg = px_x / dpi`, `y_dwg = (height - px_y) / dpi` (Y-axis flip from image top-left to AutoCAD bottom-left origin).
 - **PDF-to-bitonal conversion:** `raster_convert_pdf` and `pdf_converter.py` use PyMuPDF + Pillow to render PDF pages at 300 DPI and convert to 1-bit TIFF (Group4 compression). REQUIRED because AutoCAD Raster Design cannot attach PDF files directly.
 - **Actual Raster Design commands (CRITICAL):** `IVECTORIZE` and `IOCR` do NOT exist. The actual commands are: VTools (`vline`, `vpline`, `varc`, `vcircle`, `vrect`), Followers (`vfpline`, `vfcontour`), REM Primitives (`isline`, `isarc`, `iscircle`, `issmart`), Image Processing (`ibfilter`), Text Recognition (`irectext`), Entity Selection (`isebrcon`, `isebrsmart`). **ALL are interactive** — the pipeline uses OpenCV instead.
@@ -111,7 +113,7 @@
 - **Natural blocking via OnIdle:** Async sidecar commands (SendStringToExecute) process sequentially in OnIdle. The next HTTP request after an async command acts as a natural barrier — no polling needed. Entity count calls serve as barriers in the pipeline.
 - **Async command pattern:** `IsAsyncCommand()` on CommandRouter. OnIdle handler uses DocumentLock-only path (no Transaction) for async commands. Async: import_pdf, cleanup, vectorize, ocr. Sync: attach_image, get_status, get_entity_count, extract_all_entities, fade_image.
 - **`extract_all_entities`** C# command: full geometry extraction with type-specific handling (Line, Circle, Arc, Polyline, Ellipse, Spline, Text, MText, BlockReference, Hatch). Supports pagination (offset + limit) and layer filter. Returns handle, type, layer, color, linetype, geometry, bounds.
-- **Bug fixes in this session:** (1) Fixed scanned PDF branch passing raw PDF to `raster_attach_image` → now converts to bitonal TIFF first. (2) Replaced `IVECTORIZE` (doesn't exist) with actual VTools. (3) Replaced `IOCR` (doesn't exist) with `irectext`. (4) Added 5 new sidecar commands + 5 new MCP tools. (5) **Replaced interactive VTools with OpenCV** — VTools require mouse clicks and can't be automated. Created `image_vectorizer.py` + `raster_auto_vectorize` tool. Pipeline now uses OpenCV detection → AutoCAD draw commands. Previous fixes: `DatabasePool._verify_extensions()` init order, missing `raster_design` import, `sync_cache` 401 error, `stream_entities()` nonexistent `extract_batch`.
+- **Bug fixes in this session:** (1) Fixed scanned PDF branch passing raw PDF to `raster_attach_image` → now converts to bitonal TIFF first. (2) Replaced `IVECTORIZE` (doesn't exist) with actual VTools. (3) Replaced `IOCR` (doesn't exist) with `irectext`. (4) Added 5 new sidecar commands + 5 new MCP tools. (5) **Replaced interactive VTools with OpenCV** — VTools require mouse clicks and can't be automated. Created `image_vectorizer.py` + `raster_auto_vectorize` tool. Pipeline now uses OpenCV detection → AutoCAD draw commands. (6) Fixed Groq 400 error — `AppContext.get_tool_prefix()` missing `raster_` prefix for AUTOCAD context. (7) Vectorizer refactoring — lines-first detection, FLD, circle validation, topology cleanup, tuned thresholds. (8) Fixed Unicode `→` in log messages (cp1252 encoding). (9) Added `autocad_delete_entity` to MINIMAL_DESCRIPTIONS. Previous fixes: `DatabasePool._verify_extensions()` init order, missing `raster_design` import, `sync_cache` 401 error, `stream_entities()` nonexistent `extract_batch`.
 - **Phase 1 is COMPLETE.** PostgreSQL 18.1 running with PostGIS + pgvector, 15 tables created, all tests passing.
 - **Provider fallback chain** works: Groq (primary, fastest) → Gemini → OpenAI → Anthropic. Configure via `FALLBACK_PROVIDERS` env var.
 - **REST endpoints** added alongside MCP SSE: `POST /tools/notify_file_opened` (sidecar hooks), `GET /health`.
@@ -125,7 +127,7 @@
 - The `knowledge_base/` directory structure is planned in FUTURE_ROADMAP.md but not yet created.
 - MEP domain seed data exists inline in `src/aec_agent/domain/seed_data.py` (HVAC clearance rules).
 - **New files:** `src/aec_agent/mcp/tools/image_vectorizer.py` (OpenCV detection), `src/aec_agent/mcp/tools/pdf_converter.py` (PDF→bitonal TIFF).
-- **New dependencies:** `opencv-python-headless>=4.8.0`, `numpy>=1.24.0`, `PyMuPDF>=1.24.0`, `Pillow>=10.0.0`.
+- **New dependencies:** `opencv-python-headless>=4.8.0` (or `opencv-contrib-python` for FastLineDetector), `numpy>=1.24.0`, `PyMuPDF>=1.24.0`, `Pillow>=10.0.0`, `networkx>=3.0` (topology cleanup).
 - **Next priority:** End-to-end integration test with real PDF + running sidecar, then Phase 3 (Knowledge Base).
 
 ## 📂 Key Files to Read First

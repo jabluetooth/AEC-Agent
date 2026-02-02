@@ -86,14 +86,14 @@ def vectorize_bitonal_image(
     image_path: str,
     dpi: int = 300,
     scale: float = 1.0,
-    min_line_length: int = 80,
-    max_line_gap: int = 10,
-    hough_threshold: int = 150,
+    min_line_length: int = 50,
+    max_line_gap: int = 15,
+    hough_threshold: int = 80,
     min_circle_radius: int = 20,
     max_circle_radius: int = 500,
     hough_circles_dp: float = 1.2,
     hough_circles_param1: float = 200.0,
-    hough_circles_param2: float = 100.0,
+    hough_circles_param2: float = 200.0,
     hough_circles_min_dist: int = 100,
     contour_epsilon_factor: float = 0.01,
     min_contour_points: int = 5,
@@ -115,11 +115,21 @@ def vectorize_bitonal_image(
     signal_adaptive_c: int = 2,
     # --- Iterative Masking parameters ---
     mask_detected_circles: bool = True,
-    mask_detected_lines: bool = False,
+    mask_detected_lines: bool = True,
     mask_thickness: int = 5,
+    # --- Circle validation parameters ---
+    circle_pixel_validation: bool = True,
+    circle_min_ink_ratio: float = 0.35,
+    # --- FastLineDetector parameters ---
+    use_fast_line_detector: bool = True,
+    fld_length_threshold: int = 30,
+    fld_distance_threshold: float = 1.414,
+    fld_canny_aperture: int = 3,
+    fld_canny_th1: float = 50.0,
+    fld_canny_th2: float = 50.0,
     # --- Skeletonization & Topology parameters ---
     skeletonize: bool = False,
-    topology_cleanup: bool = False,
+    topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
 ) -> VectorizationResult:
     """
@@ -135,9 +145,9 @@ def vectorize_bitonal_image(
         scale: Coordinate scale factor. Pixel coords are multiplied by this value.
                Must match the scale used for raster_attach_image in AutoCAD.
                Default 1.0 means 1 pixel = 1 drawing unit.
-        min_line_length: Minimum line length in pixels for HoughLinesP (default 80).
-        max_line_gap: Maximum gap between line segments to merge (default 10).
-        hough_threshold: Accumulator threshold for HoughLinesP (default 150).
+        min_line_length: Minimum line length in pixels for HoughLinesP (default 50).
+        max_line_gap: Maximum gap between line segments to merge (default 15).
+        hough_threshold: Accumulator threshold for HoughLinesP (default 80).
         min_circle_radius: Minimum circle radius in pixels (default 20).
         max_circle_radius: Maximum circle radius in pixels, 0=unlimited (default 500).
         hough_circles_dp: Inverse ratio of accumulator resolution to image
@@ -148,7 +158,7 @@ def vectorize_bitonal_image(
         hough_circles_param2: Accumulator threshold for circle centers.
                               Higher = fewer but more confident circles.
                               This is the most important param for reducing
-                              false positives (default 100).
+                              false positives (default 200).
         hough_circles_min_dist: Minimum distance in pixels between detected
                                 circle centers (default 100).
         contour_epsilon_factor: Polyline approximation tolerance as fraction
@@ -187,11 +197,32 @@ def vectorize_bitonal_image(
                                from the binary image so the contour pass does
                                not re-trace them as polylines (default True).
         mask_detected_lines: After detecting lines, erase their pixels from
-                             the binary image.  Off by default — can remove
-                             too much on dense drawings (default False).
+                             the binary image so circle detection doesn't
+                             misinterpret line intersections as circles
+                             (default True).
         mask_thickness: Pixel thickness of the mask painted over detected
                         features.  Larger values erase more aggressively
                         (default 5).
+        circle_pixel_validation: After detecting circles, verify that the
+                                circumference has actual ink pixels in the
+                                binary image.  Rejects false positives from
+                                line intersections and noise (default True).
+        circle_min_ink_ratio: Minimum fraction of circumference sample points
+                              that must have ink pixels to accept a circle.
+                              Higher = stricter.  0.35 means at least 35% of
+                              sampled points must have ink (default 0.35).
+        use_fast_line_detector: Use OpenCV FastLineDetector (FLD) as the
+                                primary line detector instead of HoughLinesP.
+                                FLD is superior for engineering drawings as it
+                                better preserves corners and straightness.
+                                HoughLinesP results are merged in as a
+                                supplement (default True).
+        fld_length_threshold: Minimum segment length for FLD (default 30).
+        fld_distance_threshold: Max distance between original line and fitted
+                                line for FLD (default 1.414).
+        fld_canny_aperture: Canny aperture size for FLD (default 3).
+        fld_canny_th1: First Canny threshold for FLD (default 50.0).
+        fld_canny_th2: Second Canny threshold for FLD (default 50.0).
         skeletonize: Run morphological skeletonization (scikit-image) after
                      signal restoration to reduce thick lines to 1px
                      centerlines before Hough detection (default False).
@@ -199,7 +230,7 @@ def vectorize_bitonal_image(
         topology_cleanup: After all detection, build a NetworkX graph from
                           detected lines/polylines, merge degree-2 nodes
                           (artificial breaks), and snap dangling endpoints
-                          (default False).  Requires ``networkx``.
+                          (default True).  Requires ``networkx``.
         snap_tolerance: Maximum distance in drawing units to snap dangling
                         endpoints during topology cleanup (default 5.0).
 
@@ -388,12 +419,104 @@ def vectorize_bitonal_image(
             return px_dist * scale
 
         # =================================================================
-        # CIRCLE DETECTION (HoughCircles) + Deduplication
+        # LINE DETECTION (FastLineDetector + HoughLinesP) + Deduplication
         # =================================================================
-        # Circles are detected FIRST because they are the most "semantic"
-        # primitive and the most prone to fragmentation by contour tracers.
-        # After detection, their pixels can be masked out of the binary
-        # image so subsequent line and contour passes don't re-trace them.
+        # Lines are detected FIRST.  Engineering drawings are predominantly
+        # lines; detecting circles first causes false positives at line
+        # intersections which then mask out actual line pixels.  By
+        # detecting lines first and masking them, circle detection only
+        # sees actual circular features.
+
+        all_raw_lines = []
+
+        # --- Primary: FastLineDetector (FLD) ---
+        # FLD is superior to Hough for engineering drawings: it preserves
+        # corners and straightness better and produces fewer fragments.
+        if use_fast_line_detector:
+            try:
+                fld = cv2.ximgproc.createFastLineDetector(
+                    fld_length_threshold,
+                    fld_distance_threshold,
+                    fld_canny_th1,
+                    fld_canny_th2,
+                    fld_canny_aperture,
+                    do_merge=True,
+                )
+                fld_lines = fld.detect(binary)
+                if fld_lines is not None:
+                    for seg in fld_lines:
+                        x1, y1, x2, y2 = seg[0]
+                        length = math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+                        if length >= min_line_length:
+                            all_raw_lines.append([int(round(x1)), int(round(y1)),
+                                                  int(round(x2)), int(round(y2))])
+                    logger.info(f"FLD detected {len(fld_lines)} raw segments, "
+                                f"{len(all_raw_lines)} after length filter")
+            except AttributeError:
+                logger.info("FastLineDetector not available (needs opencv-contrib-python), "
+                            "falling back to HoughLinesP only")
+
+        # --- Supplement: HoughLinesP ---
+        edges = cv2.Canny(binary, 50, 150, apertureSize=3)
+        raw_hough = cv2.HoughLinesP(
+            edges,
+            rho=1,
+            theta=np.pi / 180,
+            threshold=hough_threshold,
+            minLineLength=min_line_length,
+            maxLineGap=max_line_gap,
+        )
+        hough_count = 0
+        if raw_hough is not None:
+            for line in raw_hough:
+                x1, y1, x2, y2 = line[0]
+                all_raw_lines.append([int(x1), int(y1), int(x2), int(y2)])
+                hough_count += 1
+
+        # Convert to the format _deduplicate_lines expects
+        raw_lines_arr = None
+        if all_raw_lines:
+            raw_lines_arr = np.array(all_raw_lines).reshape(-1, 1, 4)
+
+        # Deduplicate lines: merge nearly-parallel, closely-spaced segments
+        deduped_lines = _deduplicate_lines(
+            raw_lines_arr, line_merge_angle_tol, line_merge_dist_tol,
+        )
+        for (x1, y1, x2, y2) in deduped_lines:
+            start = px_to_dwg(float(x1), float(y1))
+            end = px_to_dwg(float(x2), float(y2))
+            result.lines.append(DetectedLine(start=start, end=end))
+
+        logger.info(
+            f"Detected {len(result.lines)} lines "
+            f"(FLD+Hough raw: {len(all_raw_lines)}, HoughLinesP: {hough_count}, "
+            f"after dedup: {len(deduped_lines)})"
+        )
+
+        # --- Mask detected lines from binary image ---
+        # Masking lines BEFORE circle detection is critical: it prevents
+        # line intersections from being misidentified as circles.
+        if mask_detected_lines and deduped_lines:
+            lines_masked = 0
+            for (x1, y1, x2, y2) in deduped_lines:
+                cv2.line(
+                    binary,
+                    (int(round(x1)), int(round(y1))),
+                    (int(round(x2)), int(round(y2))),
+                    0, mask_thickness * 2,
+                )
+                lines_masked += 1
+            logger.info(
+                "Masked detected lines from binary before circle detection",
+                lines_masked=lines_masked,
+                mask_thickness=mask_thickness,
+            )
+
+        # =================================================================
+        # CIRCLE DETECTION (HoughCircles) + Validation + Deduplication
+        # =================================================================
+        # Runs AFTER line detection and masking.  The binary image now has
+        # line pixels removed, so only actual circular features remain.
         circle_input = cv2.medianBlur(blurred_img, 7)
         raw_circles = cv2.HoughCircles(
             circle_input,
@@ -409,6 +532,25 @@ def vectorize_bitonal_image(
         deduped_circles = _deduplicate_circles(
             raw_circles, circle_merge_center_tol, circle_merge_radius_tol,
         )
+
+        # --- Pixel-level circle validation ---
+        # Verify each detected circle has actual ink pixels along its
+        # circumference in the binary image.  This rejects false positives
+        # from noise, text fragments, and line intersections that
+        # HoughCircles mistakes for circles.
+        if circle_pixel_validation and deduped_circles:
+            validated_circles = _validate_circles_by_ink(
+                deduped_circles, binary, circle_min_ink_ratio,
+            )
+            rejected = len(deduped_circles) - len(validated_circles)
+            if rejected > 0:
+                logger.info(
+                    f"Circle validation: {len(deduped_circles)} candidates, "
+                    f"{len(validated_circles)} validated, {rejected} rejected "
+                    f"(min ink ratio: {circle_min_ink_ratio})"
+                )
+            deduped_circles = validated_circles
+
         for (cx, cy, r) in deduped_circles:
             center = px_to_dwg(float(cx), float(cy))
             radius = px_dist_to_dwg(float(r))
@@ -417,7 +559,7 @@ def vectorize_bitonal_image(
         logger.info(
             f"Detected {len(result.circles)} circles "
             f"(raw: {len(raw_circles[0]) if raw_circles is not None else 0}, "
-            f"after dedup: {len(deduped_circles)})"
+            f"after dedup+validation: {len(deduped_circles)})"
         )
 
         # --- Mask detected circles from binary image ---
@@ -432,53 +574,6 @@ def vectorize_bitonal_image(
             logger.info(
                 "Masked detected circles from binary",
                 circles_masked=circles_masked,
-                mask_thickness=mask_thickness,
-            )
-
-        # =================================================================
-        # LINE DETECTION (HoughLinesP) + Deduplication
-        # =================================================================
-        # Run on the (potentially circle-masked) binary image so line
-        # detection doesn't pick up circle edges as straight segments.
-        edges = cv2.Canny(binary, 50, 150, apertureSize=3)
-        raw_lines = cv2.HoughLinesP(
-            edges,
-            rho=1,
-            theta=np.pi / 180,
-            threshold=hough_threshold,
-            minLineLength=min_line_length,
-            maxLineGap=max_line_gap,
-        )
-
-        # Deduplicate lines: merge nearly-parallel, closely-spaced segments
-        deduped_lines = _deduplicate_lines(
-            raw_lines, line_merge_angle_tol, line_merge_dist_tol,
-        )
-        for (x1, y1, x2, y2) in deduped_lines:
-            start = px_to_dwg(float(x1), float(y1))
-            end = px_to_dwg(float(x2), float(y2))
-            result.lines.append(DetectedLine(start=start, end=end))
-
-        logger.info(
-            f"Detected {len(result.lines)} lines "
-            f"(raw: {len(raw_lines) if raw_lines is not None else 0}, "
-            f"after dedup: {len(deduped_lines)})"
-        )
-
-        # --- Mask detected lines from binary image ---
-        if mask_detected_lines and deduped_lines:
-            lines_masked = 0
-            for (x1, y1, x2, y2) in deduped_lines:
-                cv2.line(
-                    binary,
-                    (int(round(x1)), int(round(y1))),
-                    (int(round(x2)), int(round(y2))),
-                    0, mask_thickness * 2,
-                )
-                lines_masked += 1
-            logger.info(
-                "Masked detected lines from binary",
-                lines_masked=lines_masked,
                 mask_thickness=mask_thickness,
             )
 
@@ -737,7 +832,7 @@ def vectorize_bitonal_image(
 
             result.lines = kept_lines
             logger.info(
-                f"Line overlap cleanup: {lines_before} → {len(result.lines)} "
+                f"Line overlap cleanup: {lines_before} -> {len(result.lines)} "
                 f"(removed {lines_before - len(result.lines)} redundant lines)"
             )
 
@@ -771,7 +866,7 @@ def vectorize_bitonal_image(
 
             result.circles = kept_circles
             logger.info(
-                f"Circle overlap cleanup: {circles_before} → {len(result.circles)} "
+                f"Circle overlap cleanup: {circles_before} -> {len(result.circles)} "
                 f"(removed {circles_before - len(result.circles)} redundant circles)"
             )
 
@@ -944,6 +1039,65 @@ def _deduplicate_circles(
                 used[j] = True
 
     return kept
+
+
+def _validate_circles_by_ink(
+    circles: List[Tuple[float, float, float]],
+    binary_image: "np.ndarray",
+    min_ink_ratio: float = 0.35,
+    n_samples: int = 36,
+) -> List[Tuple[float, float, float]]:
+    """
+    Validate detected circles by checking for actual ink pixels along
+    the circumference in the binary image.
+
+    Samples ``n_samples`` evenly-spaced points around each circle's
+    circumference and checks if the binary image has white (ink) pixels
+    at those locations.  Circles where fewer than ``min_ink_ratio``
+    fraction of samples have ink are rejected as false positives.
+
+    Args:
+        circles: List of (cx, cy, radius) tuples in pixel coordinates.
+        binary_image: Binary image (white = ink, black = background).
+        min_ink_ratio: Minimum fraction of samples with ink (default 0.35).
+        n_samples: Number of points to sample around circumference (default 36).
+
+    Returns:
+        Filtered list of validated circles.
+    """
+    import numpy as np
+    import math
+
+    h, w = binary_image.shape[:2]
+    validated = []
+
+    for (cx, cy, r) in circles:
+        ink_count = 0
+        for i in range(n_samples):
+            angle = 2.0 * math.pi * i / n_samples
+            px = int(round(cx + r * math.cos(angle)))
+            py = int(round(cy + r * math.sin(angle)))
+
+            # Check a small neighborhood (3x3) around the sample point
+            # to tolerate slight misalignment
+            found_ink = False
+            for dx in range(-1, 2):
+                for dy in range(-1, 2):
+                    sx, sy = px + dx, py + dy
+                    if 0 <= sx < w and 0 <= sy < h:
+                        if binary_image[sy, sx] > 0:
+                            found_ink = True
+                            break
+                if found_ink:
+                    break
+            if found_ink:
+                ink_count += 1
+
+        ratio = ink_count / n_samples
+        if ratio >= min_ink_ratio:
+            validated.append((cx, cy, r))
+
+    return validated
 
 
 def _compute_bulges(

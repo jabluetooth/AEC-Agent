@@ -47,6 +47,7 @@ MINIMAL_DESCRIPTIONS = {
     "autocad_draw_rectangle": "Draw rectangle. Args: corner1_x/y, corner2_x/y, layer.",
     "autocad_get_drawing_info": "Get drawing name, path, statistics.",
     "autocad_get_entities": "Get entities. Args: layer, entity_type, limit (100).",
+    "autocad_delete_entity": "Delete entity by handle. Args: handle (str).",
 
     # Revit tools
     "revit_list_levels": "List all levels with id, name, elevation (meters).",
@@ -76,6 +77,7 @@ MINIMAL_DESCRIPTIONS = {
     "raster_pdf_to_vector_pipeline": (
         "PRIMARY TOOL: Convert any PDF or image (TIFF/PNG/JPG/BMP) to AutoCAD vector entities. "
         "Use this for ALL vectorization requests. Handles the full pipeline automatically. "
+        "Uses FastLineDetector + HoughLinesP for lines, validated HoughCircles for circles. "
         "Args: file_path (str, required), page (int), dpi (int), scale (float), mode ('auto'/'raster'/'vector')."
     ),
     "raster_auto_vectorize": (

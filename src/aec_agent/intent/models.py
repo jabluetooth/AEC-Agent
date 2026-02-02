@@ -55,9 +55,13 @@ class AppContext(str, Enum):
     BOTH = "both"
 
     def get_tool_prefix(self) -> Optional[str]:
-        """Get the tool prefix for filtering."""
+        """Get the tool prefix for filtering.
+
+        Note: AutoCAD includes 'raster_' because raster/vectorization tools
+        are AutoCAD-specific but use the 'raster_' prefix.
+        """
         if self == AppContext.AUTOCAD:
-            return "autocad_"
+            return "autocad_,raster_"
         elif self == AppContext.REVIT:
             return "revit_"
         return None

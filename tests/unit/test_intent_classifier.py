@@ -51,7 +51,7 @@ class TestAppContext:
     """Tests for AppContext enum."""
 
     def test_get_tool_prefix(self):
-        assert AppContext.AUTOCAD.get_tool_prefix() == "autocad_"
+        assert AppContext.AUTOCAD.get_tool_prefix() == "autocad_,raster_"
         assert AppContext.REVIT.get_tool_prefix() == "revit_"
         assert AppContext.BOTH.get_tool_prefix() is None
 
@@ -84,7 +84,7 @@ class TestIntentResult:
 
     def test_tool_filter_prefix(self):
         result = IntentResult(app_context=AppContext.AUTOCAD)
-        assert result.tool_filter_prefix == "autocad_"
+        assert result.tool_filter_prefix == "autocad_,raster_"
 
         result = IntentResult(app_context=AppContext.BOTH)
         assert result.tool_filter_prefix is None
@@ -292,7 +292,7 @@ class TestIntentClassifier:
         assert "filter_prefix" in filter_config
         assert "tool_tier" in filter_config
         assert "include_metadata" in filter_config
-        assert filter_config["filter_prefix"] == "autocad_"
+        assert filter_config["filter_prefix"] == "autocad_,raster_"
 
 
 class TestIntentClassifierEdgeCases:
