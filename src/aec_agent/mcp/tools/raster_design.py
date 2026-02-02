@@ -832,7 +832,7 @@ async def raster_auto_vectorize(
     mask_detected_lines: bool = True,
     mask_thickness: int = 5,
     # Skeletonization & Topology
-    skeletonize: bool = False,
+    skeletonize: bool = True,
     topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
 ) -> dict:
@@ -883,7 +883,7 @@ async def raster_auto_vectorize(
         mask_detected_lines: Erase detected line pixels before circle detection to
                              prevent line intersections being misidentified (default True)
         mask_thickness: Pixel thickness of the erasure mask (default 5)
-        skeletonize: Reduce thick lines to 1px centerlines before detection (default False)
+        skeletonize: Reduce thick lines to 1px centerlines before detection (default True)
         topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default True)
         snap_tolerance: Max distance in drawing units to snap endpoints (default 5.0)
 
@@ -1207,7 +1207,7 @@ async def raster_pdf_to_vector_pipeline(
     mask_detected_lines: bool = True,
     mask_thickness: int = 5,
     # Skeletonization & Topology
-    skeletonize: bool = False,
+    skeletonize: bool = True,
     topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
 ) -> dict:
@@ -1273,7 +1273,7 @@ async def raster_pdf_to_vector_pipeline(
         mask_detected_lines: Erase detected line pixels before circle detection to
                              prevent line intersections being misidentified (default True)
         mask_thickness: Pixel thickness of the erasure mask (default 5)
-        skeletonize: Reduce thick lines to 1px centerlines before detection (default False)
+        skeletonize: Reduce thick lines to 1px centerlines before detection (default True)
         topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default True)
         snap_tolerance: Max distance in drawing units to snap endpoints (default 5.0)
 

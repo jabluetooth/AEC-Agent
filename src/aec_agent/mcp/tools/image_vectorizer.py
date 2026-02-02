@@ -128,7 +128,7 @@ def vectorize_bitonal_image(
     fld_canny_th1: float = 50.0,
     fld_canny_th2: float = 50.0,
     # --- Skeletonization & Topology parameters ---
-    skeletonize: bool = False,
+    skeletonize: bool = True,
     topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
 ) -> VectorizationResult:
@@ -223,10 +223,12 @@ def vectorize_bitonal_image(
         fld_canny_aperture: Canny aperture size for FLD (default 3).
         fld_canny_th1: First Canny threshold for FLD (default 50.0).
         fld_canny_th2: Second Canny threshold for FLD (default 50.0).
-        skeletonize: Run morphological skeletonization (scikit-image) after
-                     signal restoration to reduce thick lines to 1px
-                     centerlines before Hough detection (default False).
-                     Requires ``scikit-image`` to be installed.
+        skeletonize: Run morphological skeletonization after signal
+                     restoration to reduce thick lines to 1px centerlines
+                     before detection (default True).  Uses scikit-image
+                     if available, falls back to OpenCV ximgproc thinning.
+                     Essential for drawings with thick lines to prevent
+                     outline artifacts.
         topology_cleanup: After all detection, build a NetworkX graph from
                           detected lines/polylines, merge degree-2 nodes
                           (artificial breaks), and snap dangling endpoints
@@ -396,7 +398,12 @@ def vectorize_bitonal_image(
         )
 
         # =================================================================
-        # OPTIONAL: Skeletonization (reduce thick lines to 1px centers)
+        # SKELETONIZATION: Reduce thick lines to 1px centerlines.
+        #
+        # Critical for drawings with thick lines (e.g. white lines on
+        # dark background).  Without thinning, both FLD and HoughLinesP
+        # detect the EDGES of thick features instead of the centerline,
+        # producing two outlines per actual line.
         # =================================================================
         if skeletonize:
             try:
@@ -406,10 +413,25 @@ def vectorize_bitonal_image(
                 binary = (skel.astype(np.uint8)) * 255
                 logger.info("Skeletonization complete (lines reduced to 1px centerlines)")
             except ImportError:
-                logger.warning(
-                    "scikit-image not installed — skipping skeletonization. "
-                    "Install with: pip install scikit-image>=0.21.0"
-                )
+                # Fallback: iterative morphological thinning using OpenCV.
+                # Zhang-Suen thinning via ximgproc, or repeated erosion
+                # with hit-or-miss as a last resort.
+                try:
+                    thinned = cv2.ximgproc.thinning(
+                        binary, thinningType=cv2.ximgproc.THINNING_ZHANGSUEN,
+                    )
+                    binary = thinned
+                    logger.info(
+                        "Morphological thinning complete via cv2.ximgproc.thinning "
+                        "(scikit-image not installed, using OpenCV fallback)"
+                    )
+                except AttributeError:
+                    logger.warning(
+                        "Neither scikit-image nor opencv-contrib available for "
+                        "skeletonization. Thick lines may produce outline artifacts. "
+                        "Install with: pip install scikit-image>=0.21.0 "
+                        "or pip install opencv-contrib-python"
+                    )
 
         # Helper: convert pixel coords to drawing units.
         def px_to_dwg(px_x: float, px_y: float) -> Tuple[float, float]:
@@ -457,9 +479,13 @@ def vectorize_bitonal_image(
                             "falling back to HoughLinesP only")
 
         # --- Supplement: HoughLinesP ---
-        edges = cv2.Canny(binary, 50, 150, apertureSize=3)
+        # Pass binary directly — NOT Canny edges.  On thick lines, Canny
+        # produces two edge outlines (one per side), causing HoughLinesP to
+        # detect outlines instead of centerlines.  After skeletonization the
+        # binary already contains 1px-wide centerlines, so Canny is redundant
+        # and harmful.
         raw_hough = cv2.HoughLinesP(
-            edges,
+            binary,
             rho=1,
             theta=np.pi / 180,
             threshold=hough_threshold,
