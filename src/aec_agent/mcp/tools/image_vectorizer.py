@@ -96,8 +96,8 @@ def vectorize_bitonal_image(
     hough_circles_param2: float = 200.0,
     hough_circles_min_dist: int = 100,
     contour_epsilon_factor: float = 0.01,
-    min_contour_points: int = 5,
-    min_contour_area: float = 3000.0,
+    min_contour_points: int = 3,  # Lowered to catch small curves
+    min_contour_area: float = 100.0,  # Lowered: 3000 was too high for thin curves
     ellipse_fit_threshold: float = 0.85,
     arc_coverage_min: float = 30.0,
     arc_coverage_max: float = 350.0,
@@ -105,8 +105,10 @@ def vectorize_bitonal_image(
     line_merge_dist_tol: float = 15.0,
     circle_merge_center_tol: float = 30.0,
     circle_merge_radius_tol: float = 20.0,
+    # --- Morphological parameters ---
+    morph_open: bool = False,  # Disabled: erodes thin lines
     # --- Signal Restoration parameters ---
-    signal_restore: bool = True,
+    signal_restore: bool = False,  # Disabled: destroys parallel lines
     signal_close_kernel_length: int = 15,
     signal_close_angle_step: int = 15,
     signal_close_iterations: int = 1,
@@ -131,6 +133,11 @@ def vectorize_bitonal_image(
     skeletonize: bool = True,
     topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
+    # --- Position Refinement parameters ---
+    refine_positions: bool = True,
+    refine_search_radius: int = 10,
+    # --- Debug output ---
+    debug_output_dir: Optional[str] = None,
 ) -> VectorizationResult:
     """
     Detect geometric features from a bitonal image using OpenCV.
@@ -235,6 +242,13 @@ def vectorize_bitonal_image(
                           (default True).  Requires ``networkx``.
         snap_tolerance: Maximum distance in drawing units to snap dangling
                         endpoints during topology cleanup (default 5.0).
+        refine_positions: After detection, refine line/circle positions
+                          against the original clean binary (before signal
+                          restoration and skeletonization).  This corrects
+                          positional drift introduced by morphological
+                          pre-processing (default True).
+        refine_search_radius: Pixel radius to search for ink pixels when
+                              refining positions (default 10).
 
     Returns:
         VectorizationResult with detected lines, circles, arcs, ellipses,
@@ -248,11 +262,41 @@ def vectorize_bitonal_image(
     import numpy as np
     import math
 
+    # --- Debug checkpoint helper ---
+    def _save_debug(name: str, image: "np.ndarray", annotations: list = None):
+        """Save a debug checkpoint image if debug_output_dir is set."""
+        if not debug_output_dir:
+            return
+        os.makedirs(debug_output_dir, exist_ok=True)
+        filename = f"{name}.png"
+        filepath = os.path.join(debug_output_dir, filename)
+
+        # Convert to BGR for color annotations if needed
+        if annotations and len(image.shape) == 2:
+            out = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        else:
+            out = image.copy() if len(image.shape) == 3 else cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+        # Draw annotations (lines, circles, etc.)
+        if annotations:
+            for ann in annotations:
+                if ann["type"] == "line":
+                    cv2.line(out, ann["p1"], ann["p2"], ann.get("color", (0, 255, 0)), ann.get("thickness", 2))
+                elif ann["type"] == "circle":
+                    cv2.circle(out, ann["center"], ann["radius"], ann.get("color", (255, 0, 0)), ann.get("thickness", 2))
+                elif ann["type"] == "text":
+                    cv2.putText(out, ann["text"], ann["pos"], cv2.FONT_HERSHEY_SIMPLEX,
+                                ann.get("scale", 0.5), ann.get("color", (255, 255, 255)), 1)
+
+        cv2.imwrite(filepath, out)
+        print(f"[debug] Saved checkpoint: {filepath}")
+
     image_path = os.path.abspath(image_path)
     if not os.path.isfile(image_path):
         raise FileNotFoundError(f"Image file not found: {image_path}")
 
     logger.info("Starting image vectorization", image_path=image_path, dpi=dpi, scale=scale)
+    print(f"[vectorize] Starting: {image_path}  (dpi={dpi}, scale={scale})")
 
     try:
         # Load image as grayscale
@@ -261,6 +305,8 @@ def vectorize_bitonal_image(
             raise RuntimeError(f"Failed to load image: {image_path}")
 
         height, width = img.shape[:2]
+        print(f"[vectorize] Image loaded: {width}x{height}px, mean={float(np.mean(img)):.1f}")
+        _save_debug("01_original_grayscale", img)
         result = VectorizationResult(
             image_width_px=width,
             image_height_px=height,
@@ -286,11 +332,14 @@ def vectorize_bitonal_image(
         if mean_val < 128:
             img = cv2.bitwise_not(img)
             logger.info("Auto-inverted light-on-dark image", mean_value=mean_val)
+            print(f"[vectorize] Auto-inverted light-on-dark image (mean={mean_val:.1f})")
+            _save_debug("02_auto_inverted", img)
 
         # 1. Gaussian blur: smooth scan grain and pixel noise BEFORE
         #    thresholding.  A 5x5 kernel at σ=0 (auto) removes
         #    high-frequency scan artifacts without blurring real geometry.
         blurred_img = cv2.GaussianBlur(img, (5, 5), 0)
+        _save_debug("03_gaussian_blur", blurred_img)
 
         # 2. Adaptive threshold: binarize based on local pixel
         #    neighbourhood.  blockSize=51 tolerates uneven scan lighting.
@@ -301,17 +350,38 @@ def vectorize_bitonal_image(
             blurred_img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY_INV, blockSize=51, C=12,
         )
+        _save_debug("04_adaptive_threshold", binary)
 
         # 3. Morphological close: bridge tiny gaps in lines (1-2 px)
         #    caused by scan artifacts or threshold edge effects.
         kernel_close = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         binary = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel_close, iterations=1)
+        _save_debug("05_morph_close", binary)
 
-        # 4. Morphological open: remove single-pixel noise (speckles,
-        #    scan dithering).  ONE iteration only — two iterations
-        #    destroy 2px-wide ink lines which are common at 300 DPI.
-        kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open, iterations=1)
+        # 4. Morphological open (OPTIONAL): remove single-pixel noise.
+        #    DISABLED by default because it erodes thin lines (2px wide
+        #    at 300 DPI).  Only enable for very noisy scans with heavy
+        #    speckling.
+        if morph_open:
+            kernel_open = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            binary = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel_open, iterations=1)
+            _save_debug("06_morph_open", binary)
+
+        ink_pixels = int(np.count_nonzero(binary))
+        print(f"[vectorize] After threshold+morph: {ink_pixels} ink pixels "
+              f"({100.0 * ink_pixels / (width * height):.1f}% of image)")
+
+        # =================================================================
+        # SAVE REFERENCE BINARY for position refinement.
+        #
+        # The binary image BEFORE signal restoration and skeletonization
+        # is the most positionally accurate representation of the ink.
+        # Morphological operations (signal restore, skeletonize) improve
+        # detection but accumulate positional drift (1-3px per step).
+        # We save this clean binary to refine detected feature positions
+        # back to their true locations after detection.
+        # =================================================================
+        binary_reference = binary.copy()
 
         # =================================================================
         # SIGNAL RESTORATION: Bridge gaps in dashed / broken lines.
@@ -352,22 +422,29 @@ def vectorize_bitonal_image(
                 )
                 restored = cv2.bitwise_or(restored, closed_dir)
 
-            # 5b. Gaussian blur + adaptive threshold to smooth jagged
-            #     staircase edges introduced by the directional close and
-            #     to re-binarize the result cleanly.
+            # 5b. Gaussian blur + threshold to smooth jagged staircase
+            #     edges introduced by the directional close and to
+            #     re-binarize the result cleanly.
+            #
+            #     NOTE: We use a simple global threshold (not adaptive)
+            #     because the input is already binary (ink=255, bg=0)
+            #     that was only slightly blurred.  Adaptive thresholding
+            #     fails here: in uniform dark background regions every
+            #     pixel exceeds (local_mean - C), turning the entire
+            #     background white and destroying the image.
             sk = signal_smooth_ksize if signal_smooth_ksize % 2 == 1 else signal_smooth_ksize + 1
             smoothed = cv2.GaussianBlur(restored, (sk, sk), 0)
-            binary = cv2.adaptiveThreshold(
-                smoothed, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY, blockSize=signal_adaptive_block, C=signal_adaptive_c,
-            )
+            _, binary = cv2.threshold(smoothed, 127, 255, cv2.THRESH_BINARY)
+            _save_debug("07_signal_restored", binary)
 
+            ink_after_sr = int(np.count_nonzero(binary))
             logger.info(
                 "Signal restoration complete",
                 kernel_length=signal_close_kernel_length,
                 angle_step=signal_close_angle_step,
                 directions=180 // signal_close_angle_step,
             )
+            print(f"[vectorize] Signal restoration: {ink_after_sr} ink pixels after re-threshold")
 
         # 4. Remove small connected components (text, dots, annotations,
         #    scan artifacts).  Uses BOTH area AND bounding-box extent:
@@ -375,8 +452,9 @@ def vectorize_bitonal_image(
         #    - Small area BUT large bbox → thin line work → KEEP
         #    This preserves long thin contour lines that have small pixel
         #    area but span a significant distance across the drawing.
-        min_component_area = max(min_contour_area, width * height * 0.001)
-        min_component_dim = max(50, min(width, height) * 0.03)  # 3% of shorter side
+        # Lower thresholds to preserve thin curves
+        min_component_area = max(min_contour_area, width * height * 0.0001)  # 0.01% not 0.1%
+        min_component_dim = max(30, min(width, height) * 0.01)  # 1% of shorter side
         n_labels, labels, stats, _ = cv2.connectedComponentsWithStats(binary, connectivity=8)
         for lbl in range(1, n_labels):
             comp_area = stats[lbl, cv2.CC_STAT_AREA]
@@ -391,11 +469,15 @@ def vectorize_bitonal_image(
                     max(stats[lbl, cv2.CC_STAT_WIDTH],
                         stats[lbl, cv2.CC_STAT_HEIGHT]) >= min_component_dim)
 
+        kept_count = sum(1 for lbl in range(1, n_labels) if _component_kept(lbl))
+        removed_count = sum(1 for lbl in range(1, n_labels) if not _component_kept(lbl))
         logger.info(
             "Pre-processing complete",
-            components_kept=sum(1 for lbl in range(1, n_labels) if _component_kept(lbl)),
-            components_removed=sum(1 for lbl in range(1, n_labels) if not _component_kept(lbl)),
+            components_kept=kept_count,
+            components_removed=removed_count,
         )
+        print(f"[vectorize] Components: {kept_count} kept, {removed_count} removed")
+        _save_debug("08_components_filtered", binary)
 
         # =================================================================
         # SKELETONIZATION: Reduce thick lines to 1px centerlines.
@@ -412,6 +494,8 @@ def vectorize_bitonal_image(
                 skel = _skeletonize(binary > 0)
                 binary = (skel.astype(np.uint8)) * 255
                 logger.info("Skeletonization complete (lines reduced to 1px centerlines)")
+                print(f"[vectorize] Skeletonized: {int(np.count_nonzero(binary))} skeleton pixels")
+                _save_debug("09_skeletonized", binary)
             except ImportError:
                 # Fallback: iterative morphological thinning using OpenCV.
                 # Zhang-Suen thinning via ximgproc, or repeated erosion
@@ -425,6 +509,7 @@ def vectorize_bitonal_image(
                         "Morphological thinning complete via cv2.ximgproc.thinning "
                         "(scikit-image not installed, using OpenCV fallback)"
                     )
+                    _save_debug("09_skeletonized_ximgproc", binary)
                 except AttributeError:
                     logger.warning(
                         "Neither scikit-image nor opencv-contrib available for "
@@ -508,6 +593,29 @@ def vectorize_bitonal_image(
         deduped_lines = _deduplicate_lines(
             raw_lines_arr, line_merge_angle_tol, line_merge_dist_tol,
         )
+
+        # --- Refine line positions against the reference binary ---
+        # Detection runs on the processed image (signal restore +
+        # skeletonize) for robust connectivity.  But those morphological
+        # operations shift line positions.  Refine each line by fitting
+        # to actual ink pixels in the clean reference binary.
+        if refine_positions:
+            refined_lines = []
+            refined_count = 0
+            for (x1, y1, x2, y2) in deduped_lines:
+                rx1, ry1, rx2, ry2 = _refine_line_to_reference(
+                    float(x1), float(y1), float(x2), float(y2),
+                    binary_reference, refine_search_radius,
+                )
+                if (rx1, ry1, rx2, ry2) != (float(x1), float(y1), float(x2), float(y2)):
+                    refined_count += 1
+                refined_lines.append((rx1, ry1, rx2, ry2))
+            deduped_lines = refined_lines
+            logger.info(
+                f"Position refinement: {refined_count}/{len(deduped_lines)} "
+                f"lines refined against reference binary"
+            )
+
         for (x1, y1, x2, y2) in deduped_lines:
             start = px_to_dwg(float(x1), float(y1))
             end = px_to_dwg(float(x2), float(y2))
@@ -518,6 +626,15 @@ def vectorize_bitonal_image(
             f"(FLD+Hough raw: {len(all_raw_lines)}, HoughLinesP: {hough_count}, "
             f"after dedup: {len(deduped_lines)})"
         )
+        print(f"[vectorize] Lines: {len(result.lines)} (raw={len(all_raw_lines)}, dedup={len(deduped_lines)})")
+
+        # Debug: show detected lines overlaid on binary
+        if debug_output_dir and deduped_lines:
+            line_anns = [
+                {"type": "line", "p1": (int(x1), int(y1)), "p2": (int(x2), int(y2)), "color": (0, 255, 0), "thickness": 2}
+                for (x1, y1, x2, y2) in deduped_lines
+            ]
+            _save_debug("10_detected_lines", binary, line_anns)
 
         # --- Mask detected lines from binary image ---
         # Masking lines BEFORE circle detection is critical: it prevents
@@ -537,6 +654,7 @@ def vectorize_bitonal_image(
                 lines_masked=lines_masked,
                 mask_thickness=mask_thickness,
             )
+            _save_debug("11_lines_masked", binary)
 
         # =================================================================
         # CIRCLE DETECTION (HoughCircles) + Validation + Deduplication
@@ -577,6 +695,23 @@ def vectorize_bitonal_image(
                 )
             deduped_circles = validated_circles
 
+        # --- Refine circle positions against reference binary ---
+        if refine_positions and deduped_circles:
+            refined_circles = []
+            refined_count = 0
+            for (cx, cy, r) in deduped_circles:
+                ncx, ncy, nr = _refine_circle_to_reference(
+                    cx, cy, r, binary_reference, refine_search_radius,
+                )
+                if (ncx, ncy, nr) != (cx, cy, r):
+                    refined_count += 1
+                refined_circles.append((ncx, ncy, nr))
+            deduped_circles = refined_circles
+            logger.info(
+                f"Position refinement: {refined_count}/{len(deduped_circles)} "
+                f"circles refined against reference binary"
+            )
+
         for (cx, cy, r) in deduped_circles:
             center = px_to_dwg(float(cx), float(cy))
             radius = px_dist_to_dwg(float(r))
@@ -587,6 +722,14 @@ def vectorize_bitonal_image(
             f"(raw: {len(raw_circles[0]) if raw_circles is not None else 0}, "
             f"after dedup+validation: {len(deduped_circles)})"
         )
+
+        # Debug: show detected circles
+        if debug_output_dir and deduped_circles:
+            circle_anns = [
+                {"type": "circle", "center": (int(cx), int(cy)), "radius": int(r), "color": (255, 0, 0), "thickness": 2}
+                for (cx, cy, r) in deduped_circles
+            ]
+            _save_debug("12_detected_circles", binary, circle_anns)
 
         # --- Mask detected circles from binary image ---
         if mask_detected_circles and deduped_circles:
@@ -602,6 +745,7 @@ def vectorize_bitonal_image(
                 circles_masked=circles_masked,
                 mask_thickness=mask_thickness,
             )
+            _save_debug("13_circles_masked", binary)
 
         # =================================================================
         # CONTOUR DETECTION → arcs, ellipses, polylines
@@ -805,6 +949,8 @@ def vectorize_bitonal_image(
         logger.info(f"Detected {len(result.arcs)} arcs")
         logger.info(f"Detected {len(result.ellipses)} ellipses")
         logger.info(f"Detected {len(result.polylines)} polylines/contours")
+        print(f"[vectorize] Circles: {len(result.circles)}, Arcs: {len(result.arcs)}, "
+              f"Ellipses: {len(result.ellipses)}, Polylines: {len(result.polylines)}")
 
         # =================================================================
         # POST-PROCESSING: Remove lines/circles that overlap with contours
@@ -939,6 +1085,35 @@ def vectorize_bitonal_image(
             ellipses=len(result.ellipses),
             polylines=len(result.polylines),
         )
+        print(f"[vectorize] DONE — {total} features "
+              f"(L={len(result.lines)} C={len(result.circles)} "
+              f"A={len(result.arcs)} E={len(result.ellipses)} "
+              f"P={len(result.polylines)})")
+
+        # Final debug: all detected features on original image
+        if debug_output_dir:
+            all_anns = []
+            # Lines in green
+            for ln in result.lines:
+                # Convert back to pixel coords
+                px1 = int(ln.start[0] / scale) if scale else 0
+                py1 = int(height - ln.start[1] / scale) if scale else 0
+                px2 = int(ln.end[0] / scale) if scale else 0
+                py2 = int(height - ln.end[1] / scale) if scale else 0
+                all_anns.append({"type": "line", "p1": (px1, py1), "p2": (px2, py2), "color": (0, 255, 0), "thickness": 2})
+            # Circles in red
+            for c in result.circles:
+                cx = int(c.center[0] / scale) if scale else 0
+                cy = int(height - c.center[1] / scale) if scale else 0
+                r = int(c.radius / scale) if scale else 0
+                all_anns.append({"type": "circle", "center": (cx, cy), "radius": r, "color": (0, 0, 255), "thickness": 2})
+            # Arcs in cyan (draw as circles for simplicity)
+            for a in result.arcs:
+                cx = int(a.center[0] / scale) if scale else 0
+                cy = int(height - a.center[1] / scale) if scale else 0
+                r = int(a.radius / scale) if scale else 0
+                all_anns.append({"type": "circle", "center": (cx, cy), "radius": r, "color": (255, 255, 0), "thickness": 2})
+            _save_debug("99_final_all_features", img, all_anns)
 
         return result
 
@@ -962,8 +1137,10 @@ def _deduplicate_lines(
 
     Two lines are considered duplicates if:
     - Their angles differ by less than ``angle_tol`` degrees, AND
-    - Their midpoints are within ``dist_tol`` pixels perpendicular distance.
+    - They are within ``dist_tol`` pixels perpendicular distance, AND
+    - They actually OVERLAP along the line direction.
 
+    Collinear but non-overlapping lines are kept as separate features.
     When duplicates are found, the longest line is kept.
     """
     import numpy as np
@@ -993,11 +1170,24 @@ def _deduplicate_lines(
         kept.append((x1, y1, x2, y2))
         used[i] = True
 
+        # Line i direction unit vector
+        line_dir = np.array([x2 - x1, y2 - y1], dtype=float)
+        line_len = np.linalg.norm(line_dir)
+        if line_len < 1:
+            continue
+        line_unit = line_dir / line_len
+        perp = np.array([-line_unit[1], line_unit[0]])
+
+        # Project line i endpoints onto its direction (for overlap check)
+        origin = np.array([x1, y1], dtype=float)
+        t_i_min = 0.0
+        t_i_max = line_len
+
         # Mark near-duplicates as used
         for j in range(i + 1, len(lines_data)):
             if used[j]:
                 continue
-            _, _, _, _, ang_j, _, mx_j, my_j = lines_data[j]
+            x1_j, y1_j, x2_j, y2_j, ang_j, len_j, mx_j, my_j = lines_data[j]
 
             # Check angle similarity
             angle_diff = abs(ang - ang_j)
@@ -1007,19 +1197,30 @@ def _deduplicate_lines(
                 continue
 
             # Check perpendicular distance between midpoints
-            dx = mx_j - mx
-            dy = my_j - my
-            # Perpendicular distance from midpoint j to line i
-            line_dir = np.array([x2 - x1, y2 - y1], dtype=float)
-            line_len = np.linalg.norm(line_dir)
-            if line_len < 1:
-                continue
-            line_unit = line_dir / line_len
-            perp = np.array([-line_unit[1], line_unit[0]])
-            perp_dist = abs(dx * perp[0] + dy * perp[1])
+            dmx = mx_j - x1
+            dmy = my_j - y1
+            perp_dist = abs(dmx * perp[0] + dmy * perp[1])
 
-            if perp_dist < dist_tol:
-                used[j] = True  # Mark as duplicate
+            if perp_dist >= dist_tol:
+                continue
+
+            # Check for OVERLAP along line direction
+            # Project line j endpoints onto line i direction
+            p1_j = np.array([x1_j, y1_j], dtype=float) - origin
+            p2_j = np.array([x2_j, y2_j], dtype=float) - origin
+            t_j1 = np.dot(p1_j, line_unit)
+            t_j2 = np.dot(p2_j, line_unit)
+            t_j_min = min(t_j1, t_j2)
+            t_j_max = max(t_j1, t_j2)
+
+            # Check if intervals overlap (with small tolerance)
+            overlap_tol = dist_tol
+            if t_j_max < t_i_min - overlap_tol or t_j_min > t_i_max + overlap_tol:
+                # No overlap — these are collinear but separate lines
+                continue
+
+            # Lines overlap — mark j as duplicate
+            used[j] = True
 
     return kept
 
@@ -1201,3 +1402,211 @@ def _compute_bulges(
             bulges[i] = sign * abs(bulge_val)
 
     return bulges
+
+
+# =========================================================================
+# Position refinement helpers
+# =========================================================================
+
+def _refine_line_to_reference(
+    x1: float, y1: float, x2: float, y2: float,
+    binary_ref: "np.ndarray",
+    search_radius: int = 10,
+) -> Tuple[float, float, float, float]:
+    """
+    Refine a detected line's position by fitting to actual ink pixels in
+    the reference binary image.
+
+    The detection pipeline uses heavy morphological pre-processing (signal
+    restoration, skeletonization) that can shift line positions by several
+    pixels.  This function finds the ink pixels in the *original* clean
+    binary that lie near the detected line, fits a new line through them,
+    and returns corrected endpoints.
+
+    Args:
+        x1, y1, x2, y2: Detected line endpoints in pixel coordinates.
+        binary_ref: The reference binary image (before signal restore /
+                    skeletonize).  White = ink, black = background.
+        search_radius: Pixel radius to search for ink around the line.
+
+    Returns:
+        Refined (x1, y1, x2, y2) in pixel coordinates.
+    """
+    import cv2
+    import numpy as np
+
+    h, w = binary_ref.shape[:2]
+
+    # Create a mask along the detected line with the search radius
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.line(
+        mask,
+        (int(round(x1)), int(round(y1))),
+        (int(round(x2)), int(round(y2))),
+        255, search_radius * 2,
+    )
+
+    # Find ink pixels in the reference binary within the search corridor
+    ink_yx = np.column_stack(np.where((binary_ref > 0) & (mask > 0)))
+    if len(ink_yx) < 4:
+        return (x1, y1, x2, y2)  # Not enough ink pixels — keep original
+
+    # Convert (row, col) → (x, y)
+    pts = ink_yx[:, [1, 0]].astype(np.float32)
+
+    # Fit a line through the ink pixels (L2 = least-squares)
+    [vx, vy, cx, cy] = cv2.fitLine(pts, cv2.DIST_L2, 0, 0.01, 0.01)
+    dx, dy = float(vx[0]), float(vy[0])
+    cx, cy = float(cx[0]), float(cy[0])
+
+    # Project all ink pixels onto the fitted line direction to find
+    # the actual extent (where ink starts and ends)
+    projections = (pts[:, 0] - cx) * dx + (pts[:, 1] - cy) * dy
+
+    # Use the 2nd and 98th percentile to avoid outlier ink pixels
+    t_min = float(np.percentile(projections, 2))
+    t_max = float(np.percentile(projections, 98))
+
+    # Refined endpoints along the fitted line
+    nx1 = float(cx + t_min * dx)
+    ny1 = float(cy + t_min * dy)
+    nx2 = float(cx + t_max * dx)
+    ny2 = float(cy + t_max * dy)
+
+    # Sanity check: refined line should be roughly the same length (±50%)
+    orig_len = np.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    new_len = np.sqrt((nx2 - nx1) ** 2 + (ny2 - ny1) ** 2)
+    if orig_len > 0 and (new_len / orig_len < 0.5 or new_len / orig_len > 1.5):
+        return (x1, y1, x2, y2)  # Refinement is suspicious — keep original
+
+    return (nx1, ny1, nx2, ny2)
+
+
+def _refine_circle_to_reference(
+    cx: float, cy: float, r: float,
+    binary_ref: "np.ndarray",
+    search_radius: int = 10,
+    n_samples: int = 72,
+) -> Tuple[float, float, float]:
+    """
+    Refine a detected circle's position by fitting to actual ink pixels in
+    the reference binary image.
+
+    Samples points around the circumference, finds nearby ink pixels in the
+    reference binary, and re-fits a circle through them using least-squares.
+
+    Args:
+        cx, cy, r: Detected circle center and radius in pixel coordinates.
+        binary_ref: Reference binary image.
+        search_radius: Pixel radius to search for ink around circumference.
+        n_samples: Number of angular samples around circumference.
+
+    Returns:
+        Refined (cx, cy, r) in pixel coordinates.
+    """
+    import cv2
+    import numpy as np
+    import math
+
+    h, w = binary_ref.shape[:2]
+
+    # Create an annular mask around the detected circle
+    mask = np.zeros((h, w), dtype=np.uint8)
+    cv2.circle(mask, (int(round(cx)), int(round(cy))),
+               int(round(r)) + search_radius, 255, search_radius * 2)
+
+    # Find ink pixels within the annular mask
+    ink_yx = np.column_stack(np.where((binary_ref > 0) & (mask > 0)))
+    if len(ink_yx) < 8:
+        return (cx, cy, r)  # Not enough ink
+
+    # Convert (row, col) → (x, y)
+    pts = ink_yx[:, [1, 0]].astype(np.float64)
+
+    # Algebraic circle fit (Kasa method): minimize sum of (x²+y²-ax-by-c)²
+    # Gives (a, b, c) where center = (a/2, b/2), r = sqrt(c + a²/4 + b²/4)
+    A = np.column_stack([pts[:, 0], pts[:, 1], np.ones(len(pts))])
+    b_vec = pts[:, 0] ** 2 + pts[:, 1] ** 2
+
+    try:
+        result, _, _, _ = np.linalg.lstsq(A, b_vec, rcond=None)
+    except np.linalg.LinAlgError:
+        return (cx, cy, r)
+
+    a, b, c = result
+    ncx = a / 2.0
+    ncy = b / 2.0
+    nr = math.sqrt(max(c + ncx ** 2 + ncy ** 2, 0))
+
+    # Sanity check: center shouldn't move too far, radius shouldn't change drastically
+    center_shift = math.sqrt((ncx - cx) ** 2 + (ncy - cy) ** 2)
+    if center_shift > search_radius * 2 or nr < r * 0.5 or nr > r * 1.5:
+        return (cx, cy, r)
+
+    return (float(ncx), float(ncy), float(nr))
+
+
+# =========================================================================
+# CLI entry point for standalone testing
+# =========================================================================
+
+if __name__ == "__main__":
+    import sys
+
+    if len(sys.argv) < 2:
+        print("Usage: python image_vectorizer.py <image_path> [--debug <output_dir>] [dpi] [scale]")
+        print("Example: python image_vectorizer.py C:/plans/floor1.tif --debug ./debug_output 300 1.0")
+        print("\nThe --debug flag saves checkpoint images at each processing step.")
+        sys.exit(1)
+
+    # Parse args
+    args = sys.argv[1:]
+    debug_dir = None
+    if "--debug" in args:
+        idx = args.index("--debug")
+        if idx + 1 < len(args):
+            debug_dir = args[idx + 1]
+            args = args[:idx] + args[idx + 2:]
+        else:
+            print("Error: --debug requires an output directory")
+            sys.exit(1)
+
+    path = args[0] if args else None
+    if not path:
+        print("Error: image_path is required")
+        sys.exit(1)
+
+    dpi_arg = int(args[1]) if len(args) > 1 else 300
+    scale_arg = float(args[2]) if len(args) > 2 else 1.0
+
+    if debug_dir:
+        print(f"[debug] Checkpoint images will be saved to: {debug_dir}")
+
+    result = vectorize_bitonal_image(path, dpi=dpi_arg, scale=scale_arg, debug_output_dir=debug_dir)
+
+    print("\n=== Vectorization Summary ===")
+    print(f"  Image: {path}")
+    print(f"  Size:  {result.image_width_px} x {result.image_height_px} px")
+    print(f"  Lines:     {len(result.lines)}")
+    print(f"  Circles:   {len(result.circles)}")
+    print(f"  Arcs:      {len(result.arcs)}")
+    print(f"  Ellipses:  {len(result.ellipses)}")
+    print(f"  Polylines: {len(result.polylines)}")
+    total = (len(result.lines) + len(result.circles) + len(result.arcs)
+             + len(result.ellipses) + len(result.polylines))
+    print(f"  TOTAL:     {total}")
+
+    if result.lines:
+        print("\n--- Sample lines (first 5) ---")
+        for i, ln in enumerate(result.lines[:5]):
+            print(f"  [{i}] ({ln.start[0]:.1f}, {ln.start[1]:.1f}) -> "
+                  f"({ln.end[0]:.1f}, {ln.end[1]:.1f})")
+    if result.circles:
+        print("\n--- Sample circles (first 5) ---")
+        for i, c in enumerate(result.circles[:5]):
+            print(f"  [{i}] center=({c.center[0]:.1f}, {c.center[1]:.1f}), r={c.radius:.1f}")
+    if result.arcs:
+        print("\n--- Sample arcs (first 5) ---")
+        for i, a in enumerate(result.arcs[:5]):
+            print(f"  [{i}] center=({a.center[0]:.1f}, {a.center[1]:.1f}), r={a.radius:.1f}, "
+                  f"{a.start_angle:.1f}°-{a.end_angle:.1f}°")

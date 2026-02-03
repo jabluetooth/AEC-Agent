@@ -5,6 +5,7 @@ Provides CRUD operations for projects, elements, and relationships
 with PostGIS spatial and pgvector semantic queries.
 """
 
+import json
 from datetime import datetime
 from typing import Optional, List, Literal
 from uuid import UUID
@@ -70,7 +71,7 @@ class ElementRepository:
             project.source,
             project.file_path,
             project.file_hash,
-            project.metadata,
+            json.dumps(project.metadata) if isinstance(project.metadata, dict) else project.metadata,
         )
         logger.info("Created project", project_id=str(result), name=project.name)
         return result
@@ -186,7 +187,7 @@ class ElementRepository:
             element.category,
             element.family,
             element.type_name,
-            element.properties,
+            json.dumps(element.properties) if isinstance(element.properties, dict) else element.properties,
             element.description,
             element.embedding,
         )
@@ -605,7 +606,7 @@ class ElementRepository:
             relationship.distance,
             relationship.confidence,
             relationship.source,
-            relationship.metadata,
+            json.dumps(relationship.metadata) if isinstance(relationship.metadata, dict) else relationship.metadata,
         )
 
     async def get_related_elements(
