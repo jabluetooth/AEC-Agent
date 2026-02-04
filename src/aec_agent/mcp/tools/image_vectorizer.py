@@ -33,6 +33,7 @@ class DetectedLine:
     """A line segment detected from raster data."""
     start: Tuple[float, float]
     end: Tuple[float, float]
+    linetype: str = "CONTINUOUS"  # Phase 2.5: "CONTINUOUS", "DASHED", "HIDDEN", etc.
 
 
 @dataclass
@@ -77,6 +78,9 @@ class VectorizationResult:
     arcs: List[DetectedArc] = field(default_factory=list)
     ellipses: List[DetectedEllipse] = field(default_factory=list)
     polylines: List[DetectedPolyline] = field(default_factory=list)
+    # Phase 2.5: Semantic pipeline outputs
+    texts: List = field(default_factory=list)  # List[DetectedText] from ocr_masking
+    blocks: List = field(default_factory=list)  # List[DetectedBlock] from symbol_detection
     image_width_px: int = 0
     image_height_px: int = 0
     dpi: int = 300
@@ -138,6 +142,24 @@ def vectorize_bitonal_image(
     refine_search_radius: int = 10,
     # --- Debug output ---
     debug_output_dir: Optional[str] = None,
+    # --- Phase 2.5: Semantic Pipeline parameters ---
+    # OCR Text Masking
+    ocr_masking: bool = False,  # Disabled by default until pytesseract installed
+    ocr_min_confidence: int = 60,
+    ocr_min_text_height: int = 8,
+    ocr_lang: str = "eng",
+    # Symbol Detection
+    symbol_detection: bool = False,  # Disabled by default until templates added
+    symbol_threshold: float = 0.8,
+    symbol_nms_distance: float = 20.0,
+    # AEC Geometric Heuristics
+    aec_heuristics: bool = True,  # Enabled by default
+    orthogonal_snap: bool = True,
+    orthogonal_angle_tolerance: float = 2.0,
+    collinear_merge: bool = True,
+    collinear_angle_tolerance: float = 2.0,
+    collinear_distance_tolerance: float = 5.0,
+    collinear_gap_tolerance: float = 20.0,
 ) -> VectorizationResult:
     """
     Detect geometric features from a bitonal image using OpenCV.
@@ -382,6 +404,78 @@ def vectorize_bitonal_image(
         # back to their true locations after detection.
         # =================================================================
         binary_reference = binary.copy()
+
+        # =================================================================
+        # PHASE 2.5 STAGE 1: TEXT ISOLATION & MASKING (OCR)
+        #
+        # Detect text regions using Tesseract OCR and mask them from the
+        # image BEFORE line detection. This prevents text from being
+        # vectorized as geometry (the "bag of lines" problem).
+        # =================================================================
+        detected_texts = []
+        if ocr_masking:
+            try:
+                from aec_agent.mcp.tools.ocr_masking import detect_and_mask_text
+
+                binary, detected_texts = detect_and_mask_text(
+                    binary,
+                    scale=scale,
+                    min_confidence=ocr_min_confidence,
+                    min_text_height_px=ocr_min_text_height,
+                    lang=ocr_lang,
+                )
+                result.texts = detected_texts
+                logger.info(
+                    "OCR masking complete",
+                    texts_found=len(detected_texts),
+                )
+                print(f"[vectorize] OCR masking: {len(detected_texts)} text regions detected and masked")
+                _save_debug("04a_ocr_masked", binary)
+            except ImportError:
+                logger.warning(
+                    "pytesseract not installed, skipping OCR masking. "
+                    "Install with: pip install pytesseract"
+                )
+            except Exception as e:
+                logger.warning(f"OCR masking failed: {e}, continuing without text masking")
+
+        # =================================================================
+        # PHASE 2.5 STAGE 2: SYMBOL DETECTION (Template Matching)
+        #
+        # Detect standard AEC symbols using template matching and mask
+        # them from the image. This prevents symbols from being traced
+        # as jagged polylines - instead they'll be inserted as blocks.
+        # =================================================================
+        detected_blocks = []
+        if symbol_detection:
+            try:
+                from aec_agent.mcp.tools.symbol_detection import (
+                    load_symbol_templates,
+                    detect_and_mask_symbols,
+                )
+
+                templates = load_symbol_templates()
+                if templates:
+                    binary, detected_blocks = detect_and_mask_symbols(
+                        binary,
+                        templates,
+                        scale=scale,
+                        match_threshold=symbol_threshold,
+                        nms_distance=symbol_nms_distance,
+                    )
+                    result.blocks = detected_blocks
+                    logger.info(
+                        "Symbol detection complete",
+                        symbols_found=len(detected_blocks),
+                    )
+                    print(f"[vectorize] Symbol detection: {len(detected_blocks)} symbols detected and masked")
+                    _save_debug("04b_symbols_masked", binary)
+                else:
+                    logger.info("No symbol templates found, skipping symbol detection")
+            except ImportError as e:
+                logger.warning(f"Symbol detection dependencies not available: {e}")
+            except Exception as e:
+                logger.warning(f"Symbol detection failed: {e}, continuing without symbol masking")
 
         # =================================================================
         # SIGNAL RESTORATION: Bridge gaps in dashed / broken lines.
@@ -1072,9 +1166,89 @@ def vectorize_bitonal_image(
                     "Install with: pip install networkx>=3.0"
                 )
 
+        # =================================================================
+        # PHASE 2.5 STAGE 5: AEC GEOMETRIC HEURISTICS
+        #
+        # Apply engineering-specific post-processing to clean up geometry:
+        # 1. Orthogonal snapping: Lines within ±tolerance of 0°/90° snap to exact
+        # 2. Collinear merging: Fragmented segments merge into single lines
+        # 3. Dashed line detection: Regular gaps → DASHED linetype
+        # =================================================================
+        if aec_heuristics and result.lines:
+            try:
+                from aec_agent.utils.geometry_cleanup import (
+                    snap_to_orthogonal,
+                    merge_collinear_lines,
+                    MergedLine,
+                )
+
+                original_count = len(result.lines)
+
+                # Convert DetectedLine to tuples for processing
+                line_tuples = [
+                    (ln.start[0], ln.start[1], ln.end[0], ln.end[1])
+                    for ln in result.lines
+                ]
+
+                # Step 1: Orthogonal snapping
+                if orthogonal_snap:
+                    line_tuples = snap_to_orthogonal(
+                        line_tuples,
+                        angle_tolerance=orthogonal_angle_tolerance,
+                    )
+                    print(f"[vectorize] Orthogonal snapping: processed {len(line_tuples)} lines")
+
+                # Step 2: Collinear merging
+                if collinear_merge:
+                    continuous, dashed = merge_collinear_lines(
+                        line_tuples,
+                        angle_tolerance=collinear_angle_tolerance,
+                        distance_tolerance=collinear_distance_tolerance,
+                        gap_tolerance=collinear_gap_tolerance,
+                    )
+
+                    # Convert MergedLine back to DetectedLine
+                    result.lines = []
+                    for ml in continuous:
+                        result.lines.append(DetectedLine(
+                            start=ml.start,
+                            end=ml.end,
+                            linetype="CONTINUOUS",
+                        ))
+                    for ml in dashed:
+                        result.lines.append(DetectedLine(
+                            start=ml.start,
+                            end=ml.end,
+                            linetype="DASHED",
+                        ))
+
+                    reduction = original_count - len(result.lines)
+                    pct = (100.0 * reduction / original_count) if original_count > 0 else 0
+                    logger.info(
+                        "AEC heuristics complete",
+                        original=original_count,
+                        merged=len(result.lines),
+                        reduction_pct=f"{pct:.1f}%",
+                        dashed=len(dashed),
+                    )
+                    print(f"[vectorize] Collinear merge: {original_count} → {len(result.lines)} lines "
+                          f"({pct:.1f}% reduction, {len(dashed)} dashed)")
+                else:
+                    # Just convert back with CONTINUOUS linetype
+                    result.lines = [
+                        DetectedLine(start=(x1, y1), end=(x2, y2), linetype="CONTINUOUS")
+                        for x1, y1, x2, y2 in line_tuples
+                    ]
+
+            except ImportError as e:
+                logger.warning(f"AEC heuristics module not available: {e}")
+            except Exception as e:
+                logger.warning(f"AEC heuristics failed: {e}, keeping original lines")
+
         total = (
             len(result.lines) + len(result.circles) + len(result.arcs)
             + len(result.ellipses) + len(result.polylines)
+            + len(result.texts) + len(result.blocks)  # Phase 2.5 additions
         )
         logger.info(
             "Vectorization complete",
@@ -1084,11 +1258,13 @@ def vectorize_bitonal_image(
             arcs=len(result.arcs),
             ellipses=len(result.ellipses),
             polylines=len(result.polylines),
+            texts=len(result.texts),
+            blocks=len(result.blocks),
         )
         print(f"[vectorize] DONE — {total} features "
               f"(L={len(result.lines)} C={len(result.circles)} "
               f"A={len(result.arcs)} E={len(result.ellipses)} "
-              f"P={len(result.polylines)})")
+              f"P={len(result.polylines)} T={len(result.texts)} B={len(result.blocks)})")
 
         # Final debug: all detected features on original image
         if debug_output_dir:

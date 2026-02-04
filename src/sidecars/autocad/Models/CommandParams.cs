@@ -35,6 +35,13 @@ namespace AECAgent.AutoCAD.Models
 
         [JsonProperty("layer")]
         public string Layer { get; set; }
+
+        /// <summary>
+        /// Optional linetype name (e.g., "CONTINUOUS", "DASHED", "HIDDEN").
+        /// Must exist in the drawing's linetype table.
+        /// </summary>
+        [JsonProperty("linetype")]
+        public string Linetype { get; set; }
     }
 
     public class DrawCircleParams
@@ -426,5 +433,90 @@ namespace AECAgent.AutoCAD.Models
 
         [JsonProperty("corner2")]
         public double[] Corner2 { get; set; }
+    }
+
+    // =========================================================================
+    // Phase 2.5: Semantic Vectorization — MText and Block Insertion
+    // =========================================================================
+
+    /// <summary>
+    /// Parameters for creating MText (multi-line text) entities.
+    /// MText supports formatting, word wrap, and better handling of text blocks
+    /// compared to DBText (single-line text).
+    /// </summary>
+    public class DrawMTextParams
+    {
+        /// <summary>The text content to display.</summary>
+        [JsonProperty("text")]
+        public string Text { get; set; }
+
+        /// <summary>Insertion point [x, y] or [x, y, z].</summary>
+        [JsonProperty("position")]
+        public double[] Position { get; set; }
+
+        /// <summary>Text height in drawing units. Default 2.5.</summary>
+        [JsonProperty("height")]
+        public double Height { get; set; } = 2.5;
+
+        /// <summary>
+        /// Text box width in drawing units. If 0 or not specified,
+        /// MText will not wrap (single line behavior).
+        /// </summary>
+        [JsonProperty("width")]
+        public double Width { get; set; }
+
+        /// <summary>Rotation angle in degrees (CCW from +X axis).</summary>
+        [JsonProperty("rotation")]
+        public double Rotation { get; set; }
+
+        /// <summary>Target layer name. If not specified, uses current layer.</summary>
+        [JsonProperty("layer")]
+        public string Layer { get; set; }
+
+        /// <summary>
+        /// Text style name. If not specified, uses current text style.
+        /// </summary>
+        [JsonProperty("style")]
+        public string Style { get; set; }
+    }
+
+    /// <summary>
+    /// Parameters for inserting block references.
+    /// The block definition must already exist in the drawing's block table.
+    /// </summary>
+    public class InsertBlockParams
+    {
+        /// <summary>
+        /// Name of the block to insert. Must exist in the drawing's block table.
+        /// </summary>
+        [JsonProperty("block_name")]
+        public string BlockName { get; set; }
+
+        /// <summary>Insertion point [x, y] or [x, y, z].</summary>
+        [JsonProperty("position")]
+        public double[] Position { get; set; }
+
+        /// <summary>
+        /// Uniform scale factor. Default 1.0.
+        /// Applied equally to X, Y, and Z axes.
+        /// </summary>
+        [JsonProperty("scale")]
+        public double Scale { get; set; } = 1.0;
+
+        /// <summary>Rotation angle in degrees (CCW from +X axis).</summary>
+        [JsonProperty("rotation")]
+        public double Rotation { get; set; }
+
+        /// <summary>Target layer name. If not specified, uses current layer.</summary>
+        [JsonProperty("layer")]
+        public string Layer { get; set; }
+
+        /// <summary>
+        /// Optional attribute values as tag-value pairs.
+        /// Only applies if the block has attribute definitions.
+        /// Example: {"PART_NUMBER": "ABC-123", "DESCRIPTION": "Valve"}
+        /// </summary>
+        [JsonProperty("attributes")]
+        public System.Collections.Generic.Dictionary<string, string> Attributes { get; set; }
     }
 }

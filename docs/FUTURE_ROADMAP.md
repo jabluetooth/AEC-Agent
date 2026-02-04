@@ -4,7 +4,7 @@
 
 This document outlines the development roadmap for the AEC Agent, focusing on achieving the full vision: **an AI that can autonomously design MEP, Low Voltage, and Fire Alarm systems** using AutoCAD/Revit, with intelligent memory and semantic search.
 
-**Key Insight**: Python-side OpenCV handles vectorization (lines-first detection, FastLineDetector, circle pixel validation). The AI focuses on understanding, designing, and decision-making.
+**Key Insight**: Split-stream architecture separates **Symbols** (YOLOv8 + Vision LLM) from **Geometry** (OpenCV + skeletonization). The geometric pipeline is complete; Phase 2.5 adds the semantic AI layer for symbol recognition, OCR parsing, and knowledge-grounded CAD assembly.
 
 ---
 
@@ -51,14 +51,18 @@ This document outlines the development roadmap for the AEC Agent, focusing on ac
 
 ### What's Missing
 
-| Component | Priority | Notes |
-|-----------|----------|-------|
-| ~~Raster Design integration~~ | ~~**Critical**~~ | ~~Core PDF workflow~~ **DONE** |
-| Auto-cache on file open | **Critical** | Memory foundation |
-| Design knowledge base | **Critical** | Codes, standards, formulas |
-| Autonomous design tools | **High** | Equipment placement, routing |
-| Model routing by task | Medium | Cost optimization |
-| Embedding-based tool selection | Medium | Smarter tool matching |
+| Component | Priority | Phase | Notes |
+|-----------|----------|-------|-------|
+| ~~Raster Design integration~~ | ~~**Critical**~~ | ~~2~~ | ~~Core PDF workflow~~ **DONE** |
+| ~~Auto-cache on file open~~ | ~~**Critical**~~ | ~~1~~ | ~~Memory foundation~~ **DONE** |
+| **LLM-Enhanced Vectorization** | **Critical** | 2.5 | Symbol detection + semantic parsing |
+| YOLOv8 MEP symbol detection | **Critical** | 2.5 | Split-stream architecture |
+| Vision LLM symbol classification | **High** | 2.5 | Gemini/GPT-4o for symbol ID |
+| Semantic OCR parsing | **High** | 2.5 | LLM parses text to JSON |
+| Design knowledge base | **Critical** | 3 | Codes, standards, formulas |
+| Autonomous design tools | **High** | 4-8 | Equipment placement, routing |
+| Model routing by task | Medium | 10 | Cost optimization |
+| Embedding-based tool selection | Medium | 10 | Smarter tool matching |
 
 ---
 
@@ -94,9 +98,12 @@ This document outlines the development roadmap for the AEC Agent, focusing on ac
 │  Code Validation:        ░░░░░░░░░░░░░░░░░░░░   0%          │
 │  Knowledge Query:        ░░░░░░░░░░░░░░░░░░░░   0%          │
 │                                                              │
-│  Raster/Vectorization:     ████████████████████ 100%          │
+│  Raster/Vectorization:                                       │
+│    Geometric (OpenCV):   ████████████████████ 100%          │
+│    Semantic (LLM/YOLO):  ░░░░░░░░░░░░░░░░░░░░   0%          │
 │                                                              │
 │  OVERALL: 40% ready for autonomous design                   │
+│  (Phase 2.5 will add semantic vectorization layer)          │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
@@ -729,24 +736,227 @@ Runtime:
 
 ---
 
-### Phase 3: Knowledge Base (3-4 weeks)
+### Phase 2.5: LLM-Enhanced Vectorization (Semantic Layer)
+
+**Goal**: Add AI semantic understanding on top of the geometric vectorization pipeline
+
+**Architecture**: The LLM acts as the **Orchestrator** and **Semantic Classifier** while OpenCV/skimage handles deterministic pixel manipulation.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                 SPLIT-STREAM ARCHITECTURE                    │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Input PDF/Raster                                            │
+│       ↓                                                      │
+│  ┌─────────────────┐                                        │
+│  │ LLM Orchestrator │ ← Document classification              │
+│  └────────┬────────┘   (floor plan vs single-line diagram)  │
+│           ↓                                                  │
+│  ┌────────┴────────┐                                        │
+│  ↓                 ↓                                        │
+│  Stream A          Stream B                                  │
+│  (Symbols)         (Geometry)                               │
+│  YOLOv8 +          OpenCV +                                 │
+│  Vision LLM        Skeletonization                          │
+│  ↓                 ↓                                        │
+│  Block Coords      Vector Primitives                         │
+│  └────────┬────────┘                                        │
+│           ↓                                                  │
+│  ┌─────────────────┐                                        │
+│  │ DXF Assembly    │ ← Knowledge Base grounding             │
+│  │ (ezdxf)         │   (layer rules, block standards)       │
+│  └─────────────────┘                                        │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+| Task | Description | Status |
+|------|-------------|--------|
+| 2.5.1 | **LLM Orchestrator**: Classify document type before pipeline runs | Pending |
+| 2.5.2 | **YOLOv8 Symbol Detection**: Train on MEP symbols (valves, detectors, outlets) | Pending |
+| 2.5.3 | **Vision LLM Classification**: Send cropped symbol regions to Gemini/GPT-4o for identification | Pending |
+| 2.5.4 | **Symbol Masking**: Erase detected symbols from raster before geometry vectorization | Pending |
+| 2.5.5 | **Semantic OCR Parsing**: LLM parses raw Tesseract text to structured JSON | Pending |
+| 2.5.6 | **Knowledge Base Grounding**: Query pgvector for CAD insertion rules during assembly | Pending |
+| 2.5.7 | **Block Insertion**: Insert standard AutoCAD blocks at detected symbol coordinates | Pending |
+
+**Division of Labor** (The "Smart" Split):
+
+| Task | Tool | Why? |
+|------|------|------|
+| Pixel Manipulation | OpenCV / skimage | Cheap, fast, mathematically precise. No AI overhead for deterministic operations. |
+| Raw Text Reading | Tesseract OCR | Standard baseline for converting pixels to strings. Free, battle-tested. |
+| Geometry Cleanup | Python Math (Trig) | Deterministic rules (snapping to 90°, merging collinear lines) don't need AI. |
+| **Document Classification** | LLM Orchestrator (Groq) | Decides pipeline configuration based on document type. Fast, routing-only. |
+| **Symbol Classification** | Vision LLM (Gemini/GPT-4o) | Handles variations in drawing styles that rigid templates miss. |
+| **Semantic Extraction** | Fast LLM (Groq - Llama 3) | Converts raw OCR text into structured JSON data with domain meaning. |
+| **Memory / Retrieval** | PostgreSQL + pgvector | Stores vector relationships of parsed data. Enables semantic search. |
+| **Rule Grounding** | Knowledge Base Query | Returns CAD insertion rules (layer, color, block) during assembly. |
+
+**Example Workflows**:
+
+1. **Vision LLM for Symbols** (Replacing Rigid Templates):
+   - **Problem**: OpenCV template matching is rigid—if a valve is drawn slightly differently, it fails.
+   - **Solution**: OpenCV detects a cluster of geometry that looks like a block. The system crops that region and sends it to VLM with prompt:
+     ```
+     "Identify this standard MEP symbol. Output JSON: {'block_name': 'VAV_BOX', 'category': 'mechanical', 'confidence': 0.95}"
+     ```
+   - **Result**: The sidecar inserts the exact, correct AutoCAD dynamic block, not just a static image.
+
+2. **Semantic OCR** (Giving Meaning to Text):
+   - **Problem**: Tesseract OCR reads `"12x12 SA 200 CFM"` as just a string. To AutoCAD, this is meaningless text.
+   - **Solution**: Feed raw Tesseract output to LLM with prompt:
+     ```
+     "Parse this MEP annotation into JSON: {'type', 'width', 'height', 'airflow', 'unit'}"
+     ```
+   - **DB Connection**: LLM returns `{'type': 'supply_air_diffuser', 'width': 12, 'height': 12, 'airflow_cfm': 200}`. PostgreSQL stores this as a **Mechanical Element** with metadata, searchable via pgvector—not just "Text".
+
+3. **Orchestrator Branching** (Intent & Pipeline Control):
+   - **Problem**: Not all PDFs are the same. An architectural floorplan needs different processing than an electrical single-line diagram.
+   - **Solution**: Before pipeline runs, LLM classifies the document:
+     - Looks at title block or low-res image summary
+     - Decides pipeline configuration based on document type
+   - **Example Decisions**:
+     - *"This is a structural grid. Skip symbol detection, run orthogonal snapping at high strictness."*
+     - *"This is an MEP plan. Run VLM symbol detection on all geometric clusters."*
+     - *"This is an electrical single-line diagram. Focus on connection topology, ignore spatial layout."*
+
+4. **Knowledge Base Grounding** (Phase 3 Integration):
+   - **Workflow**: LLM identifies a Fire Damper in the raster → queries Vector DB:
+     ```
+     "What are the CAD insertion rules for a Fire Damper?"
+     ```
+   - **KB Response**: *"Fire dampers must be placed on layer 'M-HVAC-FIRE' in RED."*
+   - **Result**: LLM passes exact parameters (layer, color, block name) to AutoCAD sidecar for insertion.
+
+**MCP Tool Architecture** (LLM-OpenCV Integration):
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│              MCP TOOL: classify_symbol                       │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Input: { "image_region": base64, "context": "mep_plan" }   │
+│                                                              │
+│  Python Side:                                                │
+│  ├── OpenCV detects geometric cluster                        │
+│  ├── Crops region to bounding box                            │
+│  ├── Sends to Vision LLM API (Gemini/GPT-4o)                │
+│  └── Returns structured JSON                                 │
+│                                                              │
+│  Output: {                                                   │
+│    "block_name": "GATE_VALVE",                               │
+│    "category": "plumbing",                                   │
+│    "layer": "P-VALV",                                        │
+│    "rotation": 90,                                           │
+│    "confidence": 0.92                                        │
+│  }                                                           │
+│                                                              │
+│  Sidecar Action: INSERT block at detected coordinates        │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Deliverables**:
+- Split-stream pipeline (symbols vs geometry)
+- YOLOv8 model trained on MEP symbols
+- Vision LLM integration for symbol classification
+- Semantic OCR parsing to structured JSON
+- Knowledge Base queries during CAD assembly
+- Standard block insertion at detected coordinates
+- MCP tools: `classify_symbol`, `parse_annotation`, `classify_document`
+
+---
+
+#### Phase 2.5 PRD: Deterministic Pipeline Improvements
+
+**Problem Statement**: The current OpenCV pipeline uses purely geometric detection (FastLineDetector, HoughLinesP), resulting in highly fragmented, non-semantic AutoCAD entities. Text is rendered as stray lines, dashed lines are disconnected segments, and wall thicknesses generate double-lines.
+
+**Objective**: Evolve `image_vectorizer.py` into a multi-stage semantic pipeline that isolates AEC components (Text, Symbols, Geometry) using masking, skeletonization, and geometric heuristics before generating AutoCAD entities.
+
+**Success Metrics**:
+
+| Metric | Target | Method |
+|--------|--------|--------|
+| Entity Reduction | ≥ 60% fewer lines | Collinear merging + text masking |
+| Text Accuracy | ≥ 85% as MText | Tesseract OCR → AutoCAD MText |
+| Geometric Precision | 100% orthogonal | Lines 88°-92° snapped to 0°/90° |
+| Processing Time | < 15 sec/page | Within MCP tool timeouts |
+
+**5-Stage Technical Pipeline**:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│           DETERMINISTIC PROCESSING PIPELINE                  │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  Stage 1: TEXT ISOLATION & MASKING                          │
+│  ├── Tesseract OCR detects text bounding boxes              │
+│  ├── Extract text string + coordinates                       │
+│  ├── Fill bounding box with white (erase from image)        │
+│  └── Queue draw_text sidecar commands                        │
+│                                                              │
+│  Stage 2: SYMBOL DETECTION (Template Matching)              │
+│  ├── cv2.matchTemplate against AEC icon library             │
+│  ├── Detect centroid coordinates of matches                  │
+│  ├── Erase symbol footprint from working TIFF               │
+│  └── Queue draw_block sidecar commands                       │
+│                                                              │
+│  Stage 3: SKELETONIZATION (Thickness Reduction)             │
+│  ├── skimage.morphology.skeletonize                         │
+│  └── Thick walls → single 1-pixel centerlines               │
+│                                                              │
+│  Stage 4: GEOMETRIC DETECTION                               │
+│  ├── HoughCircles (mask out resulting circles)              │
+│  └── FastLineDetector (extract remaining lines)             │
+│                                                              │
+│  Stage 5: AEC GEOMETRIC HEURISTICS                          │
+│  ├── Orthogonal Snapping: ±2° → exact 0°/90°/180°/270°     │
+│  └── Collinear Merging: grouped lines → single entity       │
+│      (applies DASHED linetype if gaps detected)             │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Architectural Updates**:
+
+| Component | File Path | Action | Description |
+|-----------|-----------|--------|-------------|
+| Vectorizer | `src/aec_agent/mcp/tools/image_vectorizer.py` | Modify | Add masking, OCR pipeline, heuristic classes |
+| Heuristics | `src/aec_agent/utils/geometry_cleanup.py` | **New** | Orthogonal snapping + collinear merging algorithms |
+| Symbol DB | `src/assets/templates/` | **New** | 5-10 standard bitonal templates (valves, diffusers) |
+| Sidecar API | `src/sidecars/autocad/Commands.cs` | Modify | `draw_text` and `draw_block` accept entity lists |
+
+**Implementation Sprints**:
+
+| Sprint | Focus | Tasks |
+|--------|-------|-------|
+| 1 | OCR Masking | Implement `pytesseract` bbox detection, masking function, verify FLD artifact reduction |
+| 2 | Skeletonization | Add `scikit-image` thinning, orthogonal snapping algorithm, visual validation |
+| 3 | Collinear Merging | Line intersection math, merge logic, AutoCAD linetype mapping (CONTINUOUS/DASHED) |
+| 4 | Symbol Templates | `cv2.matchTemplate` integration, connect to `InsertBlock` sidecar command |
+
+---
+
+### Phase 3: Knowledge Base
 
 **Goal**: Design knowledge that AI can query and you can update
 
 **Jurisdiction**: Los Angeles, California (California codes + LA amendments)
 
-| Task | Description |
-|------|-------------|
-| 3.1 | Create knowledge base file structure |
-| 3.2 | Add **Mechanical** codes (CMC, ASHRAE, SMACNA) |
-| 3.3 | Add **Plumbing** codes (CPC, IAPMO, fixture units) |
-| 3.4 | Add **Electrical** codes (CEC, Title 24 lighting) |
-| 3.5 | Add **Fire Protection** codes (CFC, NFPA 72/13, LAFD) |
-| 3.6 | Add **Low Voltage** standards (TIA/EIA, BICSI) |
-| 3.7 | Add **LA amendments** (LAMC Chapter IX, 93, 94, 57) |
-| 3.8 | Knowledge base loader + embeddings |
-| 3.9 | Semantic search over knowledge |
-| 3.10 | Override/update mechanism |
+| Task | Description | Status |
+|------|-------------|--------|
+| 3.1 | Create knowledge base file structure | Pending |
+| 3.2 | Add **Mechanical** codes (CMC, ASHRAE, SMACNA) | Pending |
+| 3.3 | Add **Plumbing** codes (CPC, IAPMO, fixture units) | Pending |
+| 3.4 | Add **Electrical** codes (CEC, Title 24 lighting) | Pending |
+| 3.5 | Add **Fire Protection** codes (CFC, NFPA 72/13, LAFD) | Pending |
+| 3.6 | Add **Low Voltage** standards (TIA/EIA, BICSI) | Pending |
+| 3.7 | Add **LA amendments** (LAMC Chapter IX, 93, 94, 57) | Pending |
+| 3.8 | Knowledge base loader + embeddings | Pending |
+| 3.9 | Semantic search over knowledge | Pending |
+| 3.10 | Override/update mechanism | Pending |
 
 **Deliverables**:
 - Knowledge base files in place (all MEP disciplines)
@@ -951,25 +1161,26 @@ Runtime:
 
 ## Timeline Summary (Revised)
 
-| Phase | Focus | Duration | Cumulative |
-|-------|-------|----------|------------|
-| 1 | Foundation (cache, providers) | **COMPLETE** | - |
-| 2 | Raster Design integration | **COMPLETE** | - |
-| 3 | Knowledge base (LA codes) | 3-4 weeks | 10 weeks |
-| 4 | **Mechanical** (HVAC) autonomous design | 4-6 weeks | 16 weeks |
-| 5 | **Fire Protection** autonomous design | 3-4 weeks | 20 weeks |
-| 6 | **Low Voltage** autonomous design | 3-4 weeks | 24 weeks |
-| 7 | **Electrical** autonomous design | 4-6 weeks | 30 weeks |
-| 8 | **Plumbing** autonomous design | 3-4 weeks | 34 weeks |
-| 9 | Multi-system coordination | 2-3 weeks | 37 weeks |
-| 10 | Intelligence & learning | Ongoing | - |
-
-**Total: ~9 months** to full autonomous MEP design capability
+| Phase | Focus | Status |
+|-------|-------|--------|
+| 1 | Foundation (cache, providers) | **COMPLETE** |
+| 2 | Raster Design (geometric vectorization) | **COMPLETE** |
+| 2.5 | LLM-Enhanced Vectorization (semantic layer) | **PENDING** |
+| 3 | Knowledge base (LA codes) | Pending |
+| 4 | **Mechanical** (HVAC) autonomous design | Pending |
+| 5 | **Fire Protection** autonomous design | Pending |
+| 6 | **Low Voltage** autonomous design | Pending |
+| 7 | **Electrical** autonomous design | Pending |
+| 8 | **Plumbing** autonomous design | Pending |
+| 9 | Multi-system coordination | Pending |
+| 10 | Intelligence & learning | Ongoing |
 
 ### MEP Coverage Summary
 
 | Discipline | Phase | California Code |
 |------------|-------|-----------------|
+| **Vectorization** (Geometric) | 2 | N/A - **COMPLETE** |
+| **Vectorization** (Semantic) | 2.5 | N/A - YOLOv8 + Vision LLM |
 | **M** - Mechanical (HVAC) | 4 | CMC + ASHRAE |
 | **E** - Electrical | 7 | CEC + Title 24 |
 | **P** - Plumbing | 8 | CPC |
@@ -1037,6 +1248,14 @@ overrides:
 - [x] Circle pixel validation (35% ink threshold)
 - [x] Topology cleanup (merge degree-2 nodes, snap dangling endpoints)
 
+### Phase 2.5 Success (Semantic Vectorization)
+- [ ] YOLOv8 model trained on MEP symbols (mAP > 80%)
+- [ ] Vision LLM correctly identifies 90%+ of standard MEP symbols
+- [ ] Semantic OCR parses annotations to structured JSON
+- [ ] Symbol masking removes detected objects before geometry pass
+- [ ] Standard AutoCAD blocks inserted at correct coordinates
+- [ ] Knowledge Base queries return correct layer/block rules
+
 ### Phase 3 Success
 - [ ] Knowledge base searchable
 - [ ] Overrides working correctly
@@ -1061,27 +1280,36 @@ overrides:
 2. ~~**Implement file open caching**~~ - Done (Foundation for memory)
 3. **End-to-end integration test** with real PDF + running AutoCAD sidecar
 
-### Critical Tools (Phase 3-4)
-4. **Build `query_knowledge_base` tool** - Unlock design rules access
-5. **Build `place_revit_family` tool** - Unlock ALL element placement
-6. **Build `place_autocad_block` tool** - Unlock ALL block insertion
-7. **Build calculation tools** - `calculate_ventilation`, `calculate_duct_size`
+### Phase 2.5: LLM-Enhanced Vectorization (NEW)
+4. **YOLOv8 MEP Symbol Dataset** - Collect/label training data (valves, detectors, outlets)
+5. **Train YOLOv8 model** - Symbol detection for split-stream architecture
+6. **Vision LLM integration** - Gemini/GPT-4o for symbol classification
+7. **Semantic OCR pipeline** - LLM parses Tesseract text to structured JSON
+8. **Symbol masking** - Erase detected symbols before geometry vectorization
+9. **Block insertion tool** - Insert standard AutoCAD blocks at detected coordinates
 
-### Supporting Tools (Phase 4+)
-8. **Build `find_route` tool** - A* pathfinding for routing
-9. **Build `create_duct_run` tool** - Duct creation
-10. **Build validation tools** - Code compliance checking
+### Phase 3: Knowledge Base
+10. **Build `query_knowledge_base` tool** - Unlock design rules access
+11. **Build knowledge base file structure** - Codes, standards, equipment catalogs
+
+### Phase 4+: Autonomous Design
+12. **Build `place_revit_family` tool** - Unlock ALL element placement
+13. **Build `place_autocad_block` tool** - Unlock ALL block insertion
+14. **Build calculation tools** - `calculate_ventilation`, `calculate_duct_size`
+15. **Build `find_route` tool** - A* pathfinding for routing
 
 ### Order of Priority
 ```
-query_knowledge_base  →  place_revit_family  →  calculate_*  →  find_route
-        ↓                       ↓                    ↓              ↓
-   Access rules          Place equipment      Size systems    Route systems
+Phase 2.5 (Semantic)     Phase 3 (Knowledge)     Phase 4+ (Design)
+        ↓                       ↓                       ↓
+   YOLOv8 symbols    →   query_knowledge_base  →  place_revit_family
+   Vision LLM        →   equipment catalogs    →  calculate_*
+   Semantic OCR      →   code compliance       →  find_route
 ```
 
 ---
 
 *Document created: 2025-01-23*
-*Last updated: 2026-02-02*
+*Last updated: 2026-02-03*
 *Jurisdiction: Los Angeles, California*
-*Status: Phase 1-2 COMPLETE, Phase 3 (Knowledge Base) next*
+*Status: Phase 1-2 COMPLETE, Phase 2.5 (LLM-Enhanced Vectorization) next*

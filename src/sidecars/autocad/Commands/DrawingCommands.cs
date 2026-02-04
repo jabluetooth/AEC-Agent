@@ -43,9 +43,9 @@ namespace AECAgent.AutoCAD.Commands
         public object DrawLine(object parameters, Document doc, Transaction tr)
         {
             var param = Deserialize<DrawLineParams>(parameters);
-            if (param.Start == null || param.Start.Length < 2) 
+            if (param.Start == null || param.Start.Length < 2)
                 throw new ArgumentException($"Start point required. Received: {JsonConvert.SerializeObject(parameters)}");
-            if (param.End == null || param.End.Length < 2) 
+            if (param.End == null || param.End.Length < 2)
                 throw new ArgumentException($"End point required. Received: {JsonConvert.SerializeObject(parameters)}");
 
             Database db = doc.Database;
@@ -55,6 +55,16 @@ namespace AECAgent.AutoCAD.Commands
             using (Line line = new Line(ToPoint3d(param.Start), ToPoint3d(param.End)))
             {
                 if (!string.IsNullOrEmpty(param.Layer)) SetLayer(line, param.Layer, db, tr);
+
+                // Set linetype if specified (Phase 2.5: dashed line support)
+                if (!string.IsNullOrEmpty(param.Linetype))
+                {
+                    LinetypeTable ltTable = (LinetypeTable)tr.GetObject(db.LinetypeTableId, OpenMode.ForRead);
+                    if (ltTable.Has(param.Linetype))
+                        line.LinetypeId = ltTable[param.Linetype];
+                    // If linetype not found, silently fall back to CONTINUOUS (default)
+                }
+
                 ObjectId id = btr.AppendEntity(line);
                 tr.AddNewlyCreatedDBObject(line, true);
                 return new EntityCreatedResult { Handle = line.Handle.ToString(), ObjectId = id.ToString(), Type = "Line", Layer = line.Layer, Created = true };
@@ -226,6 +236,106 @@ namespace AECAgent.AutoCAD.Commands
                 ObjectId id = btr.AppendEntity(text);
                 tr.AddNewlyCreatedDBObject(text, true);
                 return new EntityCreatedResult { Handle = text.Handle.ToString(), ObjectId = id.ToString(), Type = "DBText", Layer = text.Layer, Created = true };
+            }
+        }
+
+        /// <summary>
+        /// Creates an MText (multi-line text) entity.
+        /// Phase 2.5: Semantic vectorization - proper text handling from OCR.
+        /// </summary>
+        public object DrawMText(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<DrawMTextParams>(parameters);
+            if (string.IsNullOrEmpty(param.Text)) throw new ArgumentException("Text required");
+            if (param.Position == null || param.Position.Length < 2) throw new ArgumentException("Position required");
+            if (param.Height <= 0) param.Height = 2.5;
+
+            Database db = doc.Database;
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+
+            using (MText mtext = new MText())
+            {
+                mtext.Location = ToPoint3d(param.Position);
+                mtext.Contents = param.Text;
+                mtext.TextHeight = param.Height;
+                mtext.Rotation = param.Rotation * (Math.PI / 180);
+
+                // Set width for word wrapping (0 = no wrap)
+                if (param.Width > 0)
+                    mtext.Width = param.Width;
+
+                // Set text style if specified
+                if (!string.IsNullOrEmpty(param.Style))
+                {
+                    TextStyleTable tst = (TextStyleTable)tr.GetObject(db.TextStyleTableId, OpenMode.ForRead);
+                    if (tst.Has(param.Style))
+                        mtext.TextStyleId = tst[param.Style];
+                }
+
+                if (!string.IsNullOrEmpty(param.Layer)) SetLayer(mtext, param.Layer, db, tr);
+                ObjectId id = btr.AppendEntity(mtext);
+                tr.AddNewlyCreatedDBObject(mtext, true);
+                return new EntityCreatedResult { Handle = mtext.Handle.ToString(), ObjectId = id.ToString(), Type = "MText", Layer = mtext.Layer, Created = true };
+            }
+        }
+
+        /// <summary>
+        /// Inserts a block reference at the specified position.
+        /// Phase 2.5: Semantic vectorization - symbol insertion from template detection.
+        /// </summary>
+        public object InsertBlock(object parameters, Document doc, Transaction tr)
+        {
+            var param = Deserialize<InsertBlockParams>(parameters);
+            if (string.IsNullOrEmpty(param.BlockName)) throw new ArgumentException("BlockName required");
+            if (param.Position == null || param.Position.Length < 2) throw new ArgumentException("Position required");
+
+            Database db = doc.Database;
+            BlockTable bt = (BlockTable)tr.GetObject(db.BlockTableId, OpenMode.ForRead);
+
+            // Verify block exists in the block table
+            if (!bt.Has(param.BlockName))
+                throw new ArgumentException($"Block '{param.BlockName}' not found in drawing. Available blocks can be listed with list_blocks command.");
+
+            ObjectId blockDefId = bt[param.BlockName];
+            BlockTableRecord btr = (BlockTableRecord)tr.GetObject(bt[BlockTableRecord.ModelSpace], OpenMode.ForWrite);
+
+            using (BlockReference blockRef = new BlockReference(ToPoint3d(param.Position), blockDefId))
+            {
+                // Set uniform scale (XYZ)
+                double scale = param.Scale > 0 ? param.Scale : 1.0;
+                blockRef.ScaleFactors = new Scale3d(scale, scale, scale);
+
+                // Set rotation (convert degrees to radians)
+                blockRef.Rotation = param.Rotation * (Math.PI / 180);
+
+                if (!string.IsNullOrEmpty(param.Layer)) SetLayer(blockRef, param.Layer, db, tr);
+
+                ObjectId id = btr.AppendEntity(blockRef);
+                tr.AddNewlyCreatedDBObject(blockRef, true);
+
+                // Handle attribute references if the block has attribute definitions
+                BlockTableRecord blockDef = (BlockTableRecord)tr.GetObject(blockDefId, OpenMode.ForRead);
+                if (blockDef.HasAttributeDefinitions && param.Attributes != null && param.Attributes.Count > 0)
+                {
+                    foreach (ObjectId entId in blockDef)
+                    {
+                        DBObject obj = tr.GetObject(entId, OpenMode.ForRead);
+                        if (obj is AttributeDefinition attDef && !attDef.Constant)
+                        {
+                            using (AttributeReference attRef = new AttributeReference())
+                            {
+                                attRef.SetAttributeFromBlock(attDef, blockRef.BlockTransform);
+                                if (param.Attributes.ContainsKey(attDef.Tag))
+                                    attRef.TextString = param.Attributes[attDef.Tag];
+                                blockRef.AttributeCollection.AppendAttribute(attRef);
+                                tr.AddNewlyCreatedDBObject(attRef, true);
+                            }
+                        }
+                    }
+                }
+
+                return new EntityCreatedResult { Handle = blockRef.Handle.ToString(), ObjectId = id.ToString(), Type = "BlockReference", Layer = blockRef.Layer, Created = true };
             }
         }
 

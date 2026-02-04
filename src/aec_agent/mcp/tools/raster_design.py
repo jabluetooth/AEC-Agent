@@ -804,6 +804,8 @@ async def raster_auto_vectorize(
     dpi: int = 300,
     scale: float = 1.0,
     target_layer: Optional[str] = None,
+    text_layer: Optional[str] = None,
+    symbol_layer: Optional[str] = None,
     min_line_length: int = 50,
     max_line_gap: int = 15,
     hough_threshold: int = 80,
@@ -835,6 +837,18 @@ async def raster_auto_vectorize(
     skeletonize: bool = True,
     topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
+    # Phase 2.5: OCR Text Masking
+    ocr_masking: bool = False,
+    ocr_min_confidence: int = 60,
+    ocr_lang: str = "eng",
+    # Phase 2.5: Symbol Detection
+    symbol_detection: bool = False,
+    symbol_threshold: float = 0.8,
+    # Phase 2.5: AEC Heuristics
+    aec_heuristics: bool = False,
+    orthogonal_snap: bool = True,
+    orthogonal_angle_tolerance: float = 2.0,
+    collinear_merge: bool = True,
 ) -> dict:
     """
     LOW-LEVEL: OpenCV vectorization step only. DO NOT call this directly for
@@ -851,11 +865,18 @@ async def raster_auto_vectorize(
     2. Image must already be attached in AutoCAD (use raster_attach_image)
     3. Image should already be cleaned (despeckle/deskew via raster_cleanup)
 
+    Phase 2.5 Features (optional):
+    - OCR masking: Detect text via Tesseract, create MText entities
+    - Symbol detection: Match templates, insert blocks
+    - AEC heuristics: Snap orthogonal lines, merge collinear segments
+
     Args:
         image_path: Absolute path to an already-processed bitonal TIFF image
         dpi: Image resolution in DPI (default 300)
         scale: Coordinate scale factor — must match raster_attach_image scale (default 1.0)
-        target_layer: Layer for created entities (optional)
+        target_layer: Layer for created geometry entities (optional)
+        text_layer: Layer for MText entities from OCR (optional, uses target_layer if not set)
+        symbol_layer: Layer for inserted blocks (optional, uses target_layer if not set)
         min_line_length: Min line length in pixels (default 50)
         max_line_gap: Max gap to merge line segments in pixels (default 15)
         hough_threshold: Line detection sensitivity — lower = more lines (default 80)
@@ -886,6 +907,15 @@ async def raster_auto_vectorize(
         skeletonize: Reduce thick lines to 1px centerlines before detection (default True)
         topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default True)
         snap_tolerance: Max distance in drawing units to snap endpoints (default 5.0)
+        ocr_masking: Enable OCR text detection and MText creation (default False)
+        ocr_min_confidence: Minimum OCR confidence 0-100 (default 60)
+        ocr_lang: Tesseract language code (default "eng")
+        symbol_detection: Enable template matching and block insertion (default False)
+        symbol_threshold: Template match confidence threshold 0-1 (default 0.8)
+        aec_heuristics: Enable AEC-specific geometric cleanup (default False)
+        orthogonal_snap: Snap near-orthogonal lines to exact 0/90 degrees (default True)
+        orthogonal_angle_tolerance: Degrees tolerance for orthogonal snapping (default 2.0)
+        collinear_merge: Merge collinear line segments (default True)
 
     Returns:
         Vectorization summary with entity counts and creation results
@@ -893,6 +923,8 @@ async def raster_auto_vectorize(
     Example:
         # Prefer raster_pdf_to_vector_pipeline instead of calling this directly
         raster_auto_vectorize("C:/plans/floor1_page1_bitonal.tif", dpi=300, scale=1.0)
+        # With Phase 2.5 features:
+        raster_auto_vectorize("C:/plans/floor1.tif", ocr_masking=True, aec_heuristics=True)
     """
     from .image_vectorizer import vectorize_bitonal_image
 
@@ -933,9 +965,22 @@ async def raster_auto_vectorize(
             skeletonize=skeletonize,
             topology_cleanup=topology_cleanup,
             snap_tolerance=snap_tolerance,
+            # Phase 2.5 parameters
+            ocr_masking=ocr_masking,
+            ocr_min_confidence=ocr_min_confidence,
+            ocr_lang=ocr_lang,
+            symbol_detection=symbol_detection,
+            symbol_threshold=symbol_threshold,
+            aec_heuristics=aec_heuristics,
+            orthogonal_snap=orthogonal_snap,
+            orthogonal_angle_tolerance=orthogonal_angle_tolerance,
+            collinear_merge=collinear_merge,
         )
 
-        created = {"lines": 0, "circles": 0, "arcs": 0, "ellipses": 0, "polylines": 0, "errors": 0}
+        created = {
+            "lines": 0, "circles": 0, "arcs": 0, "ellipses": 0,
+            "polylines": 0, "texts": 0, "blocks": 0, "errors": 0,
+        }
 
         # Step 2: Create AutoCAD line entities
         for line in detection.lines:
@@ -1024,9 +1069,52 @@ async def raster_auto_vectorize(
                 logger.warning("Failed to create polyline", error=str(e))
                 created["errors"] += 1
 
+        # Step 7: Create MText entities from OCR-detected text (Phase 2.5)
+        effective_text_layer = text_layer or target_layer
+        for text in detection.texts:
+            try:
+                params = {
+                    "text": text.text,
+                    "position": [text.position[0], text.position[1], 0.0],
+                    "height": text.height if text.height > 0 else 2.5,
+                    "rotation": text.rotation,
+                }
+                if text.width and text.width > 0:
+                    params["width"] = text.width
+                if effective_text_layer:
+                    params["layer"] = effective_text_layer.strip()
+                await call_autocad_command("draw_mtext", params)
+                created["texts"] += 1
+            except Exception as e:
+                logger.warning("Failed to create MText", error=str(e), text=text.text[:30])
+                created["errors"] += 1
+
+        # Step 8: Insert block references from symbol detection (Phase 2.5)
+        effective_symbol_layer = symbol_layer or target_layer
+        for block in detection.blocks:
+            try:
+                params = {
+                    "block_name": block.block_name,
+                    "position": [block.position[0], block.position[1], 0.0],
+                    "scale": block.scale if block.scale > 0 else 1.0,
+                    "rotation": block.rotation,
+                }
+                if effective_symbol_layer:
+                    params["layer"] = effective_symbol_layer.strip()
+                await call_autocad_command("insert_block", params)
+                created["blocks"] += 1
+            except Exception as e:
+                logger.warning(
+                    "Failed to insert block",
+                    error=str(e),
+                    block_name=block.block_name,
+                )
+                created["errors"] += 1
+
         total_created = (
             created["lines"] + created["circles"] + created["arcs"]
             + created["ellipses"] + created["polylines"]
+            + created["texts"] + created["blocks"]
         )
 
         return success_result(
@@ -1041,16 +1129,26 @@ async def raster_auto_vectorize(
                     "arcs": len(detection.arcs),
                     "ellipses": len(detection.ellipses),
                     "polylines": len(detection.polylines),
+                    "texts": len(detection.texts),
+                    "blocks": len(detection.blocks),
                 },
                 "created": created,
                 "total_entities_created": total_created,
                 "target_layer": target_layer,
+                "text_layer": effective_text_layer,
+                "symbol_layer": effective_symbol_layer,
+                "phase25_features": {
+                    "ocr_masking": ocr_masking,
+                    "symbol_detection": symbol_detection,
+                    "aec_heuristics": aec_heuristics,
+                },
             },
             message=(
                 f"Auto-vectorized: {total_created} entities created "
                 f"({created['lines']} lines, {created['circles']} circles, "
                 f"{created['arcs']} arcs, {created['ellipses']} ellipses, "
-                f"{created['polylines']} polylines)"
+                f"{created['polylines']} polylines, {created['texts']} texts, "
+                f"{created['blocks']} blocks)"
             ),
         )
 
@@ -1177,6 +1275,8 @@ async def raster_pdf_to_vector_pipeline(
     scale: float = 1.0,
     mode: str = "auto",
     target_layer: Optional[str] = None,
+    text_layer: Optional[str] = None,
+    symbol_layer: Optional[str] = None,
     fade_percent: int = 70,
     store_in_db: bool = True,
     min_line_length: int = 50,
@@ -1210,6 +1310,18 @@ async def raster_pdf_to_vector_pipeline(
     skeletonize: bool = True,
     topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
+    # Phase 2.5: OCR Text Masking
+    ocr_masking: bool = False,
+    ocr_min_confidence: int = 60,
+    ocr_lang: str = "eng",
+    # Phase 2.5: Symbol Detection
+    symbol_detection: bool = False,
+    symbol_threshold: float = 0.8,
+    # Phase 2.5: AEC Heuristics
+    aec_heuristics: bool = False,
+    orthogonal_snap: bool = True,
+    orthogonal_angle_tolerance: float = 2.0,
+    collinear_merge: bool = True,
 ) -> dict:
     """
     PRIMARY TOOL for converting any PDF or image file to AutoCAD vector
@@ -1228,14 +1340,22 @@ async def raster_pdf_to_vector_pipeline(
        b. Attaches bitonal TIFF to AutoCAD
        c. Despeckles (removes scan noise)
        d. Deskews (straightens rotation)
-       e. Detects features via OpenCV (lines, circles, arcs, ellipses, polylines)
-       f. Creates AutoCAD entities via draw commands
-    4. Fades original raster image for background reference
-    5. Extracts all entities and stores in PostgreSQL with geometry and embeddings
+       e. (Phase 2.5) OCR text detection → MText entities
+       f. (Phase 2.5) Symbol template matching → Block insertions
+       g. Detects features via OpenCV (lines, circles, arcs, ellipses, polylines)
+       h. (Phase 2.5) AEC heuristics: orthogonal snap, collinear merge
+       i. Creates AutoCAD entities via draw commands
+    5. Fades original raster image for background reference
+    6. Extracts all entities and stores in PostgreSQL with geometry and embeddings
 
     Vectorization uses Python-side OpenCV (HoughLinesP, HoughCircles,
     findContours + fitEllipse) instead of Raster Design VTools, which are
     interactive and cannot be automated via SendStringToExecute.
+
+    Phase 2.5 Features (optional, all default to False):
+    - ocr_masking: Detect text via Tesseract, mask from image, create MText
+    - symbol_detection: Match templates, mask from image, insert blocks
+    - aec_heuristics: Snap near-orthogonal lines, merge collinear segments
 
     Args:
         file_path: Absolute path to the PDF file
@@ -1243,7 +1363,9 @@ async def raster_pdf_to_vector_pipeline(
         dpi: Render resolution for PDF-to-TIFF conversion (default 300)
         scale: Import scale factor (default 1.0)
         mode: Detection mode — "auto", "vector", or "scanned" (default "auto")
-        target_layer: Layer for vectorized entities (optional)
+        target_layer: Layer for vectorized geometry (optional)
+        text_layer: Layer for MText entities from OCR (optional, uses target_layer if not set)
+        symbol_layer: Layer for inserted blocks (optional, uses target_layer if not set)
         fade_percent: Raster fade percentage 0-100 (default 70)
         store_in_db: Store results in PostgreSQL (default True)
         min_line_length: Min line length in pixels for detection (default 50)
@@ -1276,6 +1398,15 @@ async def raster_pdf_to_vector_pipeline(
         skeletonize: Reduce thick lines to 1px centerlines before detection (default True)
         topology_cleanup: Merge degree-2 breaks and snap dangling endpoints (default True)
         snap_tolerance: Max distance in drawing units to snap endpoints (default 5.0)
+        ocr_masking: Enable OCR text detection and MText creation (default False)
+        ocr_min_confidence: Minimum OCR confidence 0-100 (default 60)
+        ocr_lang: Tesseract language code (default "eng")
+        symbol_detection: Enable template matching and block insertion (default False)
+        symbol_threshold: Template match confidence threshold 0-1 (default 0.8)
+        aec_heuristics: Enable AEC-specific geometric cleanup (default False)
+        orthogonal_snap: Snap near-orthogonal lines to exact 0/90 degrees (default True)
+        orthogonal_angle_tolerance: Degrees tolerance for orthogonal snapping (default 2.0)
+        collinear_merge: Merge collinear line segments (default True)
 
     Returns:
         Pipeline results with step details, entity counts, and PostgreSQL project info
@@ -1283,6 +1414,8 @@ async def raster_pdf_to_vector_pipeline(
     Example:
         raster_pdf_to_vector_pipeline("C:/plans/floor1.pdf", mode="auto", store_in_db=True)
         raster_pdf_to_vector_pipeline("C:/scans/bracket.png", mode="scanned")
+        # With Phase 2.5 features:
+        raster_pdf_to_vector_pipeline("C:/plans/floor1.pdf", ocr_masking=True, aec_heuristics=True)
     """
     if not file_path or not file_path.strip():
         return error_result(ErrorCode.INVALID_PARAMS, "file_path is required")
@@ -1481,6 +1614,16 @@ async def raster_pdf_to_vector_pipeline(
                     skeletonize=skeletonize,
                     topology_cleanup=topology_cleanup,
                     snap_tolerance=snap_tolerance,
+                    # Phase 2.5 parameters
+                    ocr_masking=ocr_masking,
+                    ocr_min_confidence=ocr_min_confidence,
+                    ocr_lang=ocr_lang,
+                    symbol_detection=symbol_detection,
+                    symbol_threshold=symbol_threshold,
+                    aec_heuristics=aec_heuristics,
+                    orthogonal_snap=orthogonal_snap,
+                    orthogonal_angle_tolerance=orthogonal_angle_tolerance,
+                    collinear_merge=collinear_merge,
                 )
                 steps_completed.append({
                     "step": "opencv_detect_features",
@@ -1490,6 +1633,8 @@ async def raster_pdf_to_vector_pipeline(
                     "arcs": len(detection.arcs),
                     "ellipses": len(detection.ellipses),
                     "polylines": len(detection.polylines),
+                    "texts": len(detection.texts),
+                    "blocks": len(detection.blocks),
                 })
             except Exception as e:
                 logger.error("OpenCV vectorization failed", error=str(e), exc_info=True)
@@ -1503,8 +1648,11 @@ async def raster_pdf_to_vector_pipeline(
             # Create AutoCAD entities from detected features
             created_counts = {
                 "lines": 0, "circles": 0, "arcs": 0,
-                "ellipses": 0, "polylines": 0, "errors": 0,
+                "ellipses": 0, "polylines": 0, "texts": 0,
+                "blocks": 0, "errors": 0,
             }
+            effective_text_layer = text_layer or target_layer
+            effective_symbol_layer = symbol_layer or target_layer
 
             if detection:
                 # Create lines
@@ -1589,10 +1737,45 @@ async def raster_pdf_to_vector_pipeline(
                     except Exception:
                         created_counts["errors"] += 1
 
+                # Create MText entities from OCR-detected text (Phase 2.5)
+                for text in detection.texts:
+                    try:
+                        params = {
+                            "text": text.text,
+                            "position": [text.position[0], text.position[1], 0.0],
+                            "height": text.height if text.height > 0 else 2.5,
+                            "rotation": text.rotation,
+                        }
+                        if text.width and text.width > 0:
+                            params["width"] = text.width
+                        if effective_text_layer:
+                            params["layer"] = effective_text_layer.strip()
+                        await call_autocad_command("draw_mtext", params)
+                        created_counts["texts"] += 1
+                    except Exception:
+                        created_counts["errors"] += 1
+
+                # Insert block references from symbol detection (Phase 2.5)
+                for block in detection.blocks:
+                    try:
+                        params = {
+                            "block_name": block.block_name,
+                            "position": [block.position[0], block.position[1], 0.0],
+                            "scale": block.scale if block.scale > 0 else 1.0,
+                            "rotation": block.rotation,
+                        }
+                        if effective_symbol_layer:
+                            params["layer"] = effective_symbol_layer.strip()
+                        await call_autocad_command("insert_block", params)
+                        created_counts["blocks"] += 1
+                    except Exception:
+                        created_counts["errors"] += 1
+
             total_created = (
                 created_counts["lines"] + created_counts["circles"]
                 + created_counts["arcs"] + created_counts["ellipses"]
-                + created_counts["polylines"]
+                + created_counts["polylines"] + created_counts["texts"]
+                + created_counts["blocks"]
             )
             steps_completed.append({
                 "step": "create_autocad_entities",

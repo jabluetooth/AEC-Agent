@@ -38,6 +38,8 @@ namespace AECAgent.AutoCAD.Commands
                 { "draw_spline", _drawingCommands.DrawSpline },
                 { "draw_rectangle", _drawingCommands.DrawRectangle },
                 { "draw_text", _drawingCommands.DrawText },
+                { "draw_mtext", _drawingCommands.DrawMText },       // Phase 2.5: MText from OCR
+                { "insert_block", _drawingCommands.InsertBlock },   // Phase 2.5: Block from symbol detection
                 { "modify_entity", _drawingCommands.ModifyEntity },
                 { "delete_entity", _drawingCommands.DeleteEntity },
                 // Query commands
