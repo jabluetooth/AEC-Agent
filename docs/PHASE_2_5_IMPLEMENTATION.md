@@ -617,17 +617,270 @@ print(f"Created: {result['data']['created']}")
 
 ---
 
-## Future Enhancements
+## Future Enhancements: LLM-Enhanced Vectorization
 
-### Phase 2.5.1 (Planned)
-- [ ] YOLOv8 symbol detection for varied drawing styles
-- [ ] Vision LLM for semantic understanding
-- [ ] Multi-language OCR support
+### Problem Statement (Current Limitations)
+
+The current OpenCV pipeline uses purely geometric detection (FastLineDetector, HoughLinesP), which can result in:
+- Text rendered as stray lines (without OCR enabled)
+- Dashed lines as disconnected segments
+- Wall thicknesses generating double-lines
+- Unknown symbols missed by template matching
+
+**Phase 2.5.1** will add LLM intelligence to address these limitations.
+
+---
+
+### Phase 2.5.1: YOLOv8 Symbol Detection
+
+**Goal:** Replace template matching with neural network detection for robust symbol recognition across varied drawing styles.
+
+**Architecture:**
+```
++------------------+     +------------------+     +------------------+
+|  Bitonal Image   | --> |  YOLOv8 Model    | --> | Detected Symbols |
+|  (from Stage 1)  |     |  (MEP-trained)   |     | with confidence  |
++------------------+     +------------------+     +------------------+
+```
+
+**Implementation Plan:**
+
+1. **Dataset Creation**
+   - Extract symbols from existing DWG block libraries
+   - Augment with rotations, scales, noise
+   - Target: 50+ symbol classes, 1000+ samples each
+
+2. **Model Training**
+   - Base: YOLOv8n (nano) for speed
+   - Fine-tune on MEP symbol dataset
+   - Export to ONNX for cross-platform inference
+
+3. **Integration Point** (`symbol_detection.py`):
+   ```python
+   def detect_symbols_yolo(
+       image: np.ndarray,
+       model_path: str = "models/mep_symbols.onnx",
+       confidence: float = 0.5,
+   ) -> List[DetectedBlock]:
+       """YOLOv8 inference for symbol detection."""
+   ```
+
+4. **New Files:**
+   - `src/aec_agent/mcp/tools/yolo_detection.py`
+   - `models/mep_symbols.onnx`
+   - `scripts/train_yolo_symbols.py`
+
+**Dependencies:**
+```toml
+ultralytics = ">=8.0.0"
+onnxruntime = ">=1.15.0"
+```
+
+---
+
+### Phase 2.5.2: Vision LLM Symbol Classification
+
+**Goal:** Use Gemini/GPT-4o to identify unknown symbols and extract semantic meaning.
+
+**Use Cases:**
+- Classify symbols not in template library
+- Read symbol annotations/callouts
+- Understand symbol context (what system it belongs to)
+
+**Architecture:**
+```
++------------------+     +------------------+     +------------------+
+| Unknown Symbol   | --> | Vision LLM API   | --> | Structured JSON  |
+| (cropped image)  |     | (Gemini/GPT-4o)  |     | {type, name,...} |
++------------------+     +------------------+     +------------------+
+```
+
+**Implementation Plan:**
+
+1. **Symbol Cropping Pipeline**
+   - After YOLOv8 detects "unknown" class
+   - Crop symbol region with padding
+   - Send to Vision LLM for classification
+
+2. **Prompt Engineering:**
+   ```python
+   SYMBOL_CLASSIFICATION_PROMPT = """
+   Analyze this MEP drawing symbol and return JSON:
+   {
+     "category": "mechanical|electrical|plumbing|fire|low_voltage",
+     "type": "valve|diffuser|outlet|detector|...",
+     "subtype": "gate|ball|butterfly|...",
+     "size": "3/4 inch" or null,
+     "block_name_suggestion": "VALVE-GATE-3/4"
+   }
+   """
+   ```
+
+3. **Integration Point:**
+   ```python
+   async def classify_symbol_with_llm(
+       symbol_image: np.ndarray,
+       provider: str = "gemini",  # or "openai"
+   ) -> SymbolClassification:
+       """Send unknown symbol to Vision LLM for classification."""
+   ```
+
+4. **New Files:**
+   - `src/aec_agent/mcp/tools/vision_llm.py`
+   - `src/aec_agent/prompts/symbol_classification.py`
+
+**Dependencies:**
+```toml
+google-generativeai = ">=0.3.0"  # For Gemini
+openai = ">=1.0.0"               # For GPT-4o
+```
+
+---
+
+### Phase 2.5.3: Semantic OCR Parsing
+
+**Goal:** Use LLM to parse raw OCR text into structured JSON with engineering context.
+
+**Problem:**
+```
+Raw OCR: "3/4" BALL VALVE\nTYP. (3)"
+```
+
+**Solution:**
+```json
+{
+  "component": "valve",
+  "valve_type": "ball",
+  "size_inches": 0.75,
+  "quantity": 3,
+  "typical": true,
+  "raw_text": "3/4\" BALL VALVE TYP. (3)"
+}
+```
+
+**Architecture:**
+```
++------------------+     +------------------+     +------------------+
+| Tesseract OCR    | --> | LLM Parser       | --> | Structured Data  |
+| (raw text)       |     | (context-aware)  |     | (JSON schema)    |
++------------------+     +------------------+     +------------------+
+```
+
+**Implementation Plan:**
+
+1. **Text Clustering**
+   - Group nearby DetectedText objects
+   - Merge into annotation blocks
+   - Maintain spatial relationships
+
+2. **Schema Definitions:**
+   ```python
+   class ParsedAnnotation(BaseModel):
+       component_type: str
+       specifications: dict
+       quantities: Optional[int]
+       notes: List[str]
+       confidence: float
+   ```
+
+3. **Prompt Templates:**
+   ```python
+   ANNOTATION_PARSE_PROMPT = """
+   Parse this MEP drawing annotation into structured JSON.
+   Context: This is from a {drawing_type} drawing.
+
+   Text: "{raw_text}"
+
+   Return JSON matching this schema: {schema}
+   """
+   ```
+
+4. **Integration Point** (in `raster_design.py`):
+   ```python
+   # After OCR detection
+   if semantic_ocr:
+       parsed_texts = await parse_texts_with_llm(detection.texts)
+       # Create MText with structured attributes
+   ```
+
+5. **New Files:**
+   - `src/aec_agent/mcp/tools/semantic_ocr.py`
+   - `src/aec_agent/prompts/annotation_parsing.py`
+
+---
+
+### Phase 2.5.4: Split-Stream Architecture
+
+**Goal:** Process different element types through optimized pipelines.
+
+```
+                          +-- Text Stream -----> Tesseract + LLM Parser
+                         /
+Input Image ---> Router --+-- Symbol Stream ---> YOLOv8 + Vision LLM
+                         \
+                          +-- Geometry Stream -> OpenCV (current pipeline)
+```
+
+**Benefits:**
+- Parallel processing for speed
+- Specialized models per element type
+- Better accuracy through focused detection
+
+**Implementation:**
+```python
+async def vectorize_split_stream(
+    image_path: str,
+    # Stream toggles
+    text_stream: bool = True,
+    symbol_stream: bool = True,
+    geometry_stream: bool = True,
+    # LLM options
+    use_vision_llm: bool = False,
+    use_semantic_ocr: bool = False,
+) -> VectorizationResult:
+    """Split-stream vectorization with optional LLM enhancement."""
+```
+
+---
+
+### Implementation Roadmap
+
+| Phase | Feature | Effort | Dependencies |
+|-------|---------|--------|--------------|
+| 2.5.1 | YOLOv8 Symbol Detection | 2 weeks | Training data, GPU |
+| 2.5.2 | Vision LLM Classification | 1 week | API keys |
+| 2.5.3 | Semantic OCR Parsing | 1 week | Prompt engineering |
+| 2.5.4 | Split-Stream Architecture | 2 weeks | All above |
+
+### Cost Considerations
+
+| Provider | Model | Cost per 1000 images | Notes |
+|----------|-------|---------------------|-------|
+| Local | YOLOv8 | $0 | Requires GPU for training |
+| Google | Gemini Pro Vision | ~$0.25 | Best value |
+| OpenAI | GPT-4o | ~$1.00 | Highest accuracy |
+| Groq | Llama Vision | ~$0.05 | Fast, lower accuracy |
+
+### Configuration
+
+```python
+# settings.py additions
+class LLMVectorizationSettings(BaseSettings):
+    yolo_model_path: str = "models/mep_symbols.onnx"
+    vision_llm_provider: str = "gemini"  # gemini, openai, groq
+    vision_llm_model: str = "gemini-pro-vision"
+    semantic_ocr_enabled: bool = False
+    max_llm_calls_per_page: int = 50
+```
+
+---
 
 ### Template Library Expansion
+
 - [ ] Add more standard AEC symbol templates
 - [ ] Create template extraction tool from existing DWG blocks
 - [ ] Support for scaled template matching
+- [ ] Auto-generate templates from YOLOv8 detections
 
 ---
 

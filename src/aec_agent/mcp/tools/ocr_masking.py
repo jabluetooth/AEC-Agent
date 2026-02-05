@@ -9,6 +9,7 @@ Part of Phase 2.5: Semantic AEC Vectorization Pipeline.
 """
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import List, Tuple, Optional
 import numpy as np
 import structlog
@@ -88,6 +89,13 @@ def detect_and_mask_text(
             error=str(e),
         )
         return image, []
+
+    # Auto-detect Tesseract binary if not on PATH
+    import shutil
+    if not shutil.which("tesseract"):
+        _default_path = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        if Path(_default_path).exists():
+            pytesseract.pytesseract.tesseract_cmd = _default_path
 
     # Validate input
     if image is None or image.size == 0:

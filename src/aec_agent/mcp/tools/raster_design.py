@@ -838,14 +838,14 @@ async def raster_auto_vectorize(
     topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
     # Phase 2.5: OCR Text Masking
-    ocr_masking: bool = False,
+    ocr_masking: bool = True,
     ocr_min_confidence: int = 60,
     ocr_lang: str = "eng",
     # Phase 2.5: Symbol Detection
-    symbol_detection: bool = False,
+    symbol_detection: bool = True,
     symbol_threshold: float = 0.8,
     # Phase 2.5: AEC Heuristics
-    aec_heuristics: bool = False,
+    aec_heuristics: bool = True,
     orthogonal_snap: bool = True,
     orthogonal_angle_tolerance: float = 2.0,
     collinear_merge: bool = True,
@@ -1311,14 +1311,14 @@ async def raster_pdf_to_vector_pipeline(
     topology_cleanup: bool = True,
     snap_tolerance: float = 5.0,
     # Phase 2.5: OCR Text Masking
-    ocr_masking: bool = False,
+    ocr_masking: bool = True,
     ocr_min_confidence: int = 60,
     ocr_lang: str = "eng",
     # Phase 2.5: Symbol Detection
-    symbol_detection: bool = False,
+    symbol_detection: bool = True,
     symbol_threshold: float = 0.8,
     # Phase 2.5: AEC Heuristics
-    aec_heuristics: bool = False,
+    aec_heuristics: bool = True,
     orthogonal_snap: bool = True,
     orthogonal_angle_tolerance: float = 2.0,
     collinear_merge: bool = True,

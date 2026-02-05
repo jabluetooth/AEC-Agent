@@ -55,14 +55,17 @@ This document outlines the development roadmap for the AEC Agent, focusing on ac
 |-----------|----------|-------|-------|
 | ~~Raster Design integration~~ | ~~**Critical**~~ | ~~2~~ | ~~Core PDF workflow~~ **DONE** |
 | ~~Auto-cache on file open~~ | ~~**Critical**~~ | ~~1~~ | ~~Memory foundation~~ **DONE** |
-| **LLM-Enhanced Vectorization** | **Critical** | 2.5 | Symbol detection + semantic parsing |
-| YOLOv8 MEP symbol detection | **Critical** | 2.5 | Split-stream architecture |
-| Vision LLM symbol classification | **High** | 2.5 | Gemini/GPT-4o for symbol ID |
-| Semantic OCR parsing | **High** | 2.5 | LLM parses text to JSON |
+| ~~Classical Vectorization Pipeline~~ | ~~**Critical**~~ | ~~2.5~~ | ~~OCR, templates, AEC heuristics~~ **DONE** |
+| YOLOv8 MEP symbol detection | **Critical** | 2.5.1 | Neural network replaces template matching |
+| Vision LLM symbol classification | **High** | 2.5.2 | Gemini/GPT-4o for unknown symbol ID |
+| Semantic OCR parsing | **High** | 2.5.3 | LLM parses text to structured JSON |
+| Split-stream architecture | Medium | 2.5.4 | Parallel text/symbol/geometry pipelines |
 | Design knowledge base | **Critical** | 3 | Codes, standards, formulas |
 | Autonomous design tools | **High** | 4-8 | Equipment placement, routing |
 | Model routing by task | Medium | 10 | Cost optimization |
 | Embedding-based tool selection | Medium | 10 | Smarter tool matching |
+
+**Phase 2.5 Implementation Reference:** See `docs/PHASE_2_5_IMPLEMENTATION.md`
 
 ---
 
@@ -1165,7 +1168,11 @@ Runtime:
 |-------|-------|--------|
 | 1 | Foundation (cache, providers) | **COMPLETE** |
 | 2 | Raster Design (geometric vectorization) | **COMPLETE** |
-| 2.5 | LLM-Enhanced Vectorization (semantic layer) | **PENDING** |
+| 2.5 | Semantic Vectorization (OCR, templates, AEC heuristics) | **COMPLETE** |
+| 2.5.1 | YOLOv8 symbol detection | Pending |
+| 2.5.2 | Vision LLM symbol classification | Pending |
+| 2.5.3 | Semantic OCR parsing | Pending |
+| 2.5.4 | Split-stream architecture | Pending |
 | 3 | Knowledge base (LA codes) | Pending |
 | 4 | **Mechanical** (HVAC) autonomous design | Pending |
 | 5 | **Fire Protection** autonomous design | Pending |

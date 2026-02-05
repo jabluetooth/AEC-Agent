@@ -47,8 +47,11 @@ dependencies = [
     "PyMuPDF>=1.24.0",
     "Pillow>=10.0.0",
     # Image vectorization (raster-to-vector via OpenCV)
-    "opencv-python-headless>=4.8.0",
+    # opencv-contrib-python includes ximgproc (FastLineDetector, thinning)
+    "opencv-contrib-python>=4.8.0",
     "numpy>=1.24.0",
+    # OCR text detection for vectorization pipeline
+    "pytesseract>=0.3.10",
     # Skeletonization (centerline extraction for wiring diagrams)
     "scikit-image>=0.21.0",
     # Topology cleanup (segment graph merging, endpoint snapping)

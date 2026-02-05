@@ -144,12 +144,12 @@ def vectorize_bitonal_image(
     debug_output_dir: Optional[str] = None,
     # --- Phase 2.5: Semantic Pipeline parameters ---
     # OCR Text Masking
-    ocr_masking: bool = False,  # Disabled by default until pytesseract installed
+    ocr_masking: bool = True,  # Enabled: auto-detects pytesseract availability
     ocr_min_confidence: int = 60,
     ocr_min_text_height: int = 8,
     ocr_lang: str = "eng",
     # Symbol Detection
-    symbol_detection: bool = False,  # Disabled by default until templates added
+    symbol_detection: bool = True,  # Enabled: auto-detects template availability
     symbol_threshold: float = 0.8,
     symbol_nms_distance: float = 20.0,
     # AEC Geometric Heuristics
