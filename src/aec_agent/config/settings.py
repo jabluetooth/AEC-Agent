@@ -5,12 +5,48 @@ Loads configuration from environment variables and .env files.
 """
 
 import os
+import sys
 from enum import Enum
 from pathlib import Path
 from typing import Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+# ---------------------------------------------------------------------------
+# GPO environment variable refresh (Windows only)
+# ---------------------------------------------------------------------------
+# The GPO logon script sets MCP_LISTENER_PORT and SESSION_TOKEN as User-level
+# environment variables. If the Python process was started from a terminal that
+# predates the GPO script run, it will have stale or missing values. This
+# function reads the *current* User-level values from the Windows registry and
+# injects them into the process environment so pydantic-settings picks them up.
+# ---------------------------------------------------------------------------
+
+_GPO_VARS = ("MCP_LISTENER_PORT", "SESSION_TOKEN")
+
+
+def _refresh_gpo_env_vars() -> None:
+    """Read GPO-assigned env vars from the Windows User registry."""
+    if sys.platform != "win32":
+        return
+
+    try:
+        import winreg
+
+        with winreg.OpenKey(
+            winreg.HKEY_CURRENT_USER, r"Environment"
+        ) as key:
+            for var in _GPO_VARS:
+                try:
+                    value, _ = winreg.QueryValueEx(key, var)
+                    if value:
+                        os.environ[var] = str(value)
+                except FileNotFoundError:
+                    pass  # Variable not set at User level
+    except Exception:
+        pass  # Non-Windows or registry access denied — fall through
 
 
 class Environment(str, Enum):
@@ -528,5 +564,6 @@ def get_settings() -> Settings:
     """Get or create the global settings instance."""
     global _settings
     if _settings is None:
+        _refresh_gpo_env_vars()
         _settings = Settings()
     return _settings
