@@ -220,49 +220,54 @@ class RevitExtractor(BaseExtractor):
         batch_size = batch_size or self.config.batch_size
         offset = 0
 
-        while True:
-            payload = {
-                "offset": offset,
-                "limit": batch_size,
-                "include_parameters": self.config.include_properties,
-            }
+        try:
+            while True:
+                payload = {
+                    "offset": offset,
+                    "limit": batch_size,
+                    "include_parameters": self.config.include_properties,
+                }
 
-            if self.config.category_filter:
-                payload["categories"] = self.config.category_filter
+                if self.config.category_filter:
+                    payload["categories"] = self.config.category_filter
 
-            try:
-                response = await call_sidecar(
-                    endpoint="/mcp/extract/batch",
-                    method="POST",
-                    payload=payload,
-                    sidecar_type="revit"
-                )
-
-                if not response.get("success"):
-                    error = response.get("error", {})
-                    logger.error(
-                        "Extraction batch failed",
-                        error=error.get("message", "Unknown error")
+                try:
+                    response = await call_sidecar(
+                        endpoint="/mcp/extract/batch",
+                        method="POST",
+                        payload=payload,
+                        sidecar_type="revit"
                     )
+
+                    if not response.get("success"):
+                        error = response.get("error", {})
+                        logger.error(
+                            "Extraction batch failed",
+                            error=error.get("message", "Unknown error")
+                        )
+                        break
+
+                    data = response.get("data", {})
+                    elements = data.get("elements", [])
+
+                    if not elements:
+                        break
+
+                    yield elements
+
+                    has_more = data.get("has_more", False)
+                    if not has_more:
+                        break
+
+                    offset += len(elements)
+
+                except SidecarError as e:
+                    logger.error("Stream elements failed", error=str(e))
                     break
-
-                data = response.get("data", {})
-                elements = data.get("elements", [])
-
-                if not elements:
-                    break
-
-                yield elements
-
-                has_more = data.get("has_more", False)
-                if not has_more:
-                    break
-
-                offset += len(elements)
-
-            except SidecarError as e:
-                logger.error("Stream elements failed", error=str(e))
-                break
+        except GeneratorExit:
+            logger.debug("Element stream closed")
+        finally:
+            logger.debug("Element stream finished", offset=offset)
 
     async def compute_file_hash(self, file_path: str) -> str:
         """

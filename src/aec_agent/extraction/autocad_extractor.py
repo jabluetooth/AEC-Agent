@@ -215,46 +215,51 @@ class AutoCADExtractor(BaseExtractor):
         batch_size = batch_size or self.config.batch_size
         offset = 0
 
-        while True:
-            params = {
-                "offset": offset,
-                "limit": batch_size,
-                "include_geometry": self.config.include_geometry,
-                "include_xdata": self.config.include_xdata,
-            }
+        try:
+            while True:
+                params = {
+                    "offset": offset,
+                    "limit": batch_size,
+                    "include_geometry": self.config.include_geometry,
+                    "include_xdata": self.config.include_xdata,
+                }
 
-            if self.config.layer_filter:
-                params["layer_filter"] = self.config.layer_filter
+                if self.config.layer_filter:
+                    params["layer_filter"] = self.config.layer_filter
 
-            try:
-                response = await call_autocad_command("extract_all_entities", params)
+                try:
+                    response = await call_autocad_command("extract_all_entities", params)
 
-                if not response.get("success"):
-                    error = response.get("error", {})
-                    logger.error(
-                        "Extraction batch failed",
-                        error=error.get("message", "Unknown error")
-                    )
+                    if not response.get("success"):
+                        error = response.get("error", {})
+                        logger.error(
+                            "Extraction batch failed",
+                            error=error.get("message", "Unknown error")
+                        )
+                        break
+
+                    data = response.get("data", {})
+                    entities = data.get("entities", [])
+
+                    if not entities:
+                        break
+
+                    yield entities
+
+                    # Check if there are more
+                    has_more = data.get("has_more", False)
+                    if not has_more:
+                        break
+
+                    offset += len(entities)
+
+                except SidecarError as e:
+                    logger.error("Stream entities failed", error=str(e))
                     break
-
-                data = response.get("data", {})
-                entities = data.get("entities", [])
-
-                if not entities:
-                    break
-
-                yield entities
-
-                # Check if there are more
-                has_more = data.get("has_more", False)
-                if not has_more:
-                    break
-
-                offset += len(entities)
-
-            except SidecarError as e:
-                logger.error("Stream entities failed", error=str(e))
-                break
+        except GeneratorExit:
+            logger.debug("Entity stream closed")
+        finally:
+            logger.debug("Entity stream finished", offset=offset)
 
     async def compute_file_hash(self, file_path: str) -> str:
         """

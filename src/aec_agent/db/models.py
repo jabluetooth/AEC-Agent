@@ -4,6 +4,7 @@ Database models for AEC Agent metadata pipeline.
 Pydantic models matching the PostgreSQL schema with PostGIS and pgvector fields.
 """
 
+import json
 from datetime import datetime
 from typing import Optional, List, Literal, Dict, Any
 from uuid import UUID, uuid4
@@ -77,6 +78,14 @@ class Project(BaseModel):
     extracted_at: Optional[datetime] = Field(default=None, description="Last extraction time")
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def parse_metadata(cls, v):
+        """Handle JSONB values that were double-encoded as strings."""
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
+
     class Config:
         from_attributes = True
 
@@ -107,6 +116,14 @@ class Element(BaseModel):
 
     # Properties
     properties: Dict[str, Any] = Field(default_factory=dict, description="All parameters/xdata")
+
+    @field_validator("properties", mode="before")
+    @classmethod
+    def parse_properties(cls, v):
+        """Handle JSONB values that were double-encoded as strings."""
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
     # Semantic search
     description: Optional[str] = Field(default=None, description="Human-readable description")
@@ -173,6 +190,14 @@ class ElementRelationship(BaseModel):
     )
 
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+
+    @field_validator("metadata", mode="before")
+    @classmethod
+    def parse_metadata(cls, v):
+        """Handle JSONB values that were double-encoded as strings."""
+        if isinstance(v, str):
+            return json.loads(v)
+        return v
 
     class Config:
         from_attributes = True
