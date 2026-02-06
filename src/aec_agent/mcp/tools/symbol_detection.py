@@ -1,13 +1,21 @@
 """
-Symbol Detection using Template Matching.
+Symbol Detection for AEC Drawings.
 
-This module detects standard AEC symbols in bitonal images using OpenCV
-template matching and queues InsertBlock commands for the AutoCAD sidecar.
+This module detects standard AEC symbols in bitonal images using either:
+1. Template Matching (OpenCV) - default, no training required
+2. YOLOv8 Neural Network - more robust, requires trained model
 
 Part of Phase 2.5: Semantic AEC Vectorization Pipeline.
 
-Note: This uses classical template matching. For more robust detection with
-variations in drawing styles, consider using YOLOv8 or Vision LLMs (future).
+Usage:
+    # Template matching (default)
+    masked, blocks = detect_symbols(image, scale=1/300)
+
+    # YOLO detection (if model available)
+    masked, blocks = detect_symbols(image, scale=1/300, backend="yolo")
+
+    # Auto-select best available backend
+    masked, blocks = detect_symbols(image, scale=1/300, backend="auto")
 """
 
 import math
@@ -338,3 +346,130 @@ def _nms_detections(
             kept.append(det)
 
     return kept
+
+
+# =============================================================================
+# Unified Symbol Detection Interface
+# =============================================================================
+
+
+def is_yolo_available(model_path: Optional[str] = None) -> bool:
+    """
+    Check if YOLO detection is available.
+
+    Args:
+        model_path: Optional custom model path.
+
+    Returns:
+        True if YOLO model is available and loaded.
+    """
+    try:
+        from .yolo_detection import get_yolo_detector
+
+        detector = get_yolo_detector(model_path)
+        return detector is not None and detector.is_available
+    except ImportError:
+        return False
+
+
+def detect_symbols(
+    image: np.ndarray,
+    scale: float = 1.0,
+    backend: str = "auto",
+    # Template matching parameters
+    match_threshold: float = 0.8,
+    nms_distance: float = 20.0,
+    template_dir: Optional[str] = None,
+    # YOLO parameters
+    yolo_model_path: Optional[str] = None,
+    yolo_confidence: float = 0.5,
+    yolo_iou_threshold: float = 0.45,
+    # Common parameters
+    mask_detections: bool = True,
+) -> Tuple[np.ndarray, List[DetectedBlock]]:
+    """
+    Detect AEC symbols using the specified backend.
+
+    This is the unified entry point for symbol detection, supporting both
+    template matching and YOLOv8 neural network detection.
+
+    Args:
+        image: Binary image (white = background, black = ink).
+        scale: Coordinate scale factor (pixel to drawing units). Typically 1/DPI.
+        backend: Detection backend to use:
+                 - "auto": Use YOLO if available, else template matching
+                 - "yolo": Force YOLO (fails if not available)
+                 - "template": Force template matching
+        match_threshold: Template matching confidence threshold (0-1).
+        nms_distance: Non-maximum suppression distance in pixels.
+        template_dir: Custom template directory path.
+        yolo_model_path: Custom YOLO model path (.pt or .onnx).
+        yolo_confidence: YOLO confidence threshold (0-1).
+        yolo_iou_threshold: YOLO IoU threshold for NMS (0-1).
+        mask_detections: If True, mask detected symbols from returned image.
+
+    Returns:
+        Tuple of:
+        - masked_image: Image with symbol regions optionally masked
+        - detected_blocks: List of DetectedBlock for AutoCAD insertion
+
+    Example:
+        >>> # Auto-select best backend
+        >>> masked, blocks = detect_symbols(binary_img, scale=1/300)
+
+        >>> # Force YOLO
+        >>> masked, blocks = detect_symbols(binary_img, backend="yolo")
+
+        >>> # Force template matching with custom templates
+        >>> masked, blocks = detect_symbols(
+        ...     binary_img,
+        ...     backend="template",
+        ...     template_dir="custom/templates",
+        ... )
+    """
+    # Determine which backend to use
+    use_yolo = False
+
+    if backend == "yolo":
+        if is_yolo_available(yolo_model_path):
+            use_yolo = True
+        else:
+            logger.error("YOLO backend requested but not available")
+            return image, []
+
+    elif backend == "auto":
+        use_yolo = is_yolo_available(yolo_model_path)
+        if use_yolo:
+            logger.debug("Auto-selected YOLO backend")
+        else:
+            logger.debug("Auto-selected template matching backend")
+
+    elif backend == "template":
+        use_yolo = False
+
+    else:
+        logger.warning(f"Unknown backend '{backend}', using template matching")
+        use_yolo = False
+
+    # Run detection
+    if use_yolo:
+        from .yolo_detection import detect_symbols_yolo
+
+        return detect_symbols_yolo(
+            image,
+            scale=scale,
+            model_path=yolo_model_path,
+            confidence=yolo_confidence,
+            iou_threshold=yolo_iou_threshold,
+            mask_detections=mask_detections,
+        )
+    else:
+        templates = load_symbol_templates(template_dir)
+        return detect_and_mask_symbols(
+            image,
+            templates,
+            scale=scale,
+            match_threshold=match_threshold,
+            nms_distance=nms_distance,
+            padding_px=2 if mask_detections else 0,
+        )

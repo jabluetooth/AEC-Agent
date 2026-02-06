@@ -2,8 +2,16 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Phase 2 Raster Design — COMPLETE (full Raster Design toolset + OpenCV auto-vectorization + vectorizer refactoring).
-**Last Action:** Refactored vectorization pipeline: reversed detection order (lines first, circles second), added FastLineDetector (FLD) as primary detector with HoughLinesP fallback, added circle pixel validation (36-point circumference sampling, 35% ink threshold), enabled topology cleanup by default, tuned thresholds (param2: 100→200, min_line_length: 80→50). Fixed Groq tool prefix bug (`raster_` tools now included in AutoCAD context). Test results on North.pdf: Lines 85→1,973 (+2,221%), Circles 205→6 (-97%). Fixed Unicode encoding in log messages. Added missing `autocad_delete_entity` to tool descriptions. All 179 tests passing.
+**Objective:** Phase 2.5.1 YOLOv8 Symbol Detection — COMPLETE. Added neural network-based symbol detection as alternative to template matching.
+**Last Action:** Implemented Phase 2.5.1 YOLOv8 Symbol Detection:
+- Created `yolo_detection.py` module with `YOLOSymbolDetector` class supporting both ultralytics and ONNX Runtime backends
+- Created `train_yolo_symbols.py` training script with synthetic dataset generation for 42 MEP symbol classes
+- Updated `symbol_detection.py` with unified `detect_symbols()` interface supporting `backend="auto"|"yolo"|"template"`
+- Added `symbol_backend`, `yolo_model_path`, `yolo_confidence`, `yolo_iou_threshold` parameters to vectorizer pipeline
+- Created `models/` directory with README.md documenting model training and usage
+- Added `ultralytics>=8.0.0` and `onnxruntime>=1.15.0` as optional `[yolo]` dependencies
+- Created 34 unit tests for YOLO detection (all passing)
+- Total: **242 tests passing**
 **Next Step:** End-to-end test with real PDF + running sidecar, then Phase 3 (Knowledge Base).
 
 ## 📊 Repository Status (as of 2026-02-02)
@@ -28,7 +36,7 @@
 | **LLM Provider Fallback** (Groq -> Gemini -> OpenAI chain) | `src/aec_agent/frontend/agent.py` | Implemented |
 | **REST Sidecar API** (/tools/notify_file_opened, /health) | `src/aec_agent/server.py` | Implemented |
 | **Cached Context Tool** (get_file_context from PostgreSQL) | `src/aec_agent/mcp/tools/metadata.py` | Implemented |
-| **Test Suite** (179 tests, pytest markers) | `tests/` | Passing |
+| **Test Suite** (242 tests, pytest markers) | `tests/` | Passing |
 
 ### What's NOT Yet Done
 | Component | Blocker | Roadmap Phase |
@@ -84,6 +92,16 @@
     - [x] `image_vectorizer.py` — OpenCV feature detection module (DetectedLine, DetectedCircle, DetectedPolyline)
     - [x] Pipeline now: bitonal TIFF → attach → despeckle → deskew → **OpenCV detect** → **draw_line/draw_polyline/draw_circle** → fade → store
     - [ ] End-to-end test with real PDF + running sidecar
+- [x] **Phase 2.5.1: YOLOv8 Symbol Detection** (COMPLETE)
+    - [x] `yolo_detection.py` — YOLOv8 detector with ultralytics + ONNX Runtime backends
+    - [x] `train_yolo_symbols.py` — training script with synthetic dataset generation (42 classes)
+    - [x] Unified `detect_symbols()` interface with `backend="auto"|"yolo"|"template"`
+    - [x] Pipeline parameters: `symbol_backend`, `yolo_model_path`, `yolo_confidence`, `yolo_iou_threshold`
+    - [x] `models/` directory with README.md
+    - [x] Optional dependencies: `ultralytics>=8.0.0`, `onnxruntime>=1.15.0` via `pip install aec-agent[yolo]`
+    - [x] 34 unit tests for YOLO detection
+- [ ] **Phase 2.5.2: Vision LLM Symbol Classification** (Pending)
+- [ ] **Phase 2.5.3: Semantic OCR Parsing** (Pending)
 - [ ] **Phase 3: Knowledge Base** (Pending — `knowledge_base/` dir not yet created)
 - [ ] **Phase 4: HVAC Autonomous Design** (Pending)
 - [ ] **Phase 5-8: Fire/LV/Electrical/Plumbing** (Pending)
@@ -93,14 +111,19 @@
 ## 📈 Metrics
 | Metric | Value |
 |--------|-------|
-| Python LOC | ~16,000 |
+| Python LOC | ~17,500 |
 | MCP Tools | 50 (7 categories) |
 | Config Parameters | 42 env vars |
-| Test Files | 11 (179 tests) |
+| Test Files | 12 (242 tests) |
 | DB Tables | 15 (projects, elements, relationships, + 12 MEP/domain tables) |
 | Sidecar Files | 29 total (15 C#, 14 Python) |
 
 ## 🧠 Brain Dump (Context for Next Session)
+- **Phase 2.5.1 YOLOv8 Symbol Detection is COMPLETE.** Neural network-based symbol detection added as alternative to template matching. Files: `yolo_detection.py`, `train_yolo_symbols.py`, `models/README.md`. Use `symbol_backend="yolo"` or `"auto"` to enable. Supports 42 MEP symbol classes across mechanical, electrical, fire, plumbing, and low_voltage categories. Install with `pip install aec-agent[yolo]`.
+- **YOLOv8 Detection Architecture:** `YOLOSymbolDetector` class supports both ultralytics (native .pt) and ONNX Runtime (.onnx) backends. Auto-detects based on file extension. ONNX recommended for deployment (no heavy ultralytics dependency). Includes letterbox preprocessing, NMS, and coordinate conversion to drawing units.
+- **Training Script:** `scripts/train_yolo_symbols.py` has 4 commands: `prepare` (synthetic dataset), `train` (YOLOv8), `export` (ONNX), `validate` (test). Synthetic data uses simple geometric shapes (valves=bowtie, outlets=circle+lines, etc.) with augmentation (rotation, scale, noise, blur).
+- **Unified Symbol Detection:** `detect_symbols()` in `symbol_detection.py` is the unified entry point. `backend="auto"` (default) uses YOLO if model exists, else template matching. `backend="yolo"` forces YOLO (returns empty if unavailable). `backend="template"` forces template matching.
+- **New Parameters in Pipeline:** `symbol_backend`, `yolo_model_path`, `yolo_confidence`, `yolo_iou_threshold` added to `image_vectorizer.py`, `raster_design.py::raster_auto_vectorize()`, and `raster_design.py::raster_pdf_to_vector_pipeline()`.
 - **Phase 2 Raster Design is COMPLETE.** 17 MCP tools + 14 sidecar commands for full PDF-to-DWG-to-PostgreSQL pipeline. Vectorizer refactored with lines-first detection, FLD, circle validation, topology cleanup.
 - **Raster Design MCP tools (17):** `raster_convert_pdf`, `raster_import_pdf`, `raster_attach_image`, `raster_cleanup`, `raster_vectorize` (VTools: vline/vpline/varc/vcircle/vrect — interactive, for manual use), `raster_auto_vectorize` (**Python OpenCV — automated**), `raster_process_image` (ibfilter), `raster_create_primitive` (issmart/isline/isarc/iscircle), `raster_select_entities` (isebrsmart/isebrcon), `raster_follower` (vfpline/vfcontour/vf3dpoly), `raster_recognize_text` (irectext), `raster_ocr_extract`, `raster_get_status`, `raster_get_entity_count`, `raster_fade_image`, `raster_store_vectorized`, `raster_pdf_to_vector_pipeline`.
 - **OpenCV auto-vectorization (CRITICAL):** Raster Design VTools (`vline`, `vpline`, `varc`, `vcircle`, `vrect`) are **interactive** — they require mouse clicks and CANNOT be automated via `SendStringToExecute`. The pipeline uses Python-side OpenCV instead: `image_vectorizer.py` detects lines (FastLineDetector primary + HoughLinesP fallback), circles (HoughCircles with pixel validation), and polylines (findContours + approxPolyDP) from the bitonal TIFF, then creates AutoCAD entities via `draw_line`/`draw_polyline`/`draw_circle` sidecar commands.
@@ -126,9 +149,11 @@
 - Tool lock enforces max 1 concurrent operation (STA constraint).
 - The `knowledge_base/` directory structure is planned in FUTURE_ROADMAP.md but not yet created.
 - MEP domain seed data exists inline in `src/aec_agent/domain/seed_data.py` (HVAC clearance rules).
-- **New files:** `src/aec_agent/mcp/tools/image_vectorizer.py` (OpenCV detection), `src/aec_agent/mcp/tools/pdf_converter.py` (PDF→bitonal TIFF).
-- **New dependencies:** `opencv-python-headless>=4.8.0` (or `opencv-contrib-python` for FastLineDetector), `numpy>=1.24.0`, `PyMuPDF>=1.24.0`, `Pillow>=10.0.0`, `networkx>=3.0` (topology cleanup).
-- **Next priority:** End-to-end integration test with real PDF + running sidecar, then Phase 3 (Knowledge Base).
+- **New files (Phase 2.5.1):** `src/aec_agent/mcp/tools/yolo_detection.py` (YOLOv8 detector), `scripts/train_yolo_symbols.py` (training script), `models/README.md` (model docs), `tests/unit/test_yolo_detection.py` (34 tests).
+- **New files (Phase 2):** `src/aec_agent/mcp/tools/image_vectorizer.py` (OpenCV detection), `src/aec_agent/mcp/tools/pdf_converter.py` (PDF→bitonal TIFF).
+- **New dependencies (optional YOLO):** `ultralytics>=8.0.0`, `onnxruntime>=1.15.0` — install via `pip install aec-agent[yolo]`.
+- **New dependencies (Phase 2):** `opencv-python-headless>=4.8.0` (or `opencv-contrib-python` for FastLineDetector), `numpy>=1.24.0`, `PyMuPDF>=1.24.0`, `Pillow>=10.0.0`, `networkx>=3.0` (topology cleanup).
+- **Next priority:** End-to-end integration test with real PDF + running sidecar, then Phase 2.5.2 (Vision LLM) or Phase 3 (Knowledge Base).
 
 ## 📂 Key Files to Read First
 1. `docs/SESSION_CONTEXT.md` (This file)

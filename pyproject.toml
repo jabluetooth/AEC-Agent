@@ -69,6 +69,15 @@ dev = [
     "black>=24.1.0",
     "pre-commit>=3.6.0",
 ]
+# YOLOv8 neural network symbol detection (Phase 2.5.1)
+yolo = [
+    "ultralytics>=8.0.0",
+    "onnxruntime>=1.15.0",
+]
+# All optional dependencies
+all = [
+    "aec-agent[dev,yolo]",
+]
 
 [project.scripts]
 aec-agent = "aec_agent.cli:main"

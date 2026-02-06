@@ -843,7 +843,12 @@ async def raster_auto_vectorize(
     ocr_lang: str = "eng",
     # Phase 2.5: Symbol Detection
     symbol_detection: bool = True,
+    symbol_backend: str = "auto",  # "auto", "yolo", "template"
     symbol_threshold: float = 0.8,
+    # Phase 2.5.1: YOLO Symbol Detection
+    yolo_model_path: Optional[str] = None,
+    yolo_confidence: float = 0.5,
+    yolo_iou_threshold: float = 0.45,
     # Phase 2.5: AEC Heuristics
     aec_heuristics: bool = True,
     orthogonal_snap: bool = True,
@@ -910,8 +915,12 @@ async def raster_auto_vectorize(
         ocr_masking: Enable OCR text detection and MText creation (default False)
         ocr_min_confidence: Minimum OCR confidence 0-100 (default 60)
         ocr_lang: Tesseract language code (default "eng")
-        symbol_detection: Enable template matching and block insertion (default False)
+        symbol_detection: Enable symbol detection and block insertion (default False)
+        symbol_backend: Detection backend - "auto", "yolo", or "template" (default "auto")
         symbol_threshold: Template match confidence threshold 0-1 (default 0.8)
+        yolo_model_path: Custom YOLO model path (.pt or .onnx), uses default if None
+        yolo_confidence: YOLO confidence threshold 0-1 (default 0.5)
+        yolo_iou_threshold: YOLO IoU threshold for NMS 0-1 (default 0.45)
         aec_heuristics: Enable AEC-specific geometric cleanup (default False)
         orthogonal_snap: Snap near-orthogonal lines to exact 0/90 degrees (default True)
         orthogonal_angle_tolerance: Degrees tolerance for orthogonal snapping (default 2.0)
@@ -970,7 +979,12 @@ async def raster_auto_vectorize(
             ocr_min_confidence=ocr_min_confidence,
             ocr_lang=ocr_lang,
             symbol_detection=symbol_detection,
+            symbol_backend=symbol_backend,
             symbol_threshold=symbol_threshold,
+            # Phase 2.5.1: YOLO parameters
+            yolo_model_path=yolo_model_path,
+            yolo_confidence=yolo_confidence,
+            yolo_iou_threshold=yolo_iou_threshold,
             aec_heuristics=aec_heuristics,
             orthogonal_snap=orthogonal_snap,
             orthogonal_angle_tolerance=orthogonal_angle_tolerance,
@@ -1316,7 +1330,12 @@ async def raster_pdf_to_vector_pipeline(
     ocr_lang: str = "eng",
     # Phase 2.5: Symbol Detection
     symbol_detection: bool = True,
+    symbol_backend: str = "auto",  # "auto", "yolo", "template"
     symbol_threshold: float = 0.8,
+    # Phase 2.5.1: YOLO Symbol Detection
+    yolo_model_path: Optional[str] = None,
+    yolo_confidence: float = 0.5,
+    yolo_iou_threshold: float = 0.45,
     # Phase 2.5: AEC Heuristics
     aec_heuristics: bool = True,
     orthogonal_snap: bool = True,
@@ -1401,8 +1420,12 @@ async def raster_pdf_to_vector_pipeline(
         ocr_masking: Enable OCR text detection and MText creation (default False)
         ocr_min_confidence: Minimum OCR confidence 0-100 (default 60)
         ocr_lang: Tesseract language code (default "eng")
-        symbol_detection: Enable template matching and block insertion (default False)
+        symbol_detection: Enable symbol detection and block insertion (default False)
+        symbol_backend: Detection backend - "auto", "yolo", or "template" (default "auto")
         symbol_threshold: Template match confidence threshold 0-1 (default 0.8)
+        yolo_model_path: Custom YOLO model path (.pt or .onnx), uses default if None
+        yolo_confidence: YOLO confidence threshold 0-1 (default 0.5)
+        yolo_iou_threshold: YOLO IoU threshold for NMS 0-1 (default 0.45)
         aec_heuristics: Enable AEC-specific geometric cleanup (default False)
         orthogonal_snap: Snap near-orthogonal lines to exact 0/90 degrees (default True)
         orthogonal_angle_tolerance: Degrees tolerance for orthogonal snapping (default 2.0)
@@ -1619,7 +1642,12 @@ async def raster_pdf_to_vector_pipeline(
                     ocr_min_confidence=ocr_min_confidence,
                     ocr_lang=ocr_lang,
                     symbol_detection=symbol_detection,
+                    symbol_backend=symbol_backend,
                     symbol_threshold=symbol_threshold,
+                    # Phase 2.5.1: YOLO parameters
+                    yolo_model_path=yolo_model_path,
+                    yolo_confidence=yolo_confidence,
+                    yolo_iou_threshold=yolo_iou_threshold,
                     aec_heuristics=aec_heuristics,
                     orthogonal_snap=orthogonal_snap,
                     orthogonal_angle_tolerance=orthogonal_angle_tolerance,

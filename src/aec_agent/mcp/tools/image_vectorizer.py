@@ -150,8 +150,13 @@ def vectorize_bitonal_image(
     ocr_lang: str = "eng",
     # Symbol Detection
     symbol_detection: bool = True,  # Enabled: auto-detects template availability
+    symbol_backend: str = "auto",  # "auto", "yolo", "template"
     symbol_threshold: float = 0.8,
     symbol_nms_distance: float = 20.0,
+    # Phase 2.5.1: YOLO Symbol Detection
+    yolo_model_path: Optional[str] = None,  # Custom YOLO model path
+    yolo_confidence: float = 0.5,  # YOLO confidence threshold
+    yolo_iou_threshold: float = 0.45,  # YOLO IoU for NMS
     # AEC Geometric Heuristics
     aec_heuristics: bool = True,  # Enabled by default
     orthogonal_snap: bool = True,
@@ -440,38 +445,42 @@ def vectorize_bitonal_image(
                 logger.warning(f"OCR masking failed: {e}, continuing without text masking")
 
         # =================================================================
-        # PHASE 2.5 STAGE 2: SYMBOL DETECTION (Template Matching)
+        # PHASE 2.5 STAGE 2: SYMBOL DETECTION (Template or YOLO)
         #
-        # Detect standard AEC symbols using template matching and mask
-        # them from the image. This prevents symbols from being traced
-        # as jagged polylines - instead they'll be inserted as blocks.
+        # Detect standard AEC symbols using either:
+        # - Template matching (default, no training required)
+        # - YOLOv8 neural network (more robust, requires trained model)
+        #
+        # Detected symbols are masked from the image to prevent them
+        # from being traced as jagged polylines - instead they'll be
+        # inserted as blocks.
         # =================================================================
         detected_blocks = []
         if symbol_detection:
             try:
-                from aec_agent.mcp.tools.symbol_detection import (
-                    load_symbol_templates,
-                    detect_and_mask_symbols,
-                )
+                from aec_agent.mcp.tools.symbol_detection import detect_symbols
 
-                templates = load_symbol_templates()
-                if templates:
-                    binary, detected_blocks = detect_and_mask_symbols(
-                        binary,
-                        templates,
-                        scale=scale,
-                        match_threshold=symbol_threshold,
-                        nms_distance=symbol_nms_distance,
-                    )
-                    result.blocks = detected_blocks
-                    logger.info(
-                        "Symbol detection complete",
-                        symbols_found=len(detected_blocks),
-                    )
-                    print(f"[vectorize] Symbol detection: {len(detected_blocks)} symbols detected and masked")
-                    _save_debug("04b_symbols_masked", binary)
-                else:
-                    logger.info("No symbol templates found, skipping symbol detection")
+                binary, detected_blocks = detect_symbols(
+                    binary,
+                    scale=scale,
+                    backend=symbol_backend,
+                    # Template matching parameters
+                    match_threshold=symbol_threshold,
+                    nms_distance=symbol_nms_distance,
+                    # YOLO parameters (Phase 2.5.1)
+                    yolo_model_path=yolo_model_path,
+                    yolo_confidence=yolo_confidence,
+                    yolo_iou_threshold=yolo_iou_threshold,
+                    mask_detections=True,
+                )
+                result.blocks = detected_blocks
+                logger.info(
+                    "Symbol detection complete",
+                    backend=symbol_backend,
+                    symbols_found=len(detected_blocks),
+                )
+                print(f"[vectorize] Symbol detection ({symbol_backend}): {len(detected_blocks)} symbols detected and masked")
+                _save_debug("04b_symbols_masked", binary)
             except ImportError as e:
                 logger.warning(f"Symbol detection dependencies not available: {e}")
             except Exception as e:
