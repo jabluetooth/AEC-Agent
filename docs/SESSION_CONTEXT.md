@@ -2,23 +2,28 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Semantic Intelligence Pipeline (Phase A) — COMPLETE. Implemented document classification and region segmentation.
-**Last Action:** Phase A Implementation (2026-02-09):
-- Created `document_classifier.py` — LLM-based drawing type classification (14 types: floor_plan, mep_plan, electrical, hvac, plumbing, fire_alarm, etc.)
-- Created `region_segmenter.py` — Title block, legend, drawing area, notes, schedule detection
-- Updated `image_vectorizer.py` — Integrated classification & segmentation into pipeline
-- Created `SEMANTIC_INTELLIGENCE_PLAN.md` — Comprehensive 5-layer semantic pipeline roadmap
-- Added 56 new unit tests for Phase A components
-- All **298 tests passing** after implementation
+**Objective:** Semantic Intelligence Pipeline (Phase B) — COMPLETE. Implemented semantic OCR and text-element association.
+**Last Action:** Phase B Implementation (2026-02-09):
+- Created `semantic_ocr.py` — Pattern-based annotation parsing (20+ annotation types: equipment_tag, flow_rate, cfm, room_number, dimensions, etc.)
+- Created `text_associator.py` — Text-to-element association (links parsed text to nearby symbols)
+- Created `prompts/annotation_parsing.py` — Domain-specific LLM prompts for complex annotations
+- Updated `image_vectorizer.py` — Integrated semantic OCR and text association into pipeline
+- Added 69 new unit tests for Phase B components
+- All **367 tests passing** after implementation
 
-**New Features:**
-- `DrawingType` enum with 14 drawing classifications
-- `classify_by_keywords()` — Fast keyword-based classification (no LLM cost)
-- `segment_regions()` — Detects title block, legend, drawing area, notes, schedules
-- `get_pipeline_config()` — Returns pipeline configuration based on drawing type
-- Pipeline parameters: `document_classification`, `region_segmentation`, `process_drawing_area_only`
+**Phase A (COMPLETE):**
+- `document_classifier.py` — Drawing type classification (14 types)
+- `region_segmenter.py` — Title block, legend, drawing area detection
+- `SEMANTIC_INTELLIGENCE_PLAN.md` — 5-layer semantic pipeline roadmap
 
-**Next Step:** Phase B (Semantic OCR) or Phase C (Symbol Intelligence) from SEMANTIC_INTELLIGENCE_PLAN.md.
+**Phase B (COMPLETE):**
+- `AnnotationType` enum with 20 annotation types (room_name, equipment_tag, flow_rate, size, etc.)
+- `parse_annotation_by_patterns()` — Fast regex-based parsing (no LLM cost)
+- `associate_text_to_elements()` — Links text to nearest symbols using distance + type rules
+- `enrich_elements_with_text()` — Creates enriched elements with tags, specs, annotations
+- Pipeline parameters: `semantic_ocr`, `text_association`, `semantic_llm_fallback`
+
+**Next Step:** Phase C (Symbol Intelligence) or Phase D (Relationship Inference) from SEMANTIC_INTELLIGENCE_PLAN.md.
 
 ## 📊 Repository Status (as of 2026-02-02)
 
@@ -107,7 +112,13 @@
     - [x] Optional dependencies: `ultralytics>=8.0.0`, `onnxruntime>=1.15.0` via `pip install aec-agent[yolo]`
     - [x] 34 unit tests for YOLO detection
 - [ ] **Phase 2.5.2: Vision LLM Symbol Classification** (Pending)
-- [ ] **Phase 2.5.3: Semantic OCR Parsing** (Pending)
+- [x] **Phase 2.5.3: Semantic OCR Parsing** (COMPLETE)
+    - [x] `semantic_ocr.py` — Pattern-based annotation parsing (20+ types)
+    - [x] `text_associator.py` — Text-to-element association
+    - [x] `prompts/annotation_parsing.py` — Domain-specific LLM prompts
+    - [x] Pipeline integration with `semantic_ocr` and `text_association` parameters
+    - [x] 69 unit tests for Phase B components
+    - [x] All 367 tests passing
 - [ ] **Phase 3: Knowledge Base** (Pending — `knowledge_base/` dir not yet created)
 - [ ] **Phase 4: HVAC Autonomous Design** (Pending)
 - [ ] **Phase 5-8: Fire/LV/Electrical/Plumbing** (Pending)
@@ -155,6 +166,9 @@
 - Tool lock enforces max 1 concurrent operation (STA constraint).
 - The `knowledge_base/` directory structure is planned in FUTURE_ROADMAP.md but not yet created.
 - MEP domain seed data exists inline in `src/aec_agent/domain/seed_data.py` (HVAC clearance rules).
+- **New files (Phase B):** `src/aec_agent/mcp/tools/semantic_ocr.py` (pattern-based annotation parsing), `src/aec_agent/mcp/tools/text_associator.py` (text-element association), `src/aec_agent/prompts/annotation_parsing.py` (LLM prompts), `tests/unit/test_semantic_ocr.py` (44 tests), `tests/unit/test_text_associator.py` (25 tests).
+- **Phase B key functions:** `parse_annotation_by_patterns()` — fast regex parsing for CFM, equipment tags, room numbers, sizes, etc. `associate_text_to_elements()` — distance-based association with type-specific rules. `enrich_elements_with_text()` — combine symbols with their associated text data.
+- **New VectorizationResult fields (Phase B):** `parsed_annotations` (List[ParsedAnnotation]), `text_associations` (List[TextAssociation]), `enriched_elements` (elements with associated text).
 - **New files (Phase 2.5.1):** `src/aec_agent/mcp/tools/yolo_detection.py` (YOLOv8 detector), `scripts/train_yolo_symbols.py` (training script), `models/README.md` (model docs), `tests/unit/test_yolo_detection.py` (34 tests).
 - **New files (Phase 2):** `src/aec_agent/mcp/tools/image_vectorizer.py` (OpenCV detection), `src/aec_agent/mcp/tools/pdf_converter.py` (PDF→bitonal TIFF).
 - **New dependencies (optional YOLO):** `ultralytics>=8.0.0`, `onnxruntime>=1.15.0` — install via `pip install aec-agent[yolo]`.

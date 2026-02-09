@@ -89,6 +89,10 @@ class VectorizationResult:
     classification_confidence: float = 0.0
     regions: list = field(default_factory=list)  # List[DetectedRegion]
     title_block_text: dict = field(default_factory=dict)  # Extracted title block info
+    # Phase B: Semantic text parsing and association
+    parsed_annotations: list = field(default_factory=list)  # List[ParsedAnnotation]
+    text_associations: list = field(default_factory=list)  # List[TextAssociation]
+    enriched_elements: list = field(default_factory=list)  # Elements with associated text
 
 
 def vectorize_bitonal_image(
@@ -153,6 +157,10 @@ def vectorize_bitonal_image(
     use_llm_classification: bool = False,  # Use LLM for ambiguous cases
     llm_provider: str = "groq",  # LLM provider for classification
     process_drawing_area_only: bool = False,  # Only vectorize main drawing area
+    # --- Phase B: Semantic OCR & Text Association ---
+    semantic_ocr: bool = True,  # Parse OCR text into structured annotations
+    text_association: bool = True,  # Associate text with symbols/geometry
+    semantic_llm_fallback: bool = False,  # Use LLM for unrecognized patterns
     # --- Phase 2.5: Semantic Pipeline parameters ---
     # OCR Text Masking
     ocr_masking: bool = True,  # Enabled: auto-detects pytesseract availability
@@ -613,6 +621,136 @@ def vectorize_bitonal_image(
                 logger.warning(f"Symbol detection dependencies not available: {e}")
             except Exception as e:
                 logger.warning(f"Symbol detection failed: {e}, continuing without symbol masking")
+
+        # =================================================================
+        # PHASE B STAGE 1: SEMANTIC OCR PARSING
+        #
+        # Parse raw OCR text into structured annotations. This transforms
+        # text like "24x24 SA 200 CFM" into structured data:
+        # {type: "supply_air_diffuser", width: 24, height: 24, cfm: 200}
+        # =================================================================
+        if semantic_ocr and detected_texts:
+            try:
+                from aec_agent.mcp.tools.document_classifier import DrawingType
+                from aec_agent.mcp.tools.semantic_ocr import parse_annotation_by_patterns
+
+                # Get drawing type for context
+                drawing_type_enum = None
+                if result.drawing_type:
+                    try:
+                        drawing_type_enum = DrawingType(result.drawing_type)
+                    except ValueError:
+                        drawing_type_enum = DrawingType.UNKNOWN
+
+                parsed_annotations = []
+                for text_item in detected_texts:
+                    # Extract text content from DetectedText objects
+                    text_content = getattr(text_item, 'text', str(text_item))
+                    if not text_content or len(text_content.strip()) < 2:
+                        continue
+
+                    # Parse using pattern matching (fast, no LLM cost)
+                    parsed = parse_annotation_by_patterns(
+                        text_content,
+                        drawing_type=drawing_type_enum,
+                    )
+
+                    if parsed:
+                        # Transfer position from original detection
+                        if hasattr(text_item, 'position'):
+                            parsed.position = text_item.position
+                        if hasattr(text_item, 'bounding_box'):
+                            parsed.bounding_box = text_item.bounding_box
+                        parsed_annotations.append(parsed)
+
+                result.parsed_annotations = parsed_annotations
+
+                # Count by type for logging
+                type_counts = {}
+                for pa in parsed_annotations:
+                    type_name = pa.annotation_type.value
+                    type_counts[type_name] = type_counts.get(type_name, 0) + 1
+
+                logger.info(
+                    "Semantic OCR parsing complete",
+                    total_texts=len(detected_texts),
+                    parsed=len(parsed_annotations),
+                    types=type_counts,
+                )
+                print(f"[vectorize] Semantic OCR: {len(parsed_annotations)}/{len(detected_texts)} texts parsed")
+
+            except ImportError:
+                logger.warning("Semantic OCR module not available")
+            except Exception as e:
+                logger.warning(f"Semantic OCR parsing failed: {e}")
+
+        # =================================================================
+        # PHASE B STAGE 2: TEXT-ELEMENT ASSOCIATION
+        #
+        # Associate parsed text annotations with detected symbols.
+        # Equipment tags → nearest symbol, specs → nearby equipment, etc.
+        # =================================================================
+        if text_association and result.parsed_annotations and detected_blocks:
+            try:
+                from aec_agent.mcp.tools.text_associator import (
+                    DetectedElement,
+                    associate_text_to_elements,
+                    enrich_elements_with_text,
+                )
+
+                # Convert detected blocks to DetectedElement format
+                elements = []
+                for i, block in enumerate(detected_blocks):
+                    # Handle different block formats
+                    pos = getattr(block, 'position', (0, 0))
+                    bounds = getattr(block, 'bounding_box', (pos[0], pos[1], 50, 50))
+                    category = getattr(block, 'category', 'unknown')
+                    subtype = getattr(block, 'class_name', getattr(block, 'block_name', 'symbol'))
+
+                    elem = DetectedElement(
+                        element_id=f"block-{i:04d}",
+                        element_type="symbol",
+                        position=pos,
+                        bounds=bounds,
+                        category=category,
+                        subtype=subtype,
+                        confidence=getattr(block, 'confidence', 0.5),
+                    )
+                    elements.append(elem)
+
+                # Associate text with elements
+                associations = associate_text_to_elements(
+                    result.parsed_annotations,
+                    elements,
+                    max_distance=100.0 * scale,  # Scale to drawing units
+                )
+                result.text_associations = associations
+
+                # Create enriched elements (symbols with their associated text)
+                enriched = enrich_elements_with_text(
+                    elements,
+                    result.parsed_annotations,
+                    max_distance=100.0 * scale,
+                )
+                result.enriched_elements = enriched
+
+                # Count associations
+                elements_with_text = len([e for e in enriched if e.get('annotations')])
+
+                logger.info(
+                    "Text-element association complete",
+                    annotations=len(result.parsed_annotations),
+                    elements=len(elements),
+                    associations=len(associations),
+                    elements_with_text=elements_with_text,
+                )
+                print(f"[vectorize] Text association: {len(associations)} associations, "
+                      f"{elements_with_text}/{len(elements)} elements enriched")
+
+            except ImportError:
+                logger.warning("Text associator module not available")
+            except Exception as e:
+                logger.warning(f"Text-element association failed: {e}")
 
         # =================================================================
         # SIGNAL RESTORATION: Bridge gaps in dashed / broken lines.
