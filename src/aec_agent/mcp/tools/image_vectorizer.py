@@ -83,6 +83,12 @@ class VectorizationResult:
     image_width_px: int = 0
     image_height_px: int = 0
     dpi: int = 300
+    # Phase A: Document classification and region segmentation
+    drawing_type: str | None = None  # DrawingType value
+    drawing_discipline: str | None = None  # e.g., "mechanical", "electrical"
+    classification_confidence: float = 0.0
+    regions: list = field(default_factory=list)  # List[DetectedRegion]
+    title_block_text: dict = field(default_factory=dict)  # Extracted title block info
 
 
 def vectorize_bitonal_image(
@@ -141,6 +147,12 @@ def vectorize_bitonal_image(
     refine_search_radius: int = 10,
     # --- Debug output ---
     debug_output_dir: str | None = None,
+    # --- Phase A: Document Classification & Region Segmentation ---
+    document_classification: bool = True,  # Classify drawing type
+    region_segmentation: bool = True,  # Detect title block, legend, etc.
+    use_llm_classification: bool = False,  # Use LLM for ambiguous cases
+    llm_provider: str = "groq",  # LLM provider for classification
+    process_drawing_area_only: bool = False,  # Only vectorize main drawing area
     # --- Phase 2.5: Semantic Pipeline parameters ---
     # OCR Text Masking
     ocr_masking: bool = True,  # Enabled: auto-detects pytesseract availability
@@ -341,6 +353,110 @@ def vectorize_bitonal_image(
         )
 
         # =================================================================
+        # PHASE A STAGE 1: DOCUMENT CLASSIFICATION
+        #
+        # Classify the drawing type to configure pipeline appropriately.
+        # Uses keyword matching first, with optional LLM for ambiguous cases.
+        # =================================================================
+        if document_classification:
+            try:
+                from aec_agent.mcp.tools.document_classifier import (
+                    classify_by_keywords,
+                    get_pipeline_config,
+                )
+
+                # First, try to extract some text for classification
+                # We'll use a quick OCR on the bottom-right (likely title block)
+                title_text = ""
+                try:
+                    import pytesseract
+                    # Sample bottom-right corner for title block text
+                    tb_roi = img[int(height*0.8):, int(width*0.6):]
+                    title_text = pytesseract.image_to_string(tb_roi, config="--psm 6")
+                except Exception:
+                    pass  # OCR not available or failed
+
+                # Classify by keywords (fast, no LLM cost)
+                drawing_type, confidence = classify_by_keywords(title_text)
+
+                result.drawing_type = drawing_type.value
+                result.classification_confidence = confidence
+
+                # Get pipeline config for this drawing type
+                from aec_agent.mcp.tools.document_classifier import DRAWING_TYPE_CONFIG
+                config = DRAWING_TYPE_CONFIG.get(drawing_type, {})
+                result.drawing_discipline = config.get("discipline", "unknown")
+
+                logger.info(
+                    "Document classification complete",
+                    drawing_type=drawing_type.value,
+                    confidence=f"{confidence:.2f}",
+                    discipline=result.drawing_discipline,
+                )
+                print(f"[vectorize] Document type: {drawing_type.value} "
+                      f"(confidence: {confidence:.2f}, discipline: {result.drawing_discipline})")
+
+            except ImportError:
+                logger.warning("Document classifier not available")
+            except Exception as e:
+                logger.warning(f"Document classification failed: {e}")
+
+        # =================================================================
+        # PHASE A STAGE 2: REGION SEGMENTATION
+        #
+        # Detect title block, legend, notes, and main drawing area.
+        # This allows specialized processing per region.
+        # =================================================================
+        drawing_area_mask = None
+        if region_segmentation:
+            try:
+                from aec_agent.mcp.tools.region_segmenter import (
+                    RegionType,
+                    create_region_mask,
+                    extract_title_block_text,
+                    segment_regions,
+                )
+
+                seg_result = segment_regions(img)
+                result.regions = seg_result.regions
+
+                # Extract title block text if found
+                if seg_result.title_block:
+                    tb_text = extract_title_block_text(img, seg_result.title_block)
+                    result.title_block_text = tb_text
+                    logger.info(
+                        "Title block text extracted",
+                        sheet_number=tb_text.get("sheet_number"),
+                    )
+
+                # Create mask for drawing area if requested
+                if process_drawing_area_only and seg_result.drawing_area:
+                    drawing_area_mask = create_region_mask(
+                        (height, width),
+                        seg_result.regions,
+                        include_types=[RegionType.DRAWING_AREA],
+                    )
+                    logger.info(
+                        "Processing drawing area only",
+                        bounds=seg_result.drawing_area.bounds,
+                    )
+
+                logger.info(
+                    "Region segmentation complete",
+                    regions_found=len(seg_result.regions),
+                    has_title_block=seg_result.title_block is not None,
+                    has_legend=seg_result.legend is not None,
+                )
+                print(f"[vectorize] Regions: {len(seg_result.regions)} detected "
+                      f"(title_block: {seg_result.title_block is not None}, "
+                      f"legend: {seg_result.legend is not None})")
+
+            except ImportError:
+                logger.warning("Region segmenter not available")
+            except Exception as e:
+                logger.warning(f"Region segmentation failed: {e}")
+
+        # =================================================================
         # PRE-PROCESSING: Recover design intent from scanned geometry.
         #
         # A scanned drawing is a degraded copy of precise geometry.
@@ -397,6 +513,18 @@ def vectorize_bitonal_image(
         ink_pixels = int(np.count_nonzero(binary))
         print(f"[vectorize] After threshold+morph: {ink_pixels} ink pixels "
               f"({100.0 * ink_pixels / (width * height):.1f}% of image)")
+
+        # Apply drawing area mask if enabled
+        if drawing_area_mask is not None:
+            binary = cv2.bitwise_and(binary, drawing_area_mask)
+            ink_after_mask = int(np.count_nonzero(binary))
+            logger.info(
+                "Applied drawing area mask",
+                ink_before=ink_pixels,
+                ink_after=ink_after_mask,
+            )
+            print(f"[vectorize] After drawing area mask: {ink_after_mask} ink pixels")
+            _save_debug("04c_drawing_area_masked", binary)
 
         # =================================================================
         # SAVE REFERENCE BINARY for position refinement.

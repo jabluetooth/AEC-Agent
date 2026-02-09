@@ -2,16 +2,23 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Codebase Audit & Bug Fixes — COMPLETE. Comprehensive audit with mypy + ruff, fixed critical bugs.
-**Last Action:** Full codebase audit (2026-02-09):
-- Ran mypy (568 type errors found) and ruff (758 linting issues)
-- **CRITICAL FIX:** `repository.py:117` SQL bug — `update_project_hash` used `$1` twice (hash AND id), causing silent update failures
-- **SECURITY FIX:** `workflows/models.py:88` replaced dangerous `eval()` with safe AST-based expression evaluator
-- **SECURITY FIX:** `server.py:132` changed `0.0.0.0` to `127.0.0.1` (localhost only)
-- Fixed 6 type safety issues causing potential runtime errors (variable shadowing, missing imports)
-- Auto-fixed 759 style issues with `ruff --fix` (import sorting, modern type annotations)
-- All **237 tests passing** after fixes
-**Next Step:** End-to-end test with real PDF + running sidecar, then Phase 3 (Knowledge Base).
+**Objective:** Semantic Intelligence Pipeline (Phase A) — COMPLETE. Implemented document classification and region segmentation.
+**Last Action:** Phase A Implementation (2026-02-09):
+- Created `document_classifier.py` — LLM-based drawing type classification (14 types: floor_plan, mep_plan, electrical, hvac, plumbing, fire_alarm, etc.)
+- Created `region_segmenter.py` — Title block, legend, drawing area, notes, schedule detection
+- Updated `image_vectorizer.py` — Integrated classification & segmentation into pipeline
+- Created `SEMANTIC_INTELLIGENCE_PLAN.md` — Comprehensive 5-layer semantic pipeline roadmap
+- Added 56 new unit tests for Phase A components
+- All **298 tests passing** after implementation
+
+**New Features:**
+- `DrawingType` enum with 14 drawing classifications
+- `classify_by_keywords()` — Fast keyword-based classification (no LLM cost)
+- `segment_regions()` — Detects title block, legend, drawing area, notes, schedules
+- `get_pipeline_config()` — Returns pipeline configuration based on drawing type
+- Pipeline parameters: `document_classification`, `region_segmentation`, `process_drawing_area_only`
+
+**Next Step:** Phase B (Semantic OCR) or Phase C (Symbol Intelligence) from SEMANTIC_INTELLIGENCE_PLAN.md.
 
 ## 📊 Repository Status (as of 2026-02-02)
 
