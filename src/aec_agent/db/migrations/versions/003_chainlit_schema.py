@@ -14,8 +14,6 @@ Create Date: 2024-01-26
 """
 
 from alembic import op
-import sqlalchemy as sa
-from sqlalchemy.dialects import postgresql
 
 # Revision identifiers
 revision = "003_chainlit_schema"
@@ -26,7 +24,7 @@ depends_on = None
 
 def upgrade() -> None:
     """Create Chainlit schema."""
-    
+
     # User table
     op.execute("""
         CREATE TABLE IF NOT EXISTS "User" (

@@ -5,11 +5,11 @@ Defines the common interface for AutoCAD and Revit extractors.
 """
 
 from abc import ABC, abstractmethod
-from dataclasses import dataclass, field
-from typing import Optional, List, AsyncIterator
+from collections.abc import AsyncIterator
+from dataclasses import dataclass
 from uuid import UUID
 
-from aec_agent.db.models import Element, ExtractionResult
+from aec_agent.db.models import ExtractionResult
 
 
 @dataclass
@@ -20,8 +20,8 @@ class ExtractionConfig:
     include_geometry: bool = True
     include_properties: bool = True
     include_xdata: bool = True
-    layer_filter: Optional[str] = None
-    category_filter: Optional[List[str]] = None
+    layer_filter: str | None = None
+    category_filter: list[str] | None = None
     generate_descriptions: bool = True
     compute_embeddings: bool = True
 
@@ -33,7 +33,7 @@ class BaseExtractor(ABC):
     Provides common interface for AutoCAD and Revit extraction.
     """
 
-    def __init__(self, config: Optional[ExtractionConfig] = None):
+    def __init__(self, config: ExtractionConfig | None = None):
         """
         Initialize extractor.
 
@@ -65,7 +65,7 @@ class BaseExtractor(ABC):
     async def extract_incremental(
         self,
         project_id: UUID,
-        changed_ids: List[str]
+        changed_ids: list[str]
     ) -> ExtractionResult:
         """
         Extract only changed entities.
@@ -82,8 +82,8 @@ class BaseExtractor(ABC):
     @abstractmethod
     async def stream_entities(
         self,
-        batch_size: Optional[int] = None
-    ) -> AsyncIterator[List[dict]]:
+        batch_size: int | None = None
+    ) -> AsyncIterator[list[dict]]:
         """
         Stream entities in batches.
 
@@ -111,7 +111,7 @@ class BaseExtractor(ABC):
     async def check_file_changed(
         self,
         file_path: str,
-        stored_hash: Optional[str]
+        stored_hash: str | None
     ) -> bool:
         """
         Check if file has changed since last extraction.

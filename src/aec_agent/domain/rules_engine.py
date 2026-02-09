@@ -8,7 +8,7 @@ results and design suggestions.
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 from aec_agent.domain.models import DomainRule, RuleType, ValidationStatus
@@ -21,14 +21,14 @@ class ValidationResult:
     """Result of validating an element against rules."""
     id: UUID = field(default_factory=uuid4)
     project_id: UUID = field(default_factory=uuid4)
-    element_id: Optional[UUID] = None
-    rule_id: Optional[UUID] = None
+    element_id: UUID | None = None
+    rule_id: UUID | None = None
     rule_name: str = ""
     status: ValidationStatus = ValidationStatus.PASS
     message: str = ""
     details: dict[str, Any] = field(default_factory=dict)
     computed_at: datetime = field(default_factory=datetime.utcnow)
-    expires_at: Optional[datetime] = None
+    expires_at: datetime | None = None
 
     @property
     def is_error(self) -> bool:
@@ -57,17 +57,17 @@ class DesignSuggestion:
     """A proactive design suggestion based on rule analysis."""
     id: UUID = field(default_factory=uuid4)
     project_id: UUID = field(default_factory=uuid4)
-    context_element_id: Optional[UUID] = None
-    workflow_execution_id: Optional[UUID] = None
+    context_element_id: UUID | None = None
+    workflow_execution_id: UUID | None = None
     suggestion_type: str = ""         # routing, sizing, clearance, optimization
     suggestion: str = ""              # The suggestion text
     rationale: str = ""               # Why this is suggested
     priority: int = 50                # 0-100, higher = more important
     status: str = "pending"           # pending, accepted, dismissed
-    embedding: Optional[list[float]] = None
+    embedding: list[float] | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
-    dismissed_at: Optional[datetime] = None
-    accepted_at: Optional[datetime] = None
+    dismissed_at: datetime | None = None
+    accepted_at: datetime | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -124,7 +124,7 @@ class RulesEngine:
         self,
         project_id: UUID,
         element: dict[str, Any],
-        rule_types: Optional[list[RuleType]] = None,
+        rule_types: list[RuleType] | None = None,
     ) -> list[ValidationResult]:
         """
         Validate an element against applicable rules.
@@ -169,7 +169,7 @@ class RulesEngine:
         self,
         project_id: UUID,
         elements: list[dict[str, Any]],
-        rule_types: Optional[list[RuleType]] = None,
+        rule_types: list[RuleType] | None = None,
     ) -> dict[str, Any]:
         """
         Validate all elements in a project.
@@ -209,7 +209,7 @@ class RulesEngine:
         project_id: UUID,
         element: dict[str, Any],
         rule: DomainRule,
-    ) -> Optional[ValidationResult]:
+    ) -> ValidationResult | None:
         """Evaluate a single rule against an element."""
         try:
             condition = rule.condition
@@ -249,7 +249,7 @@ class RulesEngine:
         project_id: UUID,
         element: dict[str, Any],
         rule: DomainRule,
-    ) -> Optional[ValidationResult]:
+    ) -> ValidationResult | None:
         """Check clearance requirements."""
         condition = rule.condition
         action = rule.action
@@ -295,7 +295,7 @@ class RulesEngine:
         project_id: UUID,
         element: dict[str, Any],
         rule: DomainRule,
-    ) -> Optional[ValidationResult]:
+    ) -> ValidationResult | None:
         """Check sizing requirements (velocities, etc.)."""
         condition = rule.condition
         action = rule.action
@@ -345,7 +345,7 @@ class RulesEngine:
         project_id: UUID,
         element: dict[str, Any],
         rule: DomainRule,
-    ) -> Optional[ValidationResult]:
+    ) -> ValidationResult | None:
         """Check routing requirements (slopes, directions, etc.)."""
         action = rule.action
         element_props = element.get("properties", {})
@@ -375,7 +375,7 @@ class RulesEngine:
         project_id: UUID,
         element: dict[str, Any],
         rule: DomainRule,
-    ) -> Optional[ValidationResult]:
+    ) -> ValidationResult | None:
         """Check access requirements for maintenance."""
         action = rule.action
         element_props = element.get("properties", {})
@@ -407,7 +407,7 @@ class RulesEngine:
         self,
         project_id: UUID,
         element: dict[str, Any],
-        context: Optional[dict[str, Any]] = None,
+        context: dict[str, Any] | None = None,
     ) -> list[DesignSuggestion]:
         """
         Generate design suggestions for an element.
@@ -673,7 +673,7 @@ class RulesEngine:
 
 
 # Global instance management
-_engine: Optional[RulesEngine] = None
+_engine: RulesEngine | None = None
 
 
 async def get_rules_engine(

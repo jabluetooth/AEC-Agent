@@ -5,13 +5,13 @@ Converts AutoCAD and Revit geometry to WKT (Well-Known Text) format
 for storage in PostgreSQL with PostGIS.
 """
 
-from typing import Dict, Any, Optional, List, Tuple
 import math
+from typing import Any
 
 from aec_agent.db.models import BoundsInfo, CentroidInfo
 
 
-def autocad_geometry_to_wkt(geometry_info: Dict[str, Any]) -> Optional[str]:
+def autocad_geometry_to_wkt(geometry_info: dict[str, Any]) -> str | None:
     """
     Convert AutoCAD geometry to WKT format.
 
@@ -108,7 +108,7 @@ def autocad_geometry_to_wkt(geometry_info: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def revit_location_to_wkt(location_info: Dict[str, Any]) -> Optional[str]:
+def revit_location_to_wkt(location_info: dict[str, Any]) -> str | None:
     """
     Convert Revit element location to WKT format.
 
@@ -155,7 +155,7 @@ def revit_location_to_wkt(location_info: Dict[str, Any]) -> Optional[str]:
     return None
 
 
-def compute_centroid(geometry_info: Dict[str, Any], source: str = "autocad") -> Optional[CentroidInfo]:
+def compute_centroid(geometry_info: dict[str, Any], source: str = "autocad") -> CentroidInfo | None:
     """
     Compute centroid from geometry info.
 
@@ -172,7 +172,7 @@ def compute_centroid(geometry_info: Dict[str, Any], source: str = "autocad") -> 
         return _compute_revit_centroid(geometry_info)
 
 
-def _compute_autocad_centroid(geometry_info: Dict[str, Any]) -> Optional[CentroidInfo]:
+def _compute_autocad_centroid(geometry_info: dict[str, Any]) -> CentroidInfo | None:
     """Compute centroid for AutoCAD geometry."""
     geom_type = geometry_info.get("type", "").upper()
 
@@ -208,7 +208,7 @@ def _compute_autocad_centroid(geometry_info: Dict[str, Any]) -> Optional[Centroi
     return None
 
 
-def _compute_revit_centroid(location_info: Dict[str, Any]) -> Optional[CentroidInfo]:
+def _compute_revit_centroid(location_info: dict[str, Any]) -> CentroidInfo | None:
     """Compute centroid for Revit location."""
     loc_type = location_info.get("type", "").upper()
 
@@ -240,7 +240,7 @@ def _compute_revit_centroid(location_info: Dict[str, Any]) -> Optional[CentroidI
     return None
 
 
-def compute_bounds(geometry_info: Dict[str, Any], source: str = "autocad") -> Optional[BoundsInfo]:
+def compute_bounds(geometry_info: dict[str, Any], source: str = "autocad") -> BoundsInfo | None:
     """
     Compute bounding box from geometry info.
 
@@ -257,7 +257,7 @@ def compute_bounds(geometry_info: Dict[str, Any], source: str = "autocad") -> Op
         return _compute_revit_bounds(geometry_info)
 
 
-def _compute_autocad_bounds(geometry_info: Dict[str, Any]) -> Optional[BoundsInfo]:
+def _compute_autocad_bounds(geometry_info: dict[str, Any]) -> BoundsInfo | None:
     """Compute bounds for AutoCAD geometry."""
     # Check for pre-computed bounds
     if "bounds" in geometry_info:
@@ -286,7 +286,7 @@ def _compute_autocad_bounds(geometry_info: Dict[str, Any]) -> Optional[BoundsInf
     )
 
 
-def _compute_revit_bounds(location_info: Dict[str, Any]) -> Optional[BoundsInfo]:
+def _compute_revit_bounds(location_info: dict[str, Any]) -> BoundsInfo | None:
     """Compute bounds for Revit location."""
     # Check for pre-computed bounds
     if "bounds" in location_info:
@@ -336,12 +336,12 @@ def _compute_revit_bounds(location_info: Dict[str, Any]) -> Optional[BoundsInfo]
 # Helper Functions
 # =============================================================================
 
-def _z(point: List) -> float:
+def _z(point: list) -> float:
     """Get Z coordinate, defaulting to 0."""
     return point[2] if len(point) > 2 else 0.0
 
 
-def _extract_all_points(geometry_info: Dict[str, Any]) -> List[Tuple[float, float, float]]:
+def _extract_all_points(geometry_info: dict[str, Any]) -> list[tuple[float, float, float]]:
     """Extract all points from geometry for bounds calculation."""
     points = []
     geom_type = geometry_info.get("type", "").upper()
@@ -380,10 +380,10 @@ def _extract_all_points(geometry_info: Dict[str, Any]) -> List[Tuple[float, floa
 
 
 def _circle_to_polygon(
-    center: List[float],
+    center: list[float],
     radius: float,
     num_points: int = 32
-) -> List[Tuple[float, float]]:
+) -> list[tuple[float, float]]:
     """Convert circle to polygon approximation."""
     points = []
     for i in range(num_points + 1):  # +1 to close the polygon
@@ -395,12 +395,12 @@ def _circle_to_polygon(
 
 
 def _arc_to_linestring(
-    center: List[float],
+    center: list[float],
     radius: float,
     start_angle: float,
     end_angle: float,
     num_points: int = 16
-) -> List[Tuple[float, float]]:
+) -> list[tuple[float, float]]:
     """Convert arc to linestring approximation."""
     # Convert degrees to radians
     start_rad = math.radians(start_angle)

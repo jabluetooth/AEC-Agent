@@ -11,8 +11,8 @@ Provides specific validation logic for common MEP checks:
 import logging
 import math
 from dataclasses import dataclass, field
-from typing import Any, Optional
-from uuid import UUID, uuid4
+from typing import Any
+from uuid import UUID
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +43,12 @@ class Point3D:
 @dataclass
 class ValidationIssue:
     """A single validation issue found."""
-    element_id: Optional[UUID] = None
+    element_id: UUID | None = None
     element_name: str = ""
     issue_type: str = ""      # clearance, sizing, routing, coverage
     severity: str = "warning"  # error, warning, info
     message: str = ""
-    location: Optional[Point3D] = None
+    location: Point3D | None = None
     details: dict[str, Any] = field(default_factory=dict)
 
 
@@ -97,7 +97,7 @@ class ClearanceValidator:
         ("default", "default"): 0.10,
     }
 
-    def __init__(self, custom_clearances: Optional[dict] = None):
+    def __init__(self, custom_clearances: dict | None = None):
         """
         Initialize clearance validator.
 
@@ -130,7 +130,7 @@ class ClearanceValidator:
         self,
         element: dict[str, Any],
         nearby_element: dict[str, Any],
-    ) -> Optional[ValidationIssue]:
+    ) -> ValidationIssue | None:
         """
         Check clearance between two elements.
 
@@ -216,7 +216,7 @@ class ClearanceValidator:
 
         return issues
 
-    def _get_position(self, element: dict[str, Any]) -> Optional[Point3D]:
+    def _get_position(self, element: dict[str, Any]) -> Point3D | None:
         """Extract position from element dict."""
         props = element.get("properties", element)
 
@@ -285,7 +285,7 @@ class SizingValidator:
         "steam": {"min": 60, "max": 120, "recommended": 80},  # Steam is ft/min
     }
 
-    def __init__(self, custom_limits: Optional[dict] = None):
+    def __init__(self, custom_limits: dict | None = None):
         """
         Initialize sizing validator.
 
@@ -300,7 +300,7 @@ class SizingValidator:
         self,
         element: dict[str, Any],
         space_type: str = "general",
-    ) -> Optional[ValidationIssue]:
+    ) -> ValidationIssue | None:
         """
         Check duct velocity against limits.
 
@@ -373,7 +373,7 @@ class SizingValidator:
     def check_pipe_velocity(
         self,
         element: dict[str, Any],
-    ) -> Optional[ValidationIssue]:
+    ) -> ValidationIssue | None:
         """
         Check pipe velocity against limits.
 
@@ -480,7 +480,7 @@ class RoutingValidator:
         "vent": 0,               # Vents can be level
     }
 
-    def __init__(self, custom_slopes: Optional[dict] = None):
+    def __init__(self, custom_slopes: dict | None = None):
         """
         Initialize routing validator.
 
@@ -494,9 +494,9 @@ class RoutingValidator:
     def check_slope(
         self,
         element: dict[str, Any],
-        start_point: Optional[Point3D] = None,
-        end_point: Optional[Point3D] = None,
-    ) -> Optional[ValidationIssue]:
+        start_point: Point3D | None = None,
+        end_point: Point3D | None = None,
+    ) -> ValidationIssue | None:
         """
         Check that element has adequate slope.
 
@@ -546,7 +546,7 @@ class RoutingValidator:
         self,
         element: dict[str, Any],
         max_offset_angle: float = 45,
-    ) -> Optional[ValidationIssue]:
+    ) -> ValidationIssue | None:
         """
         Check that duct/pipe offsets are within limits.
 
@@ -630,7 +630,7 @@ class CoverageValidator:
         "sprinkler_max_spacing": 15,
     }
 
-    def __init__(self, custom_coverage: Optional[dict] = None):
+    def __init__(self, custom_coverage: dict | None = None):
         """
         Initialize coverage validator.
 
@@ -646,7 +646,7 @@ class CoverageValidator:
         room_area: float,
         diffuser_count: int,
         diffuser_type: str = "square",
-    ) -> Optional[ValidationIssue]:
+    ) -> ValidationIssue | None:
         """
         Check diffuser coverage for a room.
 
@@ -741,7 +741,7 @@ class CoverageValidator:
         area: float,
         sprinkler_count: int,
         hazard_class: str = "ordinary",
-    ) -> Optional[ValidationIssue]:
+    ) -> ValidationIssue | None:
         """
         Check sprinkler coverage per NFPA 13.
 
@@ -781,7 +781,7 @@ class CoverageValidator:
 
         return None
 
-    def _get_position_2d(self, element: dict[str, Any]) -> Optional[Point3D]:
+    def _get_position_2d(self, element: dict[str, Any]) -> Point3D | None:
         """Extract 2D position from element."""
         props = element.get("properties", element)
 

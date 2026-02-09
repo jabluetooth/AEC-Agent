@@ -9,8 +9,6 @@ Create Date: 2024-01-26
 """
 
 from alembic import op
-import sqlalchemy as sa
-
 
 # Revision identifiers
 revision = "004_fix_step_schema"

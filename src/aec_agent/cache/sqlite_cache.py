@@ -5,12 +5,10 @@ Provides fast read access to Revit model metadata without
 blocking the CAD application's UI thread.
 """
 
-import aiosqlite
-import json
-from pathlib import Path
-from typing import Optional, List
 from datetime import datetime
+from pathlib import Path
 
+import aiosqlite
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -33,7 +31,7 @@ class CacheManager:
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
         self._db_path = self.cache_dir / "aec_cache.sqlite"
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: aiosqlite.Connection | None = None
 
     async def initialize(self):
         """Initialize database connection and schema."""
@@ -93,7 +91,7 @@ class CacheManager:
     # Level Operations
     # =========================================================================
 
-    async def get_level_by_name(self, name: str) -> Optional[dict]:
+    async def get_level_by_name(self, name: str) -> dict | None:
         """
         Get level by name.
 
@@ -110,7 +108,7 @@ class CacheManager:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def get_level_by_id(self, level_id: int) -> Optional[dict]:
+    async def get_level_by_id(self, level_id: int) -> dict | None:
         """Get level by ID."""
         cursor = await self._db.execute(
             "SELECT * FROM levels WHERE id = ?",
@@ -119,7 +117,7 @@ class CacheManager:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def get_all_levels(self) -> List[dict]:
+    async def get_all_levels(self) -> list[dict]:
         """Get all levels sorted by elevation."""
         cursor = await self._db.execute(
             "SELECT * FROM levels ORDER BY elevation_m ASC"
@@ -149,13 +147,13 @@ class CacheManager:
     # Room Operations
     # =========================================================================
 
-    async def get_all_rooms(self) -> List[dict]:
+    async def get_all_rooms(self) -> list[dict]:
         """Get all rooms."""
         cursor = await self._db.execute("SELECT * FROM rooms")
         rows = await cursor.fetchall()
         return [dict(row) for row in rows]
 
-    async def get_rooms_by_level(self, level_id: int) -> List[dict]:
+    async def get_rooms_by_level(self, level_id: int) -> list[dict]:
         """Get rooms on a specific level."""
         cursor = await self._db.execute(
             "SELECT * FROM rooms WHERE level_id = ?",
@@ -189,7 +187,7 @@ class CacheManager:
     # Layer Operations (AutoCAD)
     # =========================================================================
 
-    async def get_layer_by_name(self, name: str) -> Optional[dict]:
+    async def get_layer_by_name(self, name: str) -> dict | None:
         """Get layer by name."""
         cursor = await self._db.execute(
             "SELECT * FROM layers WHERE name = ?",
@@ -198,7 +196,7 @@ class CacheManager:
         row = await cursor.fetchone()
         return dict(row) if row else None
 
-    async def get_all_layers(self) -> List[dict]:
+    async def get_all_layers(self) -> list[dict]:
         """Get all layers."""
         cursor = await self._db.execute(
             "SELECT * FROM layers ORDER BY name ASC"
@@ -231,7 +229,7 @@ class CacheManager:
     # Metadata Operations
     # =========================================================================
 
-    async def get_metadata(self, key: str) -> Optional[str]:
+    async def get_metadata(self, key: str) -> str | None:
         """Get metadata value by key."""
         cursor = await self._db.execute(
             "SELECT value FROM metadata WHERE key = ?",
@@ -252,7 +250,7 @@ class CacheManager:
         )
         await self._db.commit()
 
-    async def get_last_sync_time(self, category: str) -> Optional[str]:
+    async def get_last_sync_time(self, category: str) -> str | None:
         """Get last sync time for a category."""
         return await self.get_metadata(f"{category}_last_sync")
 

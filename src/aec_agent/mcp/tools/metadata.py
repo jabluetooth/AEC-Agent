@@ -8,22 +8,21 @@ Provides tools for:
 - Cache-first data access
 """
 
-from typing import Optional, List
 from uuid import UUID
 
 import structlog
 
 from aec_agent.mcp.server import mcp
 from aec_agent.mcp.tools.base import (
-    success_result,
+    ErrorCode,
     error_result,
     safe_tool,
-    ErrorCode,
+    success_result,
 )
 from aec_agent.mcp.tools.cache_helpers import (
+    get_cache_stats,
     get_element_with_context,
     is_cache_fresh,
-    get_cache_stats,
 )
 
 logger = structlog.get_logger(__name__)
@@ -49,9 +48,9 @@ async def _get_services():
     return pool, embeddings
 
 
-async def _get_file_context_from_sidecar(source: Optional[str] = None) -> dict:
+async def _get_file_context_from_sidecar(source: str | None = None) -> dict:
     """Fall back to direct sidecar query when PostgreSQL is not available."""
-    from aec_agent.mcp.sidecar_client import call_autocad_command, call_sidecar, SidecarError
+    from aec_agent.mcp.sidecar_client import SidecarError, call_autocad_command, call_sidecar
 
     # Determine which sidecar to query
     if source is None:
@@ -133,7 +132,7 @@ async def _get_file_context_from_sidecar(source: Optional[str] = None) -> dict:
     return error_result(ErrorCode.INVALID_PARAMS, f"Unknown source: {source}")
 
 
-async def _get_active_project_id() -> Optional[UUID]:
+async def _get_active_project_id() -> UUID | None:
     """Get the currently active project ID from cache or recent sync."""
     from aec_agent.mcp.server import get_cache
 
@@ -152,9 +151,9 @@ async def _get_active_project_id() -> Optional[UUID]:
 @safe_tool
 async def find_elements(
     query: str,
-    source: Optional[str] = None,
-    category: Optional[str] = None,
-    layer: Optional[str] = None,
+    source: str | None = None,
+    category: str | None = None,
+    layer: str | None = None,
     limit: int = 10,
 ) -> dict:
     """
@@ -235,7 +234,7 @@ async def find_elements(
 async def get_nearby_elements(
     element_id: str,
     distance: float = 1.0,
-    category: Optional[str] = None,
+    category: str | None = None,
     limit: int = 20,
 ) -> dict:
     """
@@ -332,7 +331,7 @@ async def get_nearby_elements(
 @safe_tool
 async def get_related_elements(
     element_id: str,
-    relation_type: Optional[str] = None,
+    relation_type: str | None = None,
     limit: int = 20,
 ) -> dict:
     """
@@ -495,7 +494,7 @@ async def resolve_coordinates(
 @safe_tool
 async def sync_metadata(
     source: str = "autocad",
-    file_path: Optional[str] = None,
+    file_path: str | None = None,
 ) -> dict:
     """
     Trigger metadata extraction and synchronization.
@@ -574,7 +573,7 @@ async def sync_metadata(
 @mcp.tool()
 @safe_tool
 async def get_file_context(
-    source: Optional[str] = None,
+    source: str | None = None,
 ) -> dict:
     """
     Get a compact summary of the current drawing/model.

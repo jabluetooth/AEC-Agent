@@ -9,9 +9,7 @@ Uses PyMuPDF (fitz) for PDF rendering and Pillow for bitonal conversion.
 """
 
 import os
-import tempfile
 from pathlib import Path
-from typing import Optional
 
 import structlog
 
@@ -23,7 +21,7 @@ def convert_pdf_to_bitonal_tiff(
     page: int = 1,
     dpi: int = 300,
     threshold: int = 128,
-    output_dir: Optional[str] = None,
+    output_dir: str | None = None,
 ) -> str:
     """
     Convert a PDF page to a bitonal (1-bit) TIFF image.

@@ -6,7 +6,8 @@ Each workflow executes a series of MCP tools without per-step LLM involvement.
 """
 
 from uuid import uuid4
-from aec_agent.workflows.models import WorkflowTemplate, WorkflowStep
+
+from aec_agent.workflows.models import WorkflowStep, WorkflowTemplate
 
 
 def get_default_hvac_workflows() -> list[WorkflowTemplate]:

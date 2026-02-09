@@ -21,7 +21,6 @@ Coordinate conversion:
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
 
 import structlog
 
@@ -31,22 +30,22 @@ logger = structlog.get_logger(__name__)
 @dataclass
 class DetectedLine:
     """A line segment detected from raster data."""
-    start: Tuple[float, float]
-    end: Tuple[float, float]
+    start: tuple[float, float]
+    end: tuple[float, float]
     linetype: str = "CONTINUOUS"  # Phase 2.5: "CONTINUOUS", "DASHED", "HIDDEN", etc.
 
 
 @dataclass
 class DetectedCircle:
     """A circle detected from raster data."""
-    center: Tuple[float, float]
+    center: tuple[float, float]
     radius: float
 
 
 @dataclass
 class DetectedArc:
     """A circular arc detected from raster data."""
-    center: Tuple[float, float]
+    center: tuple[float, float]
     radius: float
     start_angle: float  # degrees, 0 = +X axis, CCW positive
     end_angle: float    # degrees
@@ -55,8 +54,8 @@ class DetectedArc:
 @dataclass
 class DetectedEllipse:
     """An ellipse detected from raster data."""
-    center: Tuple[float, float]
-    major_axis_endpoint: Tuple[float, float]  # endpoint of major axis relative to center
+    center: tuple[float, float]
+    major_axis_endpoint: tuple[float, float]  # endpoint of major axis relative to center
     axis_ratio: float  # minor/major ratio (0..1]
     start_angle: float  # degrees, 0 = full ellipse
     end_angle: float    # degrees, 360 = full ellipse
@@ -65,22 +64,22 @@ class DetectedEllipse:
 @dataclass
 class DetectedPolyline:
     """A polyline (contour) detected from raster data."""
-    points: List[Tuple[float, float]]
+    points: list[tuple[float, float]]
     closed: bool = False
-    bulges: List[float] = field(default_factory=list)  # bulge per vertex (0=straight, nonzero=arc)
+    bulges: list[float] = field(default_factory=list)  # bulge per vertex (0=straight, nonzero=arc)
 
 
 @dataclass
 class VectorizationResult:
     """Results from image vectorization."""
-    lines: List[DetectedLine] = field(default_factory=list)
-    circles: List[DetectedCircle] = field(default_factory=list)
-    arcs: List[DetectedArc] = field(default_factory=list)
-    ellipses: List[DetectedEllipse] = field(default_factory=list)
-    polylines: List[DetectedPolyline] = field(default_factory=list)
+    lines: list[DetectedLine] = field(default_factory=list)
+    circles: list[DetectedCircle] = field(default_factory=list)
+    arcs: list[DetectedArc] = field(default_factory=list)
+    ellipses: list[DetectedEllipse] = field(default_factory=list)
+    polylines: list[DetectedPolyline] = field(default_factory=list)
     # Phase 2.5: Semantic pipeline outputs
-    texts: List = field(default_factory=list)  # List[DetectedText] from ocr_masking
-    blocks: List = field(default_factory=list)  # List[DetectedBlock] from symbol_detection
+    texts: list = field(default_factory=list)  # List[DetectedText] from ocr_masking
+    blocks: list = field(default_factory=list)  # List[DetectedBlock] from symbol_detection
     image_width_px: int = 0
     image_height_px: int = 0
     dpi: int = 300
@@ -141,7 +140,7 @@ def vectorize_bitonal_image(
     refine_positions: bool = True,
     refine_search_radius: int = 10,
     # --- Debug output ---
-    debug_output_dir: Optional[str] = None,
+    debug_output_dir: str | None = None,
     # --- Phase 2.5: Semantic Pipeline parameters ---
     # OCR Text Masking
     ocr_masking: bool = True,  # Enabled: auto-detects pytesseract availability
@@ -154,7 +153,7 @@ def vectorize_bitonal_image(
     symbol_threshold: float = 0.8,
     symbol_nms_distance: float = 20.0,
     # Phase 2.5.1: YOLO Symbol Detection
-    yolo_model_path: Optional[str] = None,  # Custom YOLO model path
+    yolo_model_path: str | None = None,  # Custom YOLO model path
     yolo_confidence: float = 0.5,  # YOLO confidence threshold
     yolo_iou_threshold: float = 0.45,  # YOLO IoU for NMS
     # AEC Geometric Heuristics
@@ -285,9 +284,10 @@ def vectorize_bitonal_image(
         FileNotFoundError: If the image file does not exist.
         RuntimeError: If vectorization fails.
     """
+    import math
+
     import cv2
     import numpy as np
-    import math
 
     # --- Debug checkpoint helper ---
     def _save_debug(name: str, image: "np.ndarray", annotations: list = None):
@@ -509,13 +509,13 @@ def vectorize_bitonal_image(
                 # Build a rotated line kernel of the requested length
                 k_len = signal_close_kernel_length
                 kern = np.zeros((k_len, k_len), dtype=np.uint8)
-                center = k_len // 2
+                k_center = k_len // 2
                 angle_rad = math.radians(angle_deg)
                 dx = math.cos(angle_rad)
                 dy = math.sin(angle_rad)
-                for t in range(-center, center + 1):
-                    x = int(round(center + t * dx))
-                    y = int(round(center + t * dy))
+                for t in range(-k_center, k_center + 1):
+                    x = int(round(k_center + t * dx))
+                    y = int(round(k_center + t * dy))
                     if 0 <= x < k_len and 0 <= y < k_len:
                         kern[y, x] = 1
 
@@ -622,7 +622,7 @@ def vectorize_bitonal_image(
                     )
 
         # Helper: convert pixel coords to drawing units.
-        def px_to_dwg(px_x: float, px_y: float) -> Tuple[float, float]:
+        def px_to_dwg(px_x: float, px_y: float) -> tuple[float, float]:
             return (px_x * scale, (height - px_y) * scale)
 
         def px_dist_to_dwg(px_dist: float) -> float:
@@ -865,7 +865,7 @@ def vectorize_bitonal_image(
         # already-detected circle (center within the circle radius AND
         # contour size similar to circle size).  This prevents large outer
         # contours from being killed by small interior circles.
-        circle_centers_px: List[Tuple[float, float, float]] = []
+        circle_centers_px: list[tuple[float, float, float]] = []
         for (cx, cy, r) in deduped_circles:
             circle_centers_px.append((cx, cy, r))
 
@@ -887,19 +887,19 @@ def vectorize_bitonal_image(
             (cx, cy), (ma, MA), angle = ellipse
             if ma < 1 or MA < 1:
                 return float('inf')
-            a = MA / 2.0
-            b = ma / 2.0
+            semi_major = MA / 2.0
+            semi_minor = ma / 2.0
             angle_rad = math.radians(angle)
-            cos_a = math.cos(angle_rad)
-            sin_a = math.sin(angle_rad)
+            cos_ang = math.cos(angle_rad)
+            sin_ang = math.sin(angle_rad)
             total_err = 0.0
             for pt in contour:
                 dx = float(pt[0][0]) - cx
                 dy = float(pt[0][1]) - cy
-                lx = dx * cos_a + dy * sin_a
-                ly = -dx * sin_a + dy * cos_a
-                if a > 0 and b > 0:
-                    d = math.sqrt((lx / a) ** 2 + (ly / b) ** 2)
+                lx = dx * cos_ang + dy * sin_ang
+                ly = -dx * sin_ang + dy * cos_ang
+                if semi_major > 0 and semi_minor > 0:
+                    d = math.sqrt((lx / semi_major) ** 2 + (ly / semi_minor) ** 2)
                     total_err += abs(d - 1.0)
                 else:
                     total_err += 1.0
@@ -922,7 +922,7 @@ def vectorize_bitonal_image(
                 max_gap = max(max_gap, gap)
             return 360.0 - max_gap
 
-        def _compute_arc_angles(contour, cx: float, cy: float) -> Tuple[float, float]:
+        def _compute_arc_angles(contour, cx: float, cy: float) -> tuple[float, float]:
             angles = []
             for pt in contour:
                 dx = float(pt[0][0]) - cx
@@ -1078,7 +1078,7 @@ def vectorize_bitonal_image(
         if significant_contours:
             # --- Filter redundant lines ---
             lines_before = len(result.lines)
-            kept_lines: List[DetectedLine] = []
+            kept_lines: list[DetectedLine] = []
             for line in result.lines:
                 # Convert DWG coords back to pixel coords for testing
                 sx = line.start[0] / scale if scale else 0
@@ -1113,7 +1113,7 @@ def vectorize_bitonal_image(
 
             # --- Filter redundant circles ---
             circles_before = len(result.circles)
-            kept_circles: List[DetectedCircle] = []
+            kept_circles: list[DetectedCircle] = []
             for circle in result.circles:
                 cx_px = circle.center[0] / scale if scale else 0
                 cy_px = height - (circle.center[1] / scale if scale else 0)
@@ -1124,9 +1124,9 @@ def vectorize_bitonal_image(
                     # Sample 8 points around the circle perimeter
                     perimeter_on_contour = 0
                     for angle_i in range(8):
-                        a = angle_i * (2 * math.pi / 8)
-                        px = cx_px + r_px * math.cos(a)
-                        py = cy_px + r_px * math.sin(a)
+                        theta = angle_i * (2 * math.pi / 8)
+                        px = cx_px + r_px * math.cos(theta)
+                        py = cy_px + r_px * math.sin(theta)
                         d = abs(cv2.pointPolygonTest(
                             contour, (float(px), float(py)), True,
                         ))
@@ -1152,9 +1152,9 @@ def vectorize_bitonal_image(
             try:
                 from aec_agent.mcp.tools.topology import (
                     build_segment_graph,
+                    graph_to_vectorization_result,
                     merge_degree2_nodes,
                     snap_dangling_endpoints,
-                    graph_to_vectorization_result,
                 )
                 graph = build_segment_graph(result, snap_tolerance)
                 graph = merge_degree2_nodes(graph)
@@ -1186,9 +1186,9 @@ def vectorize_bitonal_image(
         if aec_heuristics and result.lines:
             try:
                 from aec_agent.utils.geometry_cleanup import (
-                    snap_to_orthogonal,
-                    merge_collinear_lines,
                     MergedLine,
+                    merge_collinear_lines,
+                    snap_to_orthogonal,
                 )
 
                 original_count = len(result.lines)
@@ -1316,7 +1316,7 @@ def _deduplicate_lines(
     raw_lines,
     angle_tol: float = 5.0,
     dist_tol: float = 15.0,
-) -> List[Tuple[float, float, float, float]]:
+) -> list[tuple[float, float, float, float]]:
     """
     Merge near-duplicate lines detected by HoughLinesP.
 
@@ -1328,8 +1328,9 @@ def _deduplicate_lines(
     Collinear but non-overlapping lines are kept as separate features.
     When duplicates are found, the longest line is kept.
     """
-    import numpy as np
     import math
+
+    import numpy as np
 
     if raw_lines is None or len(raw_lines) == 0:
         return []
@@ -1414,7 +1415,7 @@ def _deduplicate_circles(
     raw_circles,
     center_tol: float = 30.0,
     radius_tol: float = 20.0,
-) -> List[Tuple[float, float, float]]:
+) -> list[tuple[float, float, float]]:
     """
     Merge near-duplicate circles detected by HoughCircles.
 
@@ -1454,11 +1455,11 @@ def _deduplicate_circles(
 
 
 def _validate_circles_by_ink(
-    circles: List[Tuple[float, float, float]],
+    circles: list[tuple[float, float, float]],
     binary_image: "np.ndarray",
     min_ink_ratio: float = 0.35,
     n_samples: int = 36,
-) -> List[Tuple[float, float, float]]:
+) -> list[tuple[float, float, float]]:
     """
     Validate detected circles by checking for actual ink pixels along
     the circumference in the binary image.
@@ -1477,7 +1478,6 @@ def _validate_circles_by_ink(
     Returns:
         Filtered list of validated circles.
     """
-    import numpy as np
     import math
 
     h, w = binary_image.shape[:2]
@@ -1516,7 +1516,7 @@ def _compute_bulges(
     original_contour,
     simplified: "np.ndarray",
     is_closed: bool,
-) -> List[float]:
+) -> list[float]:
     """
     Compute bulge values for a simplified polyline by comparing to the
     original contour.  A bulge of 0 means a straight segment; non-zero
@@ -1527,11 +1527,12 @@ def _compute_bulges(
     the deviation is significant relative to the segment length, we
     compute a bulge value.
     """
-    import numpy as np
     import math
 
+    import numpy as np
+
     n = len(simplified)
-    bulges: List[float] = [0.0] * n
+    bulges: list[float] = [0.0] * n
     if n < 2:
         return bulges
 
@@ -1597,7 +1598,7 @@ def _refine_line_to_reference(
     x1: float, y1: float, x2: float, y2: float,
     binary_ref: "np.ndarray",
     search_radius: int = 10,
-) -> Tuple[float, float, float, float]:
+) -> tuple[float, float, float, float]:
     """
     Refine a detected line's position by fitting to actual ink pixels in
     the reference binary image.
@@ -1672,7 +1673,7 @@ def _refine_circle_to_reference(
     binary_ref: "np.ndarray",
     search_radius: int = 10,
     n_samples: int = 72,
-) -> Tuple[float, float, float]:
+) -> tuple[float, float, float]:
     """
     Refine a detected circle's position by fitting to actual ink pixels in
     the reference binary image.
@@ -1689,9 +1690,10 @@ def _refine_circle_to_reference(
     Returns:
         Refined (cx, cy, r) in pixel coordinates.
     """
+    import math
+
     import cv2
     import numpy as np
-    import math
 
     h, w = binary_ref.shape[:2]
 

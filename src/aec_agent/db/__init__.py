@@ -6,12 +6,12 @@ Provides PostgreSQL connectivity with PostGIS (spatial) and pgvector (semantic) 
 
 from aec_agent.db.connection import DatabasePool, get_database_pool
 from aec_agent.db.models import (
-    Project,
+    BoundsInfo,
+    CentroidInfo,
     Element,
     ElementRelationship,
     GeometryInfo,
-    BoundsInfo,
-    CentroidInfo,
+    Project,
 )
 from aec_agent.db.repository import ElementRepository
 

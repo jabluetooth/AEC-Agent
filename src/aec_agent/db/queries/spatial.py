@@ -5,13 +5,12 @@ Provides optimized SQL queries for spatial operations using PostGIS indexes.
 Uses SQL instead of Python loops for O(log n) performance with spatial indexes.
 """
 
-from typing import List, Optional
 from uuid import UUID
 
 import structlog
 
 from aec_agent.db.connection import DatabasePool
-from aec_agent.db.models import Element, CentroidInfo
+from aec_agent.db.models import CentroidInfo
 
 logger = structlog.get_logger(__name__)
 
@@ -119,9 +118,9 @@ async def find_elements_near_point(
     project_id: UUID,
     point: CentroidInfo,
     radius: float = 1.0,
-    entity_type: Optional[str] = None,
+    entity_type: str | None = None,
     limit: int = 50,
-) -> List[dict]:
+) -> list[dict]:
     """
     Find elements near a specific point.
 
@@ -192,7 +191,7 @@ async def find_elements_on_layer(
     project_id: UUID,
     layer_name: str,
     limit: int = 100,
-) -> List[dict]:
+) -> list[dict]:
     """
     Find all elements on a specific layer.
 

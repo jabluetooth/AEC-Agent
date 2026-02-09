@@ -5,13 +5,12 @@ Combines vector similarity search (pgvector) with spatial queries (PostGIS)
 to resolve natural language element references.
 """
 
-from typing import Optional, List, Dict, Any
 from uuid import UUID
 
 import structlog
 
 from aec_agent.db.connection import DatabasePool
-from aec_agent.db.models import Element, CentroidInfo
+from aec_agent.db.models import CentroidInfo, Element
 from aec_agent.db.repository import ElementRepository
 from aec_agent.semantic.embeddings import EmbeddingService
 
@@ -47,12 +46,12 @@ class SemanticSearch:
     async def search(
         self,
         query: str,
-        project_id: Optional[UUID] = None,
-        entity_type: Optional[str] = None,
-        category: Optional[str] = None,
-        layer: Optional[str] = None,
+        project_id: UUID | None = None,
+        entity_type: str | None = None,
+        category: str | None = None,
+        layer: str | None = None,
         limit: int = 10,
-    ) -> List[Element]:
+    ) -> list[Element]:
         """
         Semantic search for elements.
 
@@ -89,11 +88,11 @@ class SemanticSearch:
         self,
         query: str,
         project_id: UUID,
-        near_element_id: Optional[UUID] = None,
-        near_point: Optional[CentroidInfo] = None,
+        near_element_id: UUID | None = None,
+        near_point: CentroidInfo | None = None,
         within_distance: float = 10.0,
         limit: int = 10,
-    ) -> List[Element]:
+    ) -> list[Element]:
         """
         Combined semantic + spatial search.
 
@@ -162,8 +161,8 @@ class SemanticSearch:
         self,
         reference: str,
         project_id: UUID,
-        context_element_id: Optional[UUID] = None,
-    ) -> Optional[Element]:
+        context_element_id: UUID | None = None,
+    ) -> Element | None:
         """
         Resolve a natural language element reference.
 
@@ -216,7 +215,7 @@ class SemanticSearch:
         self,
         reference: str,
         project_id: UUID,
-    ) -> Optional[Element]:
+    ) -> Element | None:
         """Try to resolve reference as a direct ID."""
         # Clean reference
         ref = reference.strip()
@@ -257,8 +256,8 @@ async def resolve_element(
     project_id: UUID,
     pool: DatabasePool,
     embedding_service: EmbeddingService,
-    context_element_id: Optional[UUID] = None,
-) -> Optional[Element]:
+    context_element_id: UUID | None = None,
+) -> Element | None:
     """
     Convenience function to resolve an element reference.
 

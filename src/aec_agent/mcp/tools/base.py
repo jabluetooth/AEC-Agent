@@ -3,15 +3,11 @@ Base utilities for MCP tools.
 """
 
 import functools
+
 import structlog
 
-from aec_agent.mcp.server import get_lock, get_cache
 from aec_agent.mcp.sidecar_client import (
-    call_sidecar,
     SidecarError,
-    SidecarTimeoutError,
-    SidecarConnectionError,
-    SidecarCircuitOpenError,
 )
 
 logger = structlog.get_logger(__name__)

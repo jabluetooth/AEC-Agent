@@ -6,14 +6,14 @@ Uses command-based API format for AutoCAD sidecar:
 - Authorization: Bearer token
 """
 
-from typing import Optional, List
-
-from aec_agent.mcp.server import mcp, get_lock, get_cache
-from aec_agent.mcp.concurrency import with_tool_lock
-from aec_agent.mcp.sidecar_client import call_autocad_command, SidecarError
-from .base import success_result, error_result, ErrorCode
 
 import structlog
+
+from aec_agent.mcp.concurrency import with_tool_lock
+from aec_agent.mcp.server import get_lock, mcp
+from aec_agent.mcp.sidecar_client import SidecarError, call_autocad_command
+
+from .base import ErrorCode, error_result
 
 logger = structlog.get_logger(__name__)
 
@@ -83,8 +83,8 @@ async def autocad_create_layer(name: str, color: int = 7) -> dict:
 @with_tool_lock(get_lock())
 async def autocad_set_layer_state(
     name: str,
-    is_on: Optional[bool] = None,
-    is_frozen: Optional[bool] = None
+    is_on: bool | None = None,
+    is_frozen: bool | None = None
 ) -> dict:
     """
     Change layer visibility state in AutoCAD.
@@ -133,7 +133,7 @@ async def autocad_draw_line(
     start_y: float,
     end_x: float,
     end_y: float,
-    layer: Optional[str] = None
+    layer: str | None = None
 ) -> dict:
     """
     Draw a line in AutoCAD.
@@ -184,7 +184,7 @@ async def autocad_draw_circle(
     center_x: float,
     center_y: float,
     radius: float,
-    layer: Optional[str] = None
+    layer: str | None = None
 ) -> dict:
     """
     Draw a circle in AutoCAD.
@@ -236,7 +236,7 @@ async def autocad_draw_rectangle(
     corner1_y: float,
     corner2_x: float,
     corner2_y: float,
-    layer: Optional[str] = None
+    layer: str | None = None
 ) -> dict:
     """
     Draw a rectangle in AutoCAD defined by two corner points.
@@ -301,8 +301,8 @@ async def autocad_get_drawing_info() -> dict:
 
 @mcp.tool()
 async def autocad_get_entities(
-    layer: Optional[str] = None,
-    entity_type: Optional[str] = None,
+    layer: str | None = None,
+    entity_type: str | None = None,
     limit: int = 100
 ) -> dict:
     """
@@ -375,7 +375,7 @@ async def autocad_draw_arc(
     radius: float,
     start_angle: float,
     end_angle: float,
-    layer: Optional[str] = None
+    layer: str | None = None
 ) -> dict:
     """
     Draw a circular arc in AutoCAD.
@@ -426,7 +426,7 @@ async def autocad_draw_ellipse(
     axis_ratio: float,
     start_angle: float = 0.0,
     end_angle: float = 360.0,
-    layer: Optional[str] = None
+    layer: str | None = None
 ) -> dict:
     """
     Draw an ellipse (or elliptical arc) in AutoCAD.
@@ -479,9 +479,9 @@ async def autocad_draw_ellipse(
 @mcp.tool()
 @with_tool_lock(get_lock())
 async def autocad_draw_spline(
-    points: List[List[float]],
+    points: list[list[float]],
     closed: bool = False,
-    layer: Optional[str] = None
+    layer: str | None = None
 ) -> dict:
     """
     Draw a spline (smooth curve) through fit points in AutoCAD.

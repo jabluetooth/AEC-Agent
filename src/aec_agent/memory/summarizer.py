@@ -6,7 +6,8 @@ preserving important information about what was discussed and done.
 """
 
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
+
 import structlog
 
 logger = structlog.get_logger(__name__)
@@ -16,7 +17,7 @@ class Message(Protocol):
     """Protocol for message objects."""
     role: str
     content: str
-    tool_calls: Optional[list[dict[str, Any]]]
+    tool_calls: list[dict[str, Any]] | None
 
 
 @dataclass
@@ -55,14 +56,14 @@ class ConversationSummarizer:
         self._use_llm = use_llm
 
         # Cache for avoiding regeneration
-        self._cached_summary: Optional[str] = None
+        self._cached_summary: str | None = None
         self._summarized_count: int = 0
 
     def summarize(
         self,
         messages: list[Any],
         keep_recent: int = 6,
-    ) -> Optional[SummaryResult]:
+    ) -> SummaryResult | None:
         """
         Summarize older messages in the conversation.
 
@@ -206,7 +207,7 @@ class ConversationSummarizer:
 
 
 # Global instance management
-_summarizer_instance: Optional[ConversationSummarizer] = None
+_summarizer_instance: ConversationSummarizer | None = None
 
 
 def get_summarizer(

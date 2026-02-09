@@ -18,9 +18,9 @@ Usage:
     ...     print(f"{block.block_name} at {block.position}")
 """
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Optional, Tuple, Dict, Any
+from typing import Any
 
 import numpy as np
 import structlog
@@ -33,7 +33,7 @@ logger = structlog.get_logger(__name__)
 
 # Default class mapping for MEP symbols
 # Maps YOLO class indices to (block_name, category)
-DEFAULT_CLASS_MAP: Dict[int, Tuple[str, str]] = {
+DEFAULT_CLASS_MAP: dict[int, tuple[str, str]] = {
     0: ("VALVE-GATE", "mechanical"),
     1: ("VALVE-BALL", "mechanical"),
     2: ("VALVE-BUTTERFLY", "mechanical"),
@@ -85,7 +85,7 @@ class YOLODetection:
 
     class_id: int
     confidence: float
-    bbox: Tuple[float, float, float, float]  # x1, y1, x2, y2 in pixels
+    bbox: tuple[float, float, float, float]  # x1, y1, x2, y2 in pixels
     class_name: str = ""
 
 
@@ -111,8 +111,8 @@ class YOLOSymbolDetector:
     def __init__(
         self,
         model_path: str,
-        class_map: Optional[Dict[int, Tuple[str, str]]] = None,
-        device: Optional[str] = None,
+        class_map: dict[int, tuple[str, str]] | None = None,
+        device: str | None = None,
         conf_threshold: float = 0.5,
         iou_threshold: float = 0.45,
     ):
@@ -123,10 +123,10 @@ class YOLOSymbolDetector:
         self.device = device
 
         # Determine backend based on file extension
-        self._backend: Optional[str] = None
+        self._backend: str | None = None
         self._model: Any = None
         self._onnx_session: Any = None
-        self._input_size: Tuple[int, int] = (640, 640)  # YOLO default
+        self._input_size: tuple[int, int] = (640, 640)  # YOLO default
 
         if not self.model_path.exists():
             logger.warning(
@@ -225,7 +225,7 @@ class YOLOSymbolDetector:
         image: np.ndarray,
         scale: float = 1.0,
         mask_detections: bool = False,
-    ) -> Tuple[np.ndarray, List[DetectedBlock]]:
+    ) -> tuple[np.ndarray, list[DetectedBlock]]:
         """
         Detect symbols in the image using YOLO.
 
@@ -263,7 +263,7 @@ class YOLOSymbolDetector:
             return image, []
 
         # Convert to DetectedBlock
-        blocks: List[DetectedBlock] = []
+        blocks: list[DetectedBlock] = []
         masked_image = image.copy() if mask_detections else image
 
         for det in raw_detections:
@@ -328,7 +328,7 @@ class YOLOSymbolDetector:
 
         return masked_image, blocks
 
-    def _detect_ultralytics(self, image: np.ndarray) -> List[YOLODetection]:
+    def _detect_ultralytics(self, image: np.ndarray) -> list[YOLODetection]:
         """Run inference using ultralytics YOLO."""
         results = self._model(
             image,
@@ -338,7 +338,7 @@ class YOLOSymbolDetector:
             verbose=False,
         )
 
-        detections: List[YOLODetection] = []
+        detections: list[YOLODetection] = []
 
         for result in results:
             if result.boxes is None:
@@ -360,7 +360,7 @@ class YOLOSymbolDetector:
 
         return detections
 
-    def _detect_onnx(self, image: np.ndarray) -> List[YOLODetection]:
+    def _detect_onnx(self, image: np.ndarray) -> list[YOLODetection]:
         """Run inference using ONNX Runtime."""
         import cv2
 
@@ -399,7 +399,7 @@ class YOLOSymbolDetector:
         else:
             output = output[0]
 
-        detections: List[YOLODetection] = []
+        detections: list[YOLODetection] = []
 
         for row in output:
             # First 4 values are bbox (cx, cy, w, h)
@@ -441,14 +441,14 @@ class YOLOSymbolDetector:
 
         return detections
 
-    def _nms(self, detections: List[YOLODetection]) -> List[YOLODetection]:
+    def _nms(self, detections: list[YOLODetection]) -> list[YOLODetection]:
         """Apply Non-Maximum Suppression to detections."""
         if not detections:
             return []
 
         # Sort by confidence descending
         detections = sorted(detections, key=lambda x: x.confidence, reverse=True)
-        kept: List[YOLODetection] = []
+        kept: list[YOLODetection] = []
 
         for det in detections:
             # Check IoU with kept detections
@@ -466,8 +466,8 @@ class YOLOSymbolDetector:
 
     @staticmethod
     def _compute_iou(
-        box1: Tuple[float, float, float, float],
-        box2: Tuple[float, float, float, float],
+        box1: tuple[float, float, float, float],
+        box2: tuple[float, float, float, float],
     ) -> float:
         """Compute Intersection over Union between two boxes."""
         x1_1, y1_1, x2_1, y2_1 = box1
@@ -495,13 +495,13 @@ class YOLOSymbolDetector:
 
 
 # Global detector instance (lazy initialization)
-_detector: Optional[YOLOSymbolDetector] = None
+_detector: YOLOSymbolDetector | None = None
 
 
 def get_yolo_detector(
-    model_path: Optional[str] = None,
+    model_path: str | None = None,
     **kwargs: Any,
-) -> Optional[YOLOSymbolDetector]:
+) -> YOLOSymbolDetector | None:
     """
     Get or create the global YOLO detector instance.
 
@@ -530,12 +530,12 @@ def get_yolo_detector(
 def detect_symbols_yolo(
     image: np.ndarray,
     scale: float = 1.0,
-    model_path: Optional[str] = None,
+    model_path: str | None = None,
     confidence: float = 0.5,
     iou_threshold: float = 0.45,
     mask_detections: bool = True,
-    class_map: Optional[Dict[int, Tuple[str, str]]] = None,
-) -> Tuple[np.ndarray, List[DetectedBlock]]:
+    class_map: dict[int, tuple[str, str]] | None = None,
+) -> tuple[np.ndarray, list[DetectedBlock]]:
     """
     Detect AEC symbols using YOLOv8.
 

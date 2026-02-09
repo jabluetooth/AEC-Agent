@@ -9,13 +9,8 @@ Handles:
 """
 
 import httpx
-from tenacity import (
-    retry,
-    stop_after_attempt,
-    wait_exponential,
-    retry_if_exception_type
-)
 import structlog
+from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from aec_agent.config.settings import get_settings
 from aec_agent.mcp.concurrency import CircuitBreaker

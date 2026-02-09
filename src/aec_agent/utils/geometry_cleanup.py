@@ -12,10 +12,16 @@ Key Functions:
 - merge_collinear_lines(): Merge fragmented collinear segments into single lines
 """
 
+from __future__ import annotations
+
 import math
-from typing import List, Tuple, Dict, Optional
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
 import structlog
+
+if TYPE_CHECKING:
+    from aec_agent.mcp.tools.image_vectorizer import DetectedLine
 
 logger = structlog.get_logger(__name__)
 
@@ -23,16 +29,16 @@ logger = structlog.get_logger(__name__)
 @dataclass
 class MergedLine:
     """Result of merging collinear line segments."""
-    start: Tuple[float, float]
-    end: Tuple[float, float]
+    start: tuple[float, float]
+    end: tuple[float, float]
     linetype: str = "CONTINUOUS"  # "CONTINUOUS", "DASHED", "HIDDEN", etc.
     segment_count: int = 1  # Number of original segments merged
 
 
 def snap_to_orthogonal(
-    lines: List[Tuple[float, float, float, float]],
+    lines: list[tuple[float, float, float, float]],
     angle_tolerance: float = 2.0,
-) -> List[Tuple[float, float, float, float]]:
+) -> list[tuple[float, float, float, float]]:
     """
     Snap near-orthogonal lines to exact 0/90/180/270 degrees.
 
@@ -58,7 +64,7 @@ def snap_to_orthogonal(
     if not lines:
         return []
 
-    snapped: List[Tuple[float, float, float, float]] = []
+    snapped: list[tuple[float, float, float, float]] = []
     orthogonal_angles = [0, 90, 180, 270, 360]  # 360 for wraparound to 0
 
     stats = {"total": len(lines), "snapped": 0}
@@ -79,7 +85,7 @@ def snap_to_orthogonal(
             angle += 360
 
         # Find nearest orthogonal angle
-        best_ortho: Optional[int] = None
+        best_ortho: int | None = None
         best_diff = angle_tolerance + 1  # Start outside tolerance
 
         for ortho in orthogonal_angles:
@@ -128,12 +134,12 @@ def snap_to_orthogonal(
 
 
 def merge_collinear_lines(
-    lines: List[Tuple[float, float, float, float]],
+    lines: list[tuple[float, float, float, float]],
     angle_tolerance: float = 2.0,
     distance_tolerance: float = 5.0,
     gap_tolerance: float = 20.0,
     min_gap_for_dashed: float = 2.0,
-) -> Tuple[List[MergedLine], List[MergedLine]]:
+) -> tuple[list[MergedLine], list[MergedLine]]:
     """
     Merge collinear line segments into single lines.
 
@@ -168,7 +174,7 @@ def merge_collinear_lines(
 
     # Group lines by angle (quantized to 1-degree buckets for efficiency)
     # Use direction-agnostic angle (0-180) since line direction doesn't matter
-    angle_groups: Dict[int, List[Tuple[float, float, float, float]]] = {}
+    angle_groups: dict[int, list[tuple[float, float, float, float]]] = {}
 
     for line in lines:
         x1, y1, x2, y2 = line
@@ -185,8 +191,8 @@ def merge_collinear_lines(
             angle_groups[bucket] = []
         angle_groups[bucket].append(line)
 
-    continuous_lines: List[MergedLine] = []
-    dashed_lines: List[MergedLine] = []
+    continuous_lines: list[MergedLine] = []
+    dashed_lines: list[MergedLine] = []
 
     for bucket, group in angle_groups.items():
         if len(group) == 1:
@@ -275,7 +281,7 @@ def merge_collinear_lines(
 
 
 def _merge_cluster(
-    cluster: List[Tuple[float, float, float, float]],
+    cluster: list[tuple[float, float, float, float]],
     ux: float,
     uy: float,
     origin_x: float,
@@ -304,7 +310,7 @@ def _merge_cluster(
         )
 
     # Project all endpoints onto the line direction
-    all_t: List[float] = []
+    all_t: list[float] = []
     for x1, y1, x2, y2 in cluster:
         t1 = (x1 - origin_x) * ux + (y1 - origin_y) * uy
         t2 = (x2 - origin_x) * ux + (y2 - origin_y) * uy
@@ -331,19 +337,19 @@ def _merge_cluster(
 
 
 def _detect_gaps_in_cluster(
-    cluster: List[Tuple[float, float, float, float]],
+    cluster: list[tuple[float, float, float, float]],
     ux: float,
     uy: float,
     origin_x: float,
     origin_y: float,
-) -> List[float]:
+) -> list[float]:
     """
     Detect gaps between segments in a collinear cluster.
 
     Projects all segments onto the line direction and finds gaps between them.
     """
     # Project all segments to 1D intervals
-    segments_1d: List[Tuple[float, float]] = []
+    segments_1d: list[tuple[float, float]] = []
     for x1, y1, x2, y2 in cluster:
         t1 = (x1 - origin_x) * ux + (y1 - origin_y) * uy
         t2 = (x2 - origin_x) * ux + (y2 - origin_y) * uy
@@ -353,7 +359,7 @@ def _detect_gaps_in_cluster(
     segments_1d.sort()
 
     # Find gaps between consecutive segments
-    gaps: List[float] = []
+    gaps: list[float] = []
     for i in range(len(segments_1d) - 1):
         gap = segments_1d[i + 1][0] - segments_1d[i][1]
         if gap > 0:  # Only count actual gaps
@@ -363,7 +369,7 @@ def _detect_gaps_in_cluster(
 
 
 def _is_regular_pattern(
-    gaps: List[float],
+    gaps: list[float],
     min_gap: float = 2.0,
     tolerance: float = 0.3,
     min_count: int = 2,
@@ -403,8 +409,8 @@ def _is_regular_pattern(
 
 
 def lines_to_tuples(
-    lines: List["DetectedLine"],
-) -> List[Tuple[float, float, float, float]]:
+    lines: list[DetectedLine],
+) -> list[tuple[float, float, float, float]]:
     """
     Convert DetectedLine objects to (x1, y1, x2, y2) tuples.
 
@@ -414,9 +420,9 @@ def lines_to_tuples(
 
 
 def tuples_to_merged_lines(
-    tuples: List[Tuple[float, float, float, float]],
+    tuples: list[tuple[float, float, float, float]],
     linetype: str = "CONTINUOUS",
-) -> List[MergedLine]:
+) -> list[MergedLine]:
     """
     Convert (x1, y1, x2, y2) tuples to MergedLine objects.
 

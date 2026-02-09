@@ -9,19 +9,26 @@ Serves both:
 """
 
 import json
-import structlog
 
+import structlog
 from starlette.applications import Starlette
-from starlette.routing import Mount, Route
 from starlette.requests import Request
 from starlette.responses import JSONResponse
+from starlette.routing import Mount, Route
 
 from aec_agent.config.settings import get_settings
-from aec_agent.utils.logging import setup_logging
 from aec_agent.mcp.server import mcp, trigger_background_sync
 
 # Import tools to register them with the MCP server
-from aec_agent.mcp.tools import common, autocad, revit, metadata, mep_tools, raster_design  # noqa: F401
+from aec_agent.mcp.tools import (  # noqa: F401
+    autocad,
+    common,
+    mep_tools,
+    metadata,
+    raster_design,
+    revit,
+)
+from aec_agent.utils.logging import setup_logging
 
 logger = structlog.get_logger(__name__)
 

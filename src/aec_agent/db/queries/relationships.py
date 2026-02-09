@@ -4,7 +4,7 @@ Relationship computation and graph queries for AEC Agent.
 Provides methods for computing and traversing element relationships.
 """
 
-from typing import List, Dict, Optional, Any
+from typing import Any
 from uuid import UUID
 
 import structlog
@@ -12,8 +12,8 @@ import structlog
 from aec_agent.db.connection import DatabasePool
 from aec_agent.db.queries.spatial import (
     compute_intersecting_elements,
-    compute_nearby_elements,
     compute_layer_groupings,
+    compute_nearby_elements,
 )
 
 logger = structlog.get_logger(__name__)
@@ -24,7 +24,7 @@ async def compute_all_relationships(
     project_id: UUID,
     distance_threshold: float = 1.0,
     include_layer_groups: bool = True,
-) -> Dict[str, int]:
+) -> dict[str, int]:
     """
     Compute all relationship types for a project.
 
@@ -165,8 +165,8 @@ async def get_element_graph(
     pool: DatabasePool,
     element_id: UUID,
     depth: int = 1,
-    relation_types: Optional[List[str]] = None,
-) -> Dict[str, Any]:
+    relation_types: list[str] | None = None,
+) -> dict[str, Any]:
     """
     Get the relationship graph around an element.
 
@@ -281,7 +281,7 @@ async def get_element_graph(
 async def get_relationship_stats(
     pool: DatabasePool,
     project_id: UUID,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """
     Get statistics about relationships in a project.
 

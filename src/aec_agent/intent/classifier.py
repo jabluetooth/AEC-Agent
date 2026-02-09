@@ -7,20 +7,18 @@ to classify user intent with minimal computational overhead.
 
 import logging
 import re
-from typing import Optional
 
 from aec_agent.intent.models import (
-    IntentResult,
-    MEPDomain,
-    MEPAction,
     AppContext,
+    IntentResult,
+    MEPAction,
+    MEPDomain,
     PatternMatch,
 )
 from aec_agent.intent.patterns import (
-    MEP_PATTERNS,
     ACTION_PATTERNS,
     APP_CONTEXT_PATTERNS,
-    get_all_patterns_flat,
+    MEP_PATTERNS,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,11 +56,11 @@ class IntentClassifier:
         self._min_confidence = min_confidence
 
         # Pre-compiled patterns for fast matching
-        self._compiled_patterns: dict[MEPDomain, list[tuple[re.Pattern, float, Optional[str]]]] = {}
+        self._compiled_patterns: dict[MEPDomain, list[tuple[re.Pattern, float, str | None]]] = {}
         self._compile_patterns()
 
         # Cached pattern embeddings (lazy loaded)
-        self._pattern_embeddings: Optional[dict[str, list[float]]] = None
+        self._pattern_embeddings: dict[str, list[float]] | None = None
 
         logger.info(
             f"IntentClassifier initialized (embeddings={'enabled' if self._use_embeddings else 'disabled'})"
@@ -189,7 +187,7 @@ class IntentClassifier:
         self, matches: list[PatternMatch]
     ) -> dict[MEPDomain, float]:
         """Calculate aggregate scores for each domain."""
-        scores: dict[MEPDomain, float] = {domain: 0.0 for domain in MEPDomain}
+        scores: dict[MEPDomain, float] = dict.fromkeys(MEPDomain, 0.0)
 
         for match in matches:
             scores[match.domain] += match.score
@@ -200,7 +198,7 @@ class IntentClassifier:
         self,
         scores: dict[MEPDomain, float],
         matches: list[PatternMatch],
-    ) -> tuple[MEPDomain, Optional[str], float, list[str]]:
+    ) -> tuple[MEPDomain, str | None, float, list[str]]:
         """
         Determine the winning domain from scores.
 
@@ -241,7 +239,7 @@ class IntentClassifier:
     def _get_suggested_tools(
         self,
         domain: MEPDomain,
-        subdomain: Optional[str],
+        subdomain: str | None,
         action: MEPAction,
     ) -> list[str]:
         """
@@ -296,7 +294,7 @@ class IntentClassifier:
 
 
 # Global instance management
-_classifier_instance: Optional[IntentClassifier] = None
+_classifier_instance: IntentClassifier | None = None
 
 
 def get_intent_classifier(

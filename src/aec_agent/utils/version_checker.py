@@ -8,12 +8,10 @@ requirements defined in the version matrix.
 import os
 import platform
 import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from aec_agent.config.versions import VERSION_MATRIX, SupportStatus
 
@@ -31,7 +29,7 @@ class CheckResult:
     """Result of a single compatibility check."""
     component: str
     status: CheckStatus
-    current_version: Optional[str]
+    current_version: str | None
     required_version: str
     message: str
 

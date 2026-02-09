@@ -6,24 +6,24 @@ and streams to PostgreSQL.
 """
 
 import hashlib
+import time
+from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, AsyncIterator
 from uuid import UUID, uuid4
-import time
 
 import structlog
 
 from aec_agent.db.connection import DatabasePool
-from aec_agent.db.models import Element, Project, ElementRelationship, ExtractionResult
+from aec_agent.db.models import Element, ElementRelationship, ExtractionResult, Project
 from aec_agent.db.repository import ElementRepository
 from aec_agent.extraction.base import BaseExtractor, ExtractionConfig
 from aec_agent.extraction.geometry import (
-    revit_location_to_wkt,
-    compute_centroid,
     compute_bounds,
+    compute_centroid,
+    revit_location_to_wkt,
 )
-from aec_agent.mcp.sidecar_client import call_sidecar, SidecarError
+from aec_agent.mcp.sidecar_client import SidecarError, call_sidecar
 
 logger = structlog.get_logger(__name__)
 
@@ -51,7 +51,7 @@ class RevitExtractor(BaseExtractor):
     def __init__(
         self,
         pool: DatabasePool,
-        config: Optional[ExtractionConfig] = None
+        config: ExtractionConfig | None = None
     ):
         """
         Initialize Revit extractor.
@@ -151,7 +151,7 @@ class RevitExtractor(BaseExtractor):
     async def extract_incremental(
         self,
         project_id: UUID,
-        changed_ids: List[str]
+        changed_ids: list[str]
     ) -> ExtractionResult:
         """
         Extract only changed elements.
@@ -206,8 +206,8 @@ class RevitExtractor(BaseExtractor):
 
     async def stream_entities(
         self,
-        batch_size: Optional[int] = None
-    ) -> AsyncIterator[List[dict]]:
+        batch_size: int | None = None
+    ) -> AsyncIterator[list[dict]]:
         """
         Stream elements in batches from the sidecar.
 
@@ -290,7 +290,7 @@ class RevitExtractor(BaseExtractor):
 
         return hashlib.sha256(str(time.time()).encode()).hexdigest()[:16]
 
-    async def _extract_relationships(self, project_id: UUID) -> List[ElementRelationship]:
+    async def _extract_relationships(self, project_id: UUID) -> list[ElementRelationship]:
         """
         Extract relationships from Revit API.
 
@@ -369,7 +369,7 @@ class RevitExtractor(BaseExtractor):
         self,
         element_data: dict,
         project_id: UUID
-    ) -> Optional[Element]:
+    ) -> Element | None:
         """
         Convert element data from sidecar to Element model.
 

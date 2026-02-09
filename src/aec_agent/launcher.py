@@ -5,17 +5,16 @@ Orchestrates the MCP server and Chainlit frontend as a unified system.
 Handles process management, port allocation, and graceful shutdown.
 """
 
+import atexit
 import os
+import signal
+import socket
+import subprocess
 import sys
 import time
 import uuid
-import socket
-import signal
-import subprocess
-import atexit
-from pathlib import Path
 from contextlib import closing
-from typing import Optional
+from pathlib import Path
 
 import structlog
 
@@ -284,7 +283,7 @@ def launch() -> int:
     else:
         print("  Sidecar Port: NOT SET (run logon script first!)")
     print(f"\n  SESSION_TOKEN: {session_token[:8]}...")
-    print(f"\n  Press Ctrl+C to stop")
+    print("\n  Press Ctrl+C to stop")
     print("=" * 60 + "\n")
 
     # Monitor processes

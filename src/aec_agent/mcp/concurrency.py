@@ -8,7 +8,8 @@ race conditions in single-threaded CAD applications.
 import asyncio
 import functools
 import time
-from typing import Callable, TypeVar, ParamSpec
+from collections.abc import Callable
+from typing import ParamSpec, TypeVar
 
 import structlog
 
@@ -61,14 +62,14 @@ class ToolLock:
         start = time.monotonic()
         try:
             await asyncio.wait_for(self._get_semaphore().acquire(), timeout=timeout)
-        except asyncio.TimeoutError:
+        except TimeoutError:
             logger.error(
                 "Tool lock acquisition timed out",
                 timeout_seconds=timeout,
                 active_count=self._active_count,
                 total_executed=self._total_executed
             )
-            raise asyncio.TimeoutError(
+            raise TimeoutError(
                 f"Could not acquire tool lock within {timeout}s. "
                 f"Another operation may be stuck. Active: {self._active_count}"
             )
@@ -130,7 +131,7 @@ def with_tool_lock(lock: ToolLock, timeout: float = None):
 
             try:
                 wait_time = await lock.acquire(timeout=effective_timeout)
-            except asyncio.TimeoutError as e:
+            except TimeoutError as e:
                 # Return error response instead of raising exception
                 logger.warning(
                     "Tool lock timeout - returning error to client",

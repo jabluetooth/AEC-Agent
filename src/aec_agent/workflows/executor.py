@@ -6,17 +6,17 @@ import asyncio
 import logging
 import time
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from aec_agent.workflows.models import (
-    WorkflowTemplate,
-    WorkflowExecution,
-    WorkflowStep,
-    WorkflowStatus,
-    StepStatus,
     StepResult,
+    StepStatus,
+    WorkflowExecution,
     WorkflowResult,
+    WorkflowStatus,
+    WorkflowStep,
+    WorkflowTemplate,
 )
 
 logger = logging.getLogger(__name__)
@@ -95,14 +95,14 @@ class WorkflowExecutor:
     # Template Management
     # =========================================================================
 
-    def list_templates(self, domain: Optional[str] = None) -> list[WorkflowTemplate]:
+    def list_templates(self, domain: str | None = None) -> list[WorkflowTemplate]:
         """List available workflow templates."""
         templates = list(self._templates.values())
         if domain:
             templates = [t for t in templates if t.domain == domain or t.subdomain == domain]
         return templates
 
-    def get_template(self, name: str) -> Optional[WorkflowTemplate]:
+    def get_template(self, name: str) -> WorkflowTemplate | None:
         """Get a workflow template by name."""
         return self._templates.get(name)
 
@@ -141,8 +141,8 @@ class WorkflowExecutor:
         self,
         template_name: str,
         context: dict[str, Any],
-        project_id: Optional[UUID] = None,
-        user_id: Optional[str] = None,
+        project_id: UUID | None = None,
+        user_id: str | None = None,
     ) -> WorkflowExecution:
         """
         Start a new workflow execution.
@@ -342,7 +342,7 @@ class WorkflowExecutor:
                         )
                     retries += 1
 
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if retries >= step.max_retries:
                     return StepResult(
                         step_name=step.name,
@@ -418,7 +418,7 @@ class WorkflowExecutor:
     # Execution Queries
     # =========================================================================
 
-    def get_execution(self, execution_id: UUID) -> Optional[WorkflowExecution]:
+    def get_execution(self, execution_id: UUID) -> WorkflowExecution | None:
         """Get a workflow execution by ID."""
         return self._executions.get(str(execution_id))
 
@@ -439,7 +439,7 @@ class WorkflowExecutor:
 
 
 # Global instance management
-_executor: Optional[WorkflowExecutor] = None
+_executor: WorkflowExecutor | None = None
 
 
 async def get_workflow_executor(

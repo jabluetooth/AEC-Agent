@@ -8,11 +8,9 @@ import os
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import Optional
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
-
 
 # ---------------------------------------------------------------------------
 # GPO environment variable refresh (Windows only)
@@ -102,32 +100,32 @@ class Settings(BaseSettings):
         description="LLM provider to use"
     )
 
-    openai_api_key: Optional[str] = Field(
+    openai_api_key: str | None = Field(
         default=None,
         description="OpenAI API key"
     )
 
-    anthropic_api_key: Optional[str] = Field(
+    anthropic_api_key: str | None = Field(
         default=None,
         description="Anthropic API key"
     )
 
-    azure_openai_api_key: Optional[str] = Field(
+    azure_openai_api_key: str | None = Field(
         default=None,
         description="Azure OpenAI API key"
     )
 
-    azure_openai_endpoint: Optional[str] = Field(
+    azure_openai_endpoint: str | None = Field(
         default=None,
         description="Azure OpenAI endpoint URL"
     )
 
-    azure_openai_deployment: Optional[str] = Field(
+    azure_openai_deployment: str | None = Field(
         default=None,
         description="Azure OpenAI deployment name"
     )
 
-    huggingface_api_key: Optional[str] = Field(
+    huggingface_api_key: str | None = Field(
         default=None,
         description="Hugging Face API key"
     )
@@ -137,7 +135,7 @@ class Settings(BaseSettings):
         description="Hugging Face model to use"
     )
 
-    groq_api_key: Optional[str] = Field(
+    groq_api_key: str | None = Field(
         default=None,
         description="Groq API key"
     )
@@ -147,7 +145,7 @@ class Settings(BaseSettings):
         description="Groq model to use"
     )
 
-    gemini_api_key: Optional[str] = Field(
+    gemini_api_key: str | None = Field(
         default=None,
         description="Google Gemini API key"
     )
@@ -171,14 +169,14 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Port Configuration
     # ==========================================================================
-    mcp_listener_port: Optional[int] = Field(
+    mcp_listener_port: int | None = Field(
         default=None,
         ge=20000,
         le=30000,
         description="Port for sidecar communication (set by GPO script)"
     )
 
-    session_token: Optional[str] = Field(
+    session_token: str | None = Field(
         default=None,
         description="Session authentication token (set by GPO script)"
     )
@@ -424,7 +422,7 @@ class Settings(BaseSettings):
     # ==========================================================================
     # Database Configuration (PostgreSQL with PostGIS + pgvector)
     # ==========================================================================
-    database_url: Optional[str] = Field(
+    database_url: str | None = Field(
         default=None,
         description="PostgreSQL connection string (postgresql://user:pass@host:port/db)"
     )
@@ -557,7 +555,7 @@ class Settings(BaseSettings):
 
 
 # Global settings instance (lazy loaded)
-_settings: Optional[Settings] = None
+_settings: Settings | None = None
 
 
 def get_settings() -> Settings:

@@ -2,15 +2,14 @@
 MCP tools for Revit automation.
 """
 
-from typing import Optional
-
-from aec_agent.mcp.server import mcp, get_lock, get_cache
-from aec_agent.mcp.concurrency import with_tool_lock
-from aec_agent.mcp.sidecar_client import call_sidecar, SidecarError
-from aec_agent.config.settings import get_settings
-from .base import success_result, error_result, ErrorCode
 
 import structlog
+
+from aec_agent.mcp.concurrency import with_tool_lock
+from aec_agent.mcp.server import get_cache, get_lock, mcp
+from aec_agent.mcp.sidecar_client import SidecarError, call_sidecar
+
+from .base import ErrorCode, error_result
 
 logger = structlog.get_logger(__name__)
 

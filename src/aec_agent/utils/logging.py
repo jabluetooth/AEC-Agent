@@ -2,8 +2,8 @@
 Structured logging configuration for AEC Agent.
 """
 
-import sys
 import logging
+import sys
 
 import structlog
 from structlog.typing import Processor

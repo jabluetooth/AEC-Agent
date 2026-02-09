@@ -9,18 +9,25 @@ This module is used as an optional post-processing step in
 ``vectorize_bitonal_image()`` when ``topology_cleanup=True``.
 """
 
+from __future__ import annotations
+
 import math
-from typing import Dict, List, Optional, Tuple
+from typing import TYPE_CHECKING
 
 import structlog
+
+if TYPE_CHECKING:
+    import networkx as nx
+
+    from aec_agent.mcp.tools.image_vectorizer import VectorizationResult
 
 logger = structlog.get_logger(__name__)
 
 
 def build_segment_graph(
-    result: "VectorizationResult",
+    result: VectorizationResult,
     snap_tolerance: float = 5.0,
-) -> "nx.Graph":
+) -> nx.Graph:
     """
     Convert detected lines and polylines into a NetworkX graph.
 
@@ -40,12 +47,12 @@ def build_segment_graph(
 
     graph = nx.Graph()
     # Pool of known node positions for snapping
-    node_pool: List[Tuple[float, float]] = []
+    node_pool: list[tuple[float, float]] = []
 
-    def _snap_point(pt: Tuple[float, float]) -> Tuple[float, float]:
+    def _snap_point(pt: tuple[float, float]) -> tuple[float, float]:
         """Snap a point to the nearest existing node within tolerance."""
         best_dist = snap_tolerance
-        best_node: Optional[Tuple[float, float]] = None
+        best_node: tuple[float, float] | None = None
         for existing in node_pool:
             d = math.sqrt((pt[0] - existing[0]) ** 2 + (pt[1] - existing[1]) ** 2)
             if d < best_dist:
@@ -95,7 +102,7 @@ def build_segment_graph(
     return graph
 
 
-def merge_degree2_nodes(graph: "nx.Graph") -> "nx.Graph":
+def merge_degree2_nodes(graph: nx.Graph) -> nx.Graph:
     """
     Merge degree-2 nodes (artificial breaks in straight lines).
 
@@ -172,9 +179,9 @@ def merge_degree2_nodes(graph: "nx.Graph") -> "nx.Graph":
 
 
 def snap_dangling_endpoints(
-    graph: "nx.Graph",
+    graph: nx.Graph,
     tolerance: float = 5.0,
-) -> "nx.Graph":
+) -> nx.Graph:
     """
     Snap degree-1 nodes (dangling endpoints) to nearby nodes or edges.
 
@@ -197,7 +204,7 @@ def snap_dangling_endpoints(
             continue
 
         best_dist = tolerance
-        best_target: Optional[Tuple[float, float]] = None
+        best_target: tuple[float, float] | None = None
 
         for other in graph.nodes():
             if other == node:
@@ -222,8 +229,8 @@ def snap_dangling_endpoints(
 
 
 def graph_to_vectorization_result(
-    graph: "nx.Graph",
-) -> "VectorizationResult":
+    graph: nx.Graph,
+) -> VectorizationResult:
     """
     Convert a cleaned NetworkX graph back to lines and polylines.
 

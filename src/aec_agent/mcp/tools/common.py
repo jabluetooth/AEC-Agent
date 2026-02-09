@@ -2,12 +2,12 @@
 Common MCP tools shared across AutoCAD and Revit.
 """
 
-from typing import Optional
 
-from aec_agent.mcp.server import mcp, get_lock, get_cache, trigger_background_sync
-from aec_agent.mcp.sidecar_client import check_sidecar_health
 from aec_agent.config.settings import get_settings
-from .base import success_result, error_result
+from aec_agent.mcp.server import get_cache, get_lock, mcp, trigger_background_sync
+from aec_agent.mcp.sidecar_client import check_sidecar_health
+
+from .base import error_result, success_result
 
 
 @mcp.tool()
@@ -89,7 +89,7 @@ async def sync_cache(
     Returns:
         Sync results or queued status
     """
-    from aec_agent.mcp.sidecar_client import call_sidecar, call_autocad_command, SidecarError
+    from aec_agent.mcp.sidecar_client import SidecarError, call_autocad_command, call_sidecar
 
     if sidecar_type not in ("autocad", "revit"):
         return error_result(4002, f"Invalid sidecar_type: {sidecar_type}. Use 'autocad' or 'revit'")
@@ -131,7 +131,7 @@ async def sync_cache(
 async def notify_file_opened(
     source: str,
     file_path: str,
-    document_title: Optional[str] = None,
+    document_title: str | None = None,
     force_sync: bool = False,
 ) -> dict:
     """

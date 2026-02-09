@@ -5,24 +5,24 @@ Provides domain-specific rules, knowledge base, validation, and suggestions
 for MEP design workflows.
 """
 
-from aec_agent.domain.models import (
-    DomainRule,
-    SystemPriority,
-    RuleType,
-    RuleSource,
-    ValidationStatus,
-    ValidationResult,
-    DesignSuggestion,
-)
 from aec_agent.domain.knowledge import MEPKnowledgeBase, get_knowledge_base
+from aec_agent.domain.models import (
+    DesignSuggestion,
+    DomainRule,
+    RuleSource,
+    RuleType,
+    SystemPriority,
+    ValidationResult,
+    ValidationStatus,
+)
 from aec_agent.domain.rules_engine import RulesEngine, get_rules_engine
 from aec_agent.domain.validators import (
     ClearanceValidator,
-    SizingValidator,
-    RoutingValidator,
     CoverageValidator,
-    ValidationIssue,
     Point3D,
+    RoutingValidator,
+    SizingValidator,
+    ValidationIssue,
 )
 
 __all__ = [

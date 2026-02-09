@@ -7,14 +7,13 @@ Uses SSE transport for RDP environment compatibility.
 
 import asyncio
 from contextlib import asynccontextmanager
-from typing import Optional
 
-from mcp.server.fastmcp import FastMCP
 import structlog
+from mcp.server.fastmcp import FastMCP
 
+from aec_agent.cache.sqlite_cache import CacheManager
 from aec_agent.config.settings import get_settings
 from aec_agent.mcp.concurrency import ToolLock
-from aec_agent.cache.sqlite_cache import CacheManager
 
 logger = structlog.get_logger(__name__)
 

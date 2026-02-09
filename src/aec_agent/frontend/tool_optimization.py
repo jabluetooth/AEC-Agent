@@ -5,10 +5,9 @@ Provides aggressive compression strategies for tool descriptions and schemas
 to minimize token usage with budget LLM providers.
 """
 
-from typing import Any
 import json
 import re
-
+from typing import Any
 
 # =============================================================================
 # Schema and Description Caching (Phase 1 optimization)

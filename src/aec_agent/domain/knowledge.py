@@ -3,10 +3,10 @@ MEP Knowledge Base for domain rules and design knowledge.
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
-from aec_agent.domain.models import DomainRule, SystemPriority, RuleType, RuleSource
+from aec_agent.domain.models import DomainRule, RuleSource, RuleType, SystemPriority
 
 logger = logging.getLogger(__name__)
 
@@ -98,8 +98,8 @@ class MEPKnowledgeBase:
 
     def get_clearance_rules(
         self,
-        element_type: Optional[str] = None,
-        near_type: Optional[str] = None,
+        element_type: str | None = None,
+        near_type: str | None = None,
     ) -> list[DomainRule]:
         """
         Get clearance rules, optionally filtered by element types.
@@ -139,7 +139,7 @@ class MEPKnowledgeBase:
             near_types = [near_types]
         return near_type.lower() in [t.lower() for t in near_types]
 
-    def get_sizing_rules(self, system_type: Optional[str] = None) -> list[DomainRule]:
+    def get_sizing_rules(self, system_type: str | None = None) -> list[DomainRule]:
         """Get sizing rules, optionally filtered by system type."""
         rules = self.get_rules_by_type(RuleType.SIZING)
         if system_type:
@@ -147,7 +147,7 @@ class MEPKnowledgeBase:
                      if r.condition.get("system_type") in (None, system_type)]
         return rules
 
-    def get_routing_rules(self, subdomain: Optional[str] = None) -> list[DomainRule]:
+    def get_routing_rules(self, subdomain: str | None = None) -> list[DomainRule]:
         """Get routing priority rules."""
         rules = self.get_rules_by_type(RuleType.ROUTING)
         if subdomain:
@@ -311,7 +311,7 @@ class MEPKnowledgeBase:
 
 
 # Global instance management
-_knowledge_base: Optional[MEPKnowledgeBase] = None
+_knowledge_base: MEPKnowledgeBase | None = None
 
 
 async def get_knowledge_base(db_pool=None) -> MEPKnowledgeBase:

@@ -7,15 +7,16 @@ Supports multiple LLM providers: OpenAI, Anthropic, Azure OpenAI, HuggingFace.
 
 import json
 from abc import ABC, abstractmethod
-from typing import Any, AsyncGenerator, Optional
+from collections.abc import AsyncGenerator
 from dataclasses import dataclass, field
+from typing import Any
 
 import structlog
 
-from aec_agent.config.settings import get_settings, LLMProvider
-from aec_agent.frontend.mcp_client import MCPClient, ToolResult
+from aec_agent.config.settings import LLMProvider, get_settings
+from aec_agent.frontend.mcp_client import MCPClient
 from aec_agent.intent.classifier import IntentClassifier, get_intent_classifier
-from aec_agent.intent.models import IntentResult, MEPDomain
+from aec_agent.intent.models import IntentResult
 
 logger = structlog.get_logger(__name__)
 
@@ -37,9 +38,9 @@ class Message:
 
     role: str  # "user", "assistant", "system", "tool"
     content: str
-    tool_call_id: Optional[str] = None
-    tool_calls: Optional[list[dict[str, Any]]] = None
-    name: Optional[str] = None  # For tool messages
+    tool_call_id: str | None = None
+    tool_calls: list[dict[str, Any]] | None = None
+    name: str | None = None  # For tool messages
 
 
 @dataclass
@@ -1064,10 +1065,10 @@ class AECAgent:
     def __init__(
         self,
         mcp_client: MCPClient,
-        backend: Optional[LLMBackend] = None,
-        max_history_messages: Optional[int] = None,
+        backend: LLMBackend | None = None,
+        max_history_messages: int | None = None,
         app_context: str = "both",
-        intent_classifier: Optional[IntentClassifier] = None,
+        intent_classifier: IntentClassifier | None = None,
     ):
         """
         Initialize the AEC Agent.
@@ -1093,14 +1094,14 @@ class AECAgent:
         ]
         # Intent classifier for MEP-aware tool filtering
         self._intent_classifier = intent_classifier
-        self._last_intent: Optional[IntentResult] = None
+        self._last_intent: IntentResult | None = None
 
         # Conversation summarizer for long conversations
         from aec_agent.memory.summarizer import ConversationSummarizer
         self._summarizer = ConversationSummarizer(
             max_summary_tokens=settings.max_summary_tokens,
         )
-        self._context_summary: Optional[str] = None
+        self._context_summary: str | None = None
 
     def set_app_context(self, app_context: str) -> None:
         """
@@ -1314,7 +1315,7 @@ class AECAgent:
         else:
             raise ValueError(f"Unsupported LLM provider: {provider}")
 
-    def _try_create_fallback(self, provider_name: str, settings) -> Optional[LLMBackend]:
+    def _try_create_fallback(self, provider_name: str, settings) -> LLMBackend | None:
         """Try to create a fallback backend. Returns None if API key is missing."""
         try:
             key_map = {
@@ -1391,7 +1392,7 @@ class AECAgent:
 
         return intent
 
-    def _detect_tool_context(self, user_input: str) -> Optional[str]:
+    def _detect_tool_context(self, user_input: str) -> str | None:
         """Detect which tool context (autocad/revit) based on user input.
 
         This is a legacy method that uses the new IntentClassifier.
@@ -1402,11 +1403,11 @@ class AECAgent:
         intent = self._classify_intent(user_input)
         return intent.tool_filter_prefix
 
-    def get_last_intent(self) -> Optional[IntentResult]:
+    def get_last_intent(self) -> IntentResult | None:
         """Get the last classified intent for debugging/logging."""
         return self._last_intent
 
-    def _get_tools(self, user_input: Optional[str] = None) -> list[dict[str, Any]]:
+    def _get_tools(self, user_input: str | None = None) -> list[dict[str, Any]]:
         """Get tools in the format expected by the current backend.
 
         Uses intent classification for intelligent tool filtering:
@@ -1427,7 +1428,7 @@ class AECAgent:
         include_metadata = settings.enable_metadata_tools and settings.has_database
 
         # Classify intent if smart routing is enabled and we have user input
-        intent: Optional[IntentResult] = None
+        intent: IntentResult | None = None
         if settings.smart_tool_routing and user_input:
             intent = self._classify_intent(user_input)
 

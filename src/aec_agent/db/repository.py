@@ -5,19 +5,18 @@ Provides CRUD operations for projects, elements, and relationships
 with PostGIS spatial and pgvector semantic queries.
 """
 
-from datetime import datetime
-from typing import Optional, List, Literal
+import json
 from uuid import UUID
 
 import structlog
 
 from aec_agent.db.connection import DatabasePool
 from aec_agent.db.models import (
-    Project,
-    Element,
-    ElementRelationship,
     BoundsInfo,
     CentroidInfo,
+    Element,
+    ElementRelationship,
+    Project,
 )
 
 logger = structlog.get_logger(__name__)
@@ -70,12 +69,12 @@ class ElementRepository:
             project.source,
             project.file_path,
             project.file_hash,
-            project.metadata,
+            json.dumps(project.metadata) if isinstance(project.metadata, dict) else project.metadata,
         )
         logger.info("Created project", project_id=str(result), name=project.name)
         return result
 
-    async def get_project(self, project_id: UUID) -> Optional[Project]:
+    async def get_project(self, project_id: UUID) -> Project | None:
         """Get project by ID."""
         query = "SELECT * FROM projects WHERE id = $1"
         row = await self._pool.fetchrow(query, project_id)
@@ -83,7 +82,7 @@ class ElementRepository:
             return Project(**dict(row))
         return None
 
-    async def get_project_by_file_path(self, file_path: str) -> Optional[Project]:
+    async def get_project_by_file_path(self, file_path: str) -> Project | None:
         """Get project by file path."""
         query = "SELECT * FROM projects WHERE file_path = $1"
         row = await self._pool.fetchrow(query, file_path)
@@ -91,7 +90,7 @@ class ElementRepository:
             return Project(**dict(row))
         return None
 
-    async def get_project_by_file_hash(self, file_hash: str) -> Optional[Project]:
+    async def get_project_by_file_hash(self, file_hash: str) -> Project | None:
         """Get project by file hash."""
         query = "SELECT * FROM projects WHERE file_hash = $1"
         row = await self._pool.fetchrow(query, file_hash)
@@ -113,9 +112,9 @@ class ElementRepository:
         query = """
             UPDATE projects
             SET file_hash = $1, updated_at = NOW()
-            WHERE id = $1
+            WHERE id = $2
         """
-        await self._pool.execute(query, project_id, file_hash)
+        await self._pool.execute(query, file_hash, project_id)
 
     async def delete_project(self, project_id: UUID) -> bool:
         """Delete project and all its elements (cascade)."""
@@ -186,13 +185,13 @@ class ElementRepository:
             element.category,
             element.family,
             element.type_name,
-            element.properties,
+            json.dumps(element.properties) if isinstance(element.properties, dict) else element.properties,
             element.description,
             element.embedding,
         )
         return result
 
-    async def upsert_elements_batch(self, elements: List[Element]) -> int:
+    async def upsert_elements_batch(self, elements: list[Element]) -> int:
         """
         Batch upsert elements for performance.
 
@@ -214,7 +213,7 @@ class ElementRepository:
         logger.info("Batch upserted elements", count=count)
         return count
 
-    async def get_element(self, element_id: UUID) -> Optional[Element]:
+    async def get_element(self, element_id: UUID) -> Element | None:
         """Get element by ID."""
         query = """
             SELECT
@@ -239,7 +238,7 @@ class ElementRepository:
         project_id: UUID,
         source_id: str,
         source: str = None
-    ) -> Optional[Element]:
+    ) -> Element | None:
         """Get element by source ID (Handle or ElementId)."""
         if source:
             query = """
@@ -281,7 +280,7 @@ class ElementRepository:
         project_id: UUID,
         entity_type: str,
         limit: int = 100
-    ) -> List[Element]:
+    ) -> list[Element]:
         """Get elements by entity type."""
         query = """
             SELECT
@@ -328,7 +327,7 @@ class ElementRepository:
         element_id: UUID,
         distance: float = 1.0,
         limit: int = 50
-    ) -> List[Element]:
+    ) -> list[Element]:
         """
         Find elements near a given element.
 
@@ -370,7 +369,7 @@ class ElementRepository:
         project_id: UUID,
         bounds: BoundsInfo,
         limit: int = 100
-    ) -> List[Element]:
+    ) -> list[Element]:
         """
         Find elements within a bounding box.
 
@@ -406,7 +405,7 @@ class ElementRepository:
         self,
         element_id: UUID,
         limit: int = 50
-    ) -> List[Element]:
+    ) -> list[Element]:
         """Find elements that intersect with a given element."""
         query = """
             WITH ref AS (
@@ -437,13 +436,13 @@ class ElementRepository:
 
     async def search_elements_semantic(
         self,
-        query_embedding: List[float],
-        project_id: Optional[UUID] = None,
-        entity_type: Optional[str] = None,
-        category: Optional[str] = None,
-        layer: Optional[str] = None,
+        query_embedding: list[float],
+        project_id: UUID | None = None,
+        entity_type: str | None = None,
+        category: str | None = None,
+        layer: str | None = None,
         limit: int = 10
-    ) -> List[Element]:
+    ) -> list[Element]:
         """
         Semantic search for elements using vector similarity.
 
@@ -510,9 +509,9 @@ class ElementRepository:
     async def search_elements_text(
         self,
         search_text: str,
-        project_id: Optional[UUID] = None,
+        project_id: UUID | None = None,
         limit: int = 10
-    ) -> List[Element]:
+    ) -> list[Element]:
         """
         Text search in element descriptions.
 
@@ -605,15 +604,15 @@ class ElementRepository:
             relationship.distance,
             relationship.confidence,
             relationship.source,
-            relationship.metadata,
+            json.dumps(relationship.metadata) if isinstance(relationship.metadata, dict) else relationship.metadata,
         )
 
     async def get_related_elements(
         self,
         element_id: UUID,
-        relation_types: Optional[List[str]] = None,
+        relation_types: list[str] | None = None,
         limit: int = 50
-    ) -> List[Element]:
+    ) -> list[Element]:
         """
         Get elements related to a given element.
 

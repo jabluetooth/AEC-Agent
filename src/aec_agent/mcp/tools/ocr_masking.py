@@ -10,7 +10,7 @@ Part of Phase 2.5: Semantic AEC Vectorization Pipeline.
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import List, Tuple, Optional
+
 import numpy as np
 import structlog
 
@@ -22,7 +22,7 @@ class DetectedText:
     """Text region detected by OCR."""
 
     text: str  # The recognized text string
-    position: Tuple[float, float]  # Bottom-left corner in drawing units
+    position: tuple[float, float]  # Bottom-left corner in drawing units
     width: float  # Text box width in drawing units
     height: float  # Text height in drawing units (for AutoCAD)
     confidence: float  # OCR confidence 0-100
@@ -38,7 +38,7 @@ def detect_and_mask_text(
     padding_px: int = 2,
     lang: str = "eng",
     invert_for_ocr: bool = True,
-) -> Tuple[np.ndarray, List[DetectedText]]:
+) -> tuple[np.ndarray, list[DetectedText]]:
     """
     Detect text regions using Tesseract OCR and mask them from the image.
 
@@ -138,7 +138,7 @@ def detect_and_mask_text(
         )
         return image, []
 
-    detected_texts: List[DetectedText] = []
+    detected_texts: list[DetectedText] = []
     masked_image = image.copy()
 
     # Determine background value for masking
@@ -218,10 +218,10 @@ def detect_and_mask_text(
 
 
 def merge_adjacent_texts(
-    texts: List[DetectedText],
+    texts: list[DetectedText],
     horizontal_gap_tolerance: float = 5.0,
     vertical_tolerance: float = 2.0,
-) -> List[DetectedText]:
+) -> list[DetectedText]:
     """
     Merge adjacent text regions that likely belong together.
 
@@ -243,8 +243,8 @@ def merge_adjacent_texts(
     # Sort by Y position (line), then X position (left to right)
     sorted_texts = sorted(texts, key=lambda t: (round(t.position[1], 1), t.position[0]))
 
-    merged: List[DetectedText] = []
-    current_group: List[DetectedText] = [sorted_texts[0]]
+    merged: list[DetectedText] = []
+    current_group: list[DetectedText] = [sorted_texts[0]]
 
     for text in sorted_texts[1:]:
         last = current_group[-1]
@@ -276,7 +276,7 @@ def merge_adjacent_texts(
     return merged
 
 
-def _merge_text_group(group: List[DetectedText]) -> DetectedText:
+def _merge_text_group(group: list[DetectedText]) -> DetectedText:
     """Merge a group of adjacent texts into a single DetectedText."""
     if len(group) == 1:
         return group[0]

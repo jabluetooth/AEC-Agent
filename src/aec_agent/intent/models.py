@@ -4,7 +4,6 @@ Data models for intent classification.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class MEPDomain(str, Enum):
@@ -54,7 +53,7 @@ class AppContext(str, Enum):
     REVIT = "revit"
     BOTH = "both"
 
-    def get_tool_prefix(self) -> Optional[str]:
+    def get_tool_prefix(self) -> str | None:
         """Get the tool prefix for filtering.
 
         Note: AutoCAD includes 'raster_' because raster/vectorization tools
@@ -76,7 +75,7 @@ class IntentResult:
     """
 
     domain: MEPDomain = MEPDomain.GENERAL
-    subdomain: Optional[str] = None  # More specific: "ductwork", "panels", etc.
+    subdomain: str | None = None  # More specific: "ductwork", "panels", etc.
     action: MEPAction = MEPAction.QUERY
     app_context: AppContext = AppContext.BOTH
     confidence: float = 0.0
@@ -89,7 +88,7 @@ class IntentResult:
         return self.domain != MEPDomain.GENERAL and self.confidence >= 0.5
 
     @property
-    def tool_filter_prefix(self) -> Optional[str]:
+    def tool_filter_prefix(self) -> str | None:
         """Get the tool prefix for filtering based on app context."""
         return self.app_context.get_tool_prefix()
 
@@ -135,7 +134,7 @@ class PatternMatch:
 
     pattern: str
     domain: MEPDomain
-    subdomain: Optional[str]
+    subdomain: str | None
     weight: float
     similarity: float = 0.0
 

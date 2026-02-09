@@ -4,9 +4,9 @@ PostgreSQL connection pool with PostGIS and pgvector support.
 Provides async database connectivity for spatial and semantic queries.
 """
 
-import asyncio
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Optional, List, Any, AsyncIterator
+from typing import Any
 
 import structlog
 
@@ -15,7 +15,7 @@ logger = structlog.get_logger(__name__)
 # Optional import - gracefully handle missing asyncpg
 try:
     import asyncpg
-    from asyncpg import Pool, Connection, Record
+    from asyncpg import Connection, Pool, Record
     ASYNCPG_AVAILABLE = True
 except ImportError:
     ASYNCPG_AVAILABLE = False
@@ -62,7 +62,7 @@ class DatabasePool:
         self._database_url = database_url
         self._min_size = min_size
         self._max_size = max_size
-        self._pool: Optional[Pool] = None
+        self._pool: Pool | None = None
         self._initialized = False
 
     async def initialize(self) -> None:
@@ -117,12 +117,12 @@ class DatabasePool:
         )
 
     @staticmethod
-    def _encode_vector(value: List[float]) -> str:
+    def _encode_vector(value: list[float]) -> str:
         """Encode Python list to pgvector format."""
         return f"[{','.join(str(v) for v in value)}]"
 
     @staticmethod
-    def _decode_vector(value: str) -> List[float]:
+    def _decode_vector(value: str) -> list[float]:
         """Decode pgvector format to Python list."""
         # Format: [0.1,0.2,0.3,...]
         if value.startswith('[') and value.endswith(']'):
@@ -191,7 +191,7 @@ class DatabasePool:
         async with self.acquire() as conn:
             return await conn.execute(query, *args)
 
-    async def executemany(self, query: str, args: List[tuple]) -> None:
+    async def executemany(self, query: str, args: list[tuple]) -> None:
         """
         Execute a query multiple times with different parameters.
 
@@ -202,7 +202,7 @@ class DatabasePool:
         async with self.acquire() as conn:
             await conn.executemany(query, args)
 
-    async def fetch(self, query: str, *args: Any) -> List[Record]:
+    async def fetch(self, query: str, *args: Any) -> list[Record]:
         """
         Execute a query and return all rows.
 
@@ -216,7 +216,7 @@ class DatabasePool:
         async with self.acquire() as conn:
             return await conn.fetch(query, *args)
 
-    async def fetchrow(self, query: str, *args: Any) -> Optional[Record]:
+    async def fetchrow(self, query: str, *args: Any) -> Record | None:
         """
         Execute a query and return first row.
 
@@ -286,10 +286,10 @@ class DatabasePool:
 
 
 # Global pool instance (lazy initialized)
-_database_pool: Optional[DatabasePool] = None
+_database_pool: DatabasePool | None = None
 
 
-async def get_database_pool() -> Optional[DatabasePool]:
+async def get_database_pool() -> DatabasePool | None:
     """
     Get the global database pool instance.
 

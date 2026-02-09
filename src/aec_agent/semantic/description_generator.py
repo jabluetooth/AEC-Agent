@@ -5,10 +5,10 @@ Generates human-readable descriptions from element properties
 for use in semantic search embeddings.
 """
 
-from typing import Dict, Any, Optional
+from typing import Any
 
 
-def generate_description(element: Dict[str, Any], source: str = "autocad") -> str:
+def generate_description(element: dict[str, Any], source: str = "autocad") -> str:
     """
     Generate searchable description from element properties.
 
@@ -25,7 +25,7 @@ def generate_description(element: Dict[str, Any], source: str = "autocad") -> st
         return generate_revit_description(element)
 
 
-def generate_autocad_description(element: Dict[str, Any]) -> str:
+def generate_autocad_description(element: dict[str, Any]) -> str:
     """
     Generate description for AutoCAD entity.
 
@@ -100,7 +100,7 @@ def generate_autocad_description(element: Dict[str, Any]) -> str:
     return ", ".join(parts)
 
 
-def generate_revit_description(element: Dict[str, Any]) -> str:
+def generate_revit_description(element: dict[str, Any]) -> str:
     """
     Generate description for Revit element.
 
@@ -199,7 +199,7 @@ def generate_revit_description(element: Dict[str, Any]) -> str:
     return ", ".join(parts)
 
 
-def _get_param(properties: Dict[str, Any], *names: str) -> Optional[Any]:
+def _get_param(properties: dict[str, Any], *names: str) -> Any | None:
     """Get parameter value by trying multiple names."""
     for name in names:
         if name in properties:

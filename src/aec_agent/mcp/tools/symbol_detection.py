@@ -20,7 +20,6 @@ Usage:
 
 import math
 from dataclasses import dataclass, field
-from typing import List, Tuple, Optional
 from pathlib import Path
 
 import numpy as np
@@ -34,7 +33,7 @@ class DetectedBlock:
     """A symbol/block detected via template matching."""
 
     block_name: str  # AutoCAD block name to insert
-    position: Tuple[float, float]  # Insertion point in drawing units
+    position: tuple[float, float]  # Insertion point in drawing units
     scale: float = 1.0  # Block scale factor
     rotation: float = 0.0  # Rotation in degrees (0, 90, 180, 270)
     confidence: float = 0.0  # Match confidence 0-1
@@ -49,12 +48,12 @@ class SymbolTemplate:
     block_name: str  # AutoCAD block name (e.g., "VALVE-GATE")
     category: str  # Category (e.g., "mechanical")
     image: "np.ndarray" = field(repr=False)  # Template image
-    rotations: List[int] = field(default_factory=lambda: [0, 90, 180, 270])
+    rotations: list[int] = field(default_factory=lambda: [0, 90, 180, 270])
 
 
 def load_symbol_templates(
-    template_dir: Optional[str] = None,
-) -> List[SymbolTemplate]:
+    template_dir: str | Path | None = None,
+) -> list[SymbolTemplate]:
     """
     Load symbol template images from the assets directory.
 
@@ -85,22 +84,22 @@ def load_symbol_templates(
         # Default to package assets
         # Navigate from this file's location to assets/templates/
         this_file = Path(__file__)
-        template_dir = this_file.parent.parent.parent.parent / "assets" / "templates"
+        templates_path = this_file.parent.parent.parent.parent / "assets" / "templates"
     else:
-        template_dir = Path(template_dir)
+        templates_path = Path(template_dir)
 
-    if not template_dir.exists():
+    if not templates_path.exists():
         logger.info(
             "Template directory not found, symbol detection will be skipped",
-            path=str(template_dir),
+            path=str(templates_path),
         )
         return []
 
-    templates: List[SymbolTemplate] = []
+    templates: list[SymbolTemplate] = []
     categories = ["mechanical", "electrical", "fire", "plumbing", "low_voltage"]
 
     for category in categories:
-        cat_dir = template_dir / category
+        cat_dir = templates_path / category
         if not cat_dir.exists():
             continue
 
@@ -138,12 +137,12 @@ def load_symbol_templates(
 
 def detect_and_mask_symbols(
     image: np.ndarray,
-    templates: List[SymbolTemplate],
+    templates: list[SymbolTemplate],
     scale: float = 1.0,
     match_threshold: float = 0.8,
     nms_distance: float = 20.0,
     padding_px: int = 2,
-) -> Tuple[np.ndarray, List[DetectedBlock]]:
+) -> tuple[np.ndarray, list[DetectedBlock]]:
     """
     Detect symbols using template matching and mask them from the image.
 
@@ -187,7 +186,7 @@ def detect_and_mask_symbols(
 
     # Collect all detections from all templates and rotations
     # Format: (cx, cy, w, h, block_name, category, confidence, rotation)
-    all_detections: List[Tuple[float, float, int, int, str, str, float, int]] = []
+    all_detections: list[tuple[float, float, int, int, str, str, float, int]] = []
 
     for template in templates:
         for rotation in template.rotations or [0]:
@@ -241,7 +240,7 @@ def detect_and_mask_symbols(
     # Non-maximum suppression to remove duplicate detections
     detections = _nms_detections(all_detections, nms_distance)
 
-    detected_blocks: List[DetectedBlock] = []
+    detected_blocks: list[DetectedBlock] = []
 
     # Determine background value for masking
     background_value = 255 if np.mean(image) > 128 else 0
@@ -307,9 +306,9 @@ def _rotate_template(image: np.ndarray, angle: int) -> np.ndarray:
 
 
 def _nms_detections(
-    detections: List[Tuple[float, float, int, int, str, str, float, int]],
+    detections: list[tuple[float, float, int, int, str, str, float, int]],
     distance: float,
-) -> List[Tuple[float, float, int, int, str, str, float, int]]:
+) -> list[tuple[float, float, int, int, str, str, float, int]]:
     """
     Non-maximum suppression to remove duplicate detections.
 
@@ -328,7 +327,7 @@ def _nms_detections(
 
     # Sort by confidence descending
     sorted_dets = sorted(detections, key=lambda x: x[6], reverse=True)
-    kept: List[Tuple[float, float, int, int, str, str, float, int]] = []
+    kept: list[tuple[float, float, int, int, str, str, float, int]] = []
 
     for det in sorted_dets:
         cx, cy = det[0], det[1]
@@ -353,7 +352,7 @@ def _nms_detections(
 # =============================================================================
 
 
-def is_yolo_available(model_path: Optional[str] = None) -> bool:
+def is_yolo_available(model_path: str | None = None) -> bool:
     """
     Check if YOLO detection is available.
 
@@ -379,14 +378,14 @@ def detect_symbols(
     # Template matching parameters
     match_threshold: float = 0.8,
     nms_distance: float = 20.0,
-    template_dir: Optional[str] = None,
+    template_dir: str | None = None,
     # YOLO parameters
-    yolo_model_path: Optional[str] = None,
+    yolo_model_path: str | None = None,
     yolo_confidence: float = 0.5,
     yolo_iou_threshold: float = 0.45,
     # Common parameters
     mask_detections: bool = True,
-) -> Tuple[np.ndarray, List[DetectedBlock]]:
+) -> tuple[np.ndarray, list[DetectedBlock]]:
     """
     Detect AEC symbols using the specified backend.
 

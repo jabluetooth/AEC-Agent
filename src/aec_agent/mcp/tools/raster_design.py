@@ -23,15 +23,15 @@ be converted to a supported raster format (bitonal TIFF) first using
 raster_convert_pdf or the raster_pdf_to_vector_pipeline.
 """
 
-from typing import Optional, List
-
-from aec_agent.mcp.server import mcp, get_lock
-from aec_agent.mcp.concurrency import with_tool_lock
-from aec_agent.mcp.sidecar_client import call_autocad_command, SidecarError
-from .base import success_result, error_result, ErrorCode
-from .pdf_converter import convert_pdf_to_bitonal_tiff
 
 import structlog
+
+from aec_agent.mcp.concurrency import with_tool_lock
+from aec_agent.mcp.server import get_lock, mcp
+from aec_agent.mcp.sidecar_client import SidecarError, call_autocad_command
+
+from .base import ErrorCode, error_result, success_result
+from .pdf_converter import convert_pdf_to_bitonal_tiff
 
 logger = structlog.get_logger(__name__)
 
@@ -49,7 +49,7 @@ async def raster_import_pdf(
     insertion_point_y: float = 0.0,
     scale: float = 1.0,
     rotation: float = 0.0,
-    target_layer: Optional[str] = None
+    target_layer: str | None = None
 ) -> dict:
     """
     Import a PDF file into AutoCAD as vector entities.
@@ -115,7 +115,7 @@ async def raster_convert_pdf(
     page: int = 1,
     dpi: int = 300,
     threshold: int = 128,
-    output_dir: Optional[str] = None,
+    output_dir: str | None = None,
 ) -> dict:
     """
     Convert a PDF file to a bitonal (1-bit black & white) TIFF image.
@@ -190,11 +190,11 @@ async def raster_convert_pdf(
 @with_tool_lock(get_lock())
 async def raster_attach_image(
     file_path: str,
-    image_name: Optional[str] = None,
+    image_name: str | None = None,
     insertion_point_x: float = 0.0,
     insertion_point_y: float = 0.0,
     scale: float = 1.0,
-    target_layer: Optional[str] = None
+    target_layer: str | None = None
 ) -> dict:
     """
     Attach a raster image file to the current AutoCAD drawing.
@@ -320,8 +320,8 @@ async def raster_cleanup(
 async def raster_vectorize(
     tool: str = "vpline",
     method: str = "1p",
-    points: Optional[List[List[float]]] = None,
-    target_layer: Optional[str] = None,
+    points: list[list[float]] | None = None,
+    target_layer: str | None = None,
 ) -> dict:
     """
     Vectorize raster entities to AutoCAD vector objects using Raster Design VTools.
@@ -389,7 +389,7 @@ async def raster_vectorize(
 @mcp.tool()
 @with_tool_lock(get_lock())
 async def raster_ocr_extract(
-    target_layer: Optional[str] = None,
+    target_layer: str | None = None,
     text_height: float = 0.0,
     language: str = "eng"
 ) -> dict:
@@ -456,7 +456,7 @@ async def raster_get_status() -> dict:
 
 @mcp.tool()
 async def raster_get_entity_count(
-    layer: Optional[str] = None
+    layer: str | None = None
 ) -> dict:
     """
     Count entities in the drawing, optionally filtered by layer.
@@ -586,8 +586,8 @@ async def raster_process_image(
 @with_tool_lock(get_lock())
 async def raster_create_primitive(
     primitive_type: str = "smart",
-    point_x: Optional[float] = None,
-    point_y: Optional[float] = None,
+    point_x: float | None = None,
+    point_y: float | None = None,
 ) -> dict:
     """
     Create a REM (Raster Entity Manipulation) primitive from raster data.
@@ -643,10 +643,10 @@ async def raster_create_primitive(
 @with_tool_lock(get_lock())
 async def raster_select_entities(
     method: str = "smart",
-    corner1_x: Optional[float] = None,
-    corner1_y: Optional[float] = None,
-    corner2_x: Optional[float] = None,
-    corner2_y: Optional[float] = None,
+    corner1_x: float | None = None,
+    corner1_y: float | None = None,
+    corner2_x: float | None = None,
+    corner2_y: float | None = None,
 ) -> dict:
     """
     Select raster entities within a rectangular region.
@@ -701,9 +701,9 @@ async def raster_select_entities(
 @with_tool_lock(get_lock())
 async def raster_follower(
     follower_type: str = "polyline",
-    start_point_x: Optional[float] = None,
-    start_point_y: Optional[float] = None,
-    target_layer: Optional[str] = None,
+    start_point_x: float | None = None,
+    start_point_y: float | None = None,
+    target_layer: str | None = None,
 ) -> dict:
     """
     Semi-automatic follower for tracing raster lines and contours.
@@ -760,7 +760,7 @@ async def raster_follower(
 @mcp.tool()
 @with_tool_lock(get_lock())
 async def raster_recognize_text(
-    target_layer: Optional[str] = None,
+    target_layer: str | None = None,
 ) -> dict:
     """
     Recognize and convert raster text to AutoCAD TEXT entities.
@@ -803,9 +803,9 @@ async def raster_auto_vectorize(
     image_path: str,
     dpi: int = 300,
     scale: float = 1.0,
-    target_layer: Optional[str] = None,
-    text_layer: Optional[str] = None,
-    symbol_layer: Optional[str] = None,
+    target_layer: str | None = None,
+    text_layer: str | None = None,
+    symbol_layer: str | None = None,
     min_line_length: int = 50,
     max_line_gap: int = 15,
     hough_threshold: int = 80,
@@ -846,7 +846,7 @@ async def raster_auto_vectorize(
     symbol_backend: str = "auto",  # "auto", "yolo", "template"
     symbol_threshold: float = 0.8,
     # Phase 2.5.1: YOLO Symbol Detection
-    yolo_model_path: Optional[str] = None,
+    yolo_model_path: str | None = None,
     yolo_confidence: float = 0.5,
     yolo_iou_threshold: float = 0.45,
     # Phase 2.5: AEC Heuristics
@@ -1184,7 +1184,7 @@ async def raster_auto_vectorize(
 @mcp.tool()
 @with_tool_lock(get_lock())
 async def raster_store_vectorized(
-    file_path: Optional[str] = None,
+    file_path: str | None = None,
     force: bool = True,
 ) -> dict:
     """
@@ -1288,9 +1288,9 @@ async def raster_pdf_to_vector_pipeline(
     dpi: int = 300,
     scale: float = 1.0,
     mode: str = "auto",
-    target_layer: Optional[str] = None,
-    text_layer: Optional[str] = None,
-    symbol_layer: Optional[str] = None,
+    target_layer: str | None = None,
+    text_layer: str | None = None,
+    symbol_layer: str | None = None,
     fade_percent: int = 70,
     store_in_db: bool = True,
     min_line_length: int = 50,
@@ -1333,7 +1333,7 @@ async def raster_pdf_to_vector_pipeline(
     symbol_backend: str = "auto",  # "auto", "yolo", "template"
     symbol_threshold: float = 0.8,
     # Phase 2.5.1: YOLO Symbol Detection
-    yolo_model_path: Optional[str] = None,
+    yolo_model_path: str | None = None,
     yolo_confidence: float = 0.5,
     yolo_iou_threshold: float = 0.45,
     # Phase 2.5: AEC Heuristics
@@ -1930,8 +1930,8 @@ async def raster_pdf_to_vector_pipeline(
 @mcp.tool()
 @with_tool_lock(get_lock())
 async def raster_topology_cleanup(
-    lines_json: List[dict],
-    polylines_json: Optional[List[dict]] = None,
+    lines_json: list[dict],
+    polylines_json: list[dict] | None = None,
     snap_tolerance: float = 5.0,
 ) -> dict:
     """
@@ -1958,16 +1958,16 @@ async def raster_topology_cleanup(
         )
     """
     try:
-        from .topology import (
-            build_segment_graph,
-            merge_degree2_nodes,
-            snap_dangling_endpoints,
-            graph_to_vectorization_result,
-        )
         from .image_vectorizer import (
             DetectedLine,
             DetectedPolyline,
             VectorizationResult,
+        )
+        from .topology import (
+            build_segment_graph,
+            graph_to_vectorization_result,
+            merge_degree2_nodes,
+            snap_dangling_endpoints,
         )
     except ImportError as e:
         return error_result(

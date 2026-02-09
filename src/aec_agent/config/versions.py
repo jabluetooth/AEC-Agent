@@ -7,7 +7,6 @@ and provides validation utilities.
 
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Optional
 
 
 class SupportStatus(Enum):
@@ -25,7 +24,7 @@ class VersionInfo:
     version: str
     status: SupportStatus
     notes: str = ""
-    end_of_support: Optional[str] = None
+    end_of_support: str | None = None
 
 
 @dataclass
@@ -54,14 +53,14 @@ class PythonRequirement:
     name: str
     min_version: str
     recommended_version: str
-    max_version: Optional[str] = None
+    max_version: str | None = None
 
 
 @dataclass
 class PortRange:
     """Network port range configuration."""
     component: str
-    default_port: Optional[int]
+    default_port: int | None
     range_start: int
     range_end: int
     protocol: str
@@ -234,14 +233,14 @@ class VersionMatrix:
         },
     })
 
-    def get_autocad_version(self, version: str) -> Optional[AutoCADVersion]:
+    def get_autocad_version(self, version: str) -> AutoCADVersion | None:
         """Get AutoCAD version info by version string."""
         for v in self.autocad_versions:
             if v.version == version:
                 return v
         return None
 
-    def get_revit_version(self, version: str) -> Optional[RevitVersion]:
+    def get_revit_version(self, version: str) -> RevitVersion | None:
         """Get Revit version info by version string."""
         for v in self.revit_versions:
             if v.version == version:
@@ -262,7 +261,7 @@ class VersionMatrix:
                 return v
         return self.revit_versions[-1]
 
-    def get_port_range(self, component: str) -> Optional[PortRange]:
+    def get_port_range(self, component: str) -> PortRange | None:
         """Get port range for a component."""
         for p in self.port_ranges:
             if p.component == component:
@@ -272,15 +271,15 @@ class VersionMatrix:
     def is_version_supported(self, component: str, version: str) -> bool:
         """Check if a version is supported for a component."""
         if component == "autocad":
-            v = self.get_autocad_version(version)
-            return v is not None and v.status in [
+            acad_ver = self.get_autocad_version(version)
+            return acad_ver is not None and acad_ver.status in [
                 SupportStatus.RECOMMENDED,
                 SupportStatus.SUPPORTED,
                 SupportStatus.TESTING
             ]
         elif component == "revit":
-            v = self.get_revit_version(version)
-            return v is not None and v.status in [
+            revit_ver = self.get_revit_version(version)
+            return revit_ver is not None and revit_ver.status in [
                 SupportStatus.RECOMMENDED,
                 SupportStatus.SUPPORTED,
                 SupportStatus.TESTING

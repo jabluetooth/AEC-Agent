@@ -5,7 +5,8 @@ These rules encode industry best practices for HVAC design.
 """
 
 from uuid import uuid4
-from aec_agent.domain.models import DomainRule, RuleType, RuleSource
+
+from aec_agent.domain.models import DomainRule, RuleSource, RuleType
 
 
 def get_default_hvac_rules() -> list[DomainRule]:

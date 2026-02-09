@@ -5,7 +5,7 @@ Data models for project memory and user preferences.
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 
@@ -45,8 +45,8 @@ class ProjectFact:
     value: Any = None
     source: FactSource = FactSource.USER
     confidence: float = 1.0
-    expires_at: Optional[datetime] = None
-    embedding: Optional[list[float]] = None
+    expires_at: datetime | None = None
+    embedding: list[float] | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
     updated_at: datetime = field(default_factory=datetime.utcnow)
 
@@ -107,13 +107,13 @@ class ConversationSummary:
     instead of full message threads.
     """
     id: UUID = field(default_factory=uuid4)
-    project_id: Optional[UUID] = None
-    user_id: Optional[str] = None
-    user_session: Optional[str] = None
+    project_id: UUID | None = None
+    user_id: str | None = None
+    user_session: str | None = None
     summary: str = ""
     key_decisions: list[str] = field(default_factory=list)
     key_topics: list[str] = field(default_factory=list)
-    embedding: Optional[list[float]] = None
+    embedding: list[float] | None = None
     message_count: int = 0
     created_at: datetime = field(default_factory=datetime.utcnow)
 

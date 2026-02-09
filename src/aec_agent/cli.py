@@ -7,7 +7,6 @@ and managing the system.
 
 import argparse
 import sys
-from typing import Optional
 
 from aec_agent import __version__
 from aec_agent.config.settings import get_settings
@@ -96,7 +95,7 @@ def cmd_config(args: argparse.Namespace) -> int:
                 config_dict[key] = str(value) if value is not None else None
         print(json.dumps(config_dict, indent=2))
     else:
-        print(f"\nAEC Agent Configuration")
+        print("\nAEC Agent Configuration")
         print("=" * 50)
         print(f"Environment:      {settings.environment.value}")
         print(f"LLM Provider:     {settings.llm_provider.value}")
@@ -118,25 +117,25 @@ def cmd_version(args: argparse.Namespace) -> int:
     if args.matrix:
         print("\nAutoCAD Versions:")
         print("-" * 60)
-        for v in VERSION_MATRIX.autocad_versions:
+        for acad_ver in VERSION_MATRIX.autocad_versions:
             status_icon = {
                 "recommended": "[*]",
                 "supported": "[+]",
                 "testing": "[?]",
                 "deprecated": "[-]",
-            }.get(v.status.value, "[ ]")
-            print(f"  {status_icon} {v.version} (.NET {v.dotnet_framework}) - {v.notes or v.status.value}")
+            }.get(acad_ver.status.value, "[ ]")
+            print(f"  {status_icon} {acad_ver.version} (.NET {acad_ver.dotnet_framework}) - {acad_ver.notes or acad_ver.status.value}")
 
         print("\nRevit Versions:")
         print("-" * 60)
-        for v in VERSION_MATRIX.revit_versions:
+        for revit_ver in VERSION_MATRIX.revit_versions:
             status_icon = {
                 "recommended": "[*]",
                 "supported": "[+]",
                 "testing": "[?]",
                 "deprecated": "[-]",
-            }.get(v.status.value, "[ ]")
-            print(f"  {status_icon} {v.version} (.NET {v.dotnet_framework}, pyRevit {v.pyrevit_version}) - {v.notes or v.status.value}")
+            }.get(revit_ver.status.value, "[ ]")
+            print(f"  {status_icon} {revit_ver.version} (.NET {revit_ver.dotnet_framework}, pyRevit {revit_ver.pyrevit_version}) - {revit_ver.notes or revit_ver.status.value}")
 
         print("\nLegend: [*] Recommended  [+] Supported  [?] Testing  [-] Deprecated")
     else:
@@ -147,7 +146,6 @@ def cmd_version(args: argparse.Namespace) -> int:
 
 def cmd_init(args: argparse.Namespace) -> int:
     """Initialize the AEC Agent environment."""
-    import os
     from pathlib import Path
 
     settings = get_settings()
@@ -170,11 +168,11 @@ def cmd_init(args: argparse.Namespace) -> int:
         if env_example.exists():
             import shutil
             shutil.copy(env_example, env_file)
-            print(f"  Created .env from .env.example")
+            print("  Created .env from .env.example")
         else:
-            print(f"  Skipped .env (no .env.example found)")
+            print("  Skipped .env (no .env.example found)")
     else:
-        print(f"  .env already exists")
+        print("  .env already exists")
 
     print("\nInitialization complete!")
     print("\nNext steps:")
@@ -185,7 +183,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     return 0
 
 
-def main(argv: Optional[list[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     """Main CLI entry point."""
     parser = argparse.ArgumentParser(
         prog="aec-agent",

@@ -5,14 +5,13 @@ Patterns are organized by domain and subdomain with weights indicating specifici
 Higher weights indicate more domain-specific terms.
 """
 
-from typing import Optional
-from aec_agent.intent.models import MEPDomain
 
+from aec_agent.intent.models import MEPDomain
 
 # Pattern structure: {term: (weight, subdomain)}
 # Weight scale: 1.0 = general, 2.0 = domain-specific, 3.0 = highly specific
 
-MEP_PATTERNS: dict[MEPDomain, dict[str, tuple[float, Optional[str]]]] = {
+MEP_PATTERNS: dict[MEPDomain, dict[str, tuple[float, str | None]]] = {
     # =========================================================================
     # HVAC - Primary focus with most detailed patterns
     # =========================================================================
@@ -417,7 +416,7 @@ APP_CONTEXT_PATTERNS: dict[str, list[str]] = {
 }
 
 
-def get_all_patterns_flat() -> list[tuple[str, MEPDomain, Optional[str], float]]:
+def get_all_patterns_flat() -> list[tuple[str, MEPDomain, str | None, float]]:
     """
     Get all patterns as a flat list for embedding.
 

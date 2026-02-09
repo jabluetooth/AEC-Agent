@@ -7,15 +7,15 @@ to reduce token usage by maintaining compressed context.
 
 import logging
 from datetime import datetime, timedelta
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID
 
 from aec_agent.memory.models import (
-    ProjectFact,
-    FactType,
-    FactSource,
     ConversationSummary,
+    FactSource,
+    FactType,
     MemoryContext,
+    ProjectFact,
 )
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ class ProjectMemory:
         value: Any,
         source: FactSource = FactSource.USER,
         confidence: float = 1.0,
-        ttl_hours: Optional[int] = None,
+        ttl_hours: int | None = None,
     ) -> ProjectFact:
         """
         Store a new fact about a project.
@@ -129,7 +129,7 @@ class ProjectMemory:
     async def get_facts(
         self,
         project_id: UUID,
-        fact_type: Optional[FactType] = None,
+        fact_type: FactType | None = None,
         include_expired: bool = False,
         min_confidence: float = 0.0,
         limit: int = 50,
@@ -255,7 +255,7 @@ class ProjectMemory:
 
     async def store_summary(
         self,
-        project_id: Optional[UUID],
+        project_id: UUID | None,
         user_id: str,
         user_session: str,
         summary: str,
@@ -300,7 +300,7 @@ class ProjectMemory:
         if self._db_pool:
             await self._save_summary_to_db(conv_summary)
 
-        logger.debug(f"Stored conversation summary", extra={
+        logger.debug("Stored conversation summary", extra={
             "project_id": str(project_id) if project_id else None,
             "user_id": user_id,
             "message_count": message_count,
@@ -310,8 +310,8 @@ class ProjectMemory:
 
     async def get_recent_summaries(
         self,
-        project_id: Optional[UUID] = None,
-        user_id: Optional[str] = None,
+        project_id: UUID | None = None,
+        user_id: str | None = None,
         limit: int = 5,
     ) -> list[ConversationSummary]:
         """
@@ -379,8 +379,8 @@ class ProjectMemory:
     async def get_context(
         self,
         project_id: UUID,
-        user_id: Optional[str] = None,
-        query: Optional[str] = None,
+        user_id: str | None = None,
+        query: str | None = None,
         token_budget: int = 500,
     ) -> MemoryContext:
         """
@@ -460,7 +460,7 @@ class ProjectMemory:
     async def _get_facts_from_db(
         self,
         project_id: UUID,
-        fact_type: Optional[FactType],
+        fact_type: FactType | None,
         include_expired: bool,
         min_confidence: float,
         limit: int,
@@ -607,7 +607,7 @@ class ProjectMemory:
 
 
 # Global instance management
-_memory: Optional[ProjectMemory] = None
+_memory: ProjectMemory | None = None
 
 
 async def get_project_memory(

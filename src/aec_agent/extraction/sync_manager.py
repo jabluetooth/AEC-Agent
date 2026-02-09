@@ -9,22 +9,20 @@ import asyncio
 import hashlib
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Dict, Set, List
 from uuid import UUID
-import time
 
 import structlog
 
 from aec_agent.config.settings import get_settings
 from aec_agent.db.connection import DatabasePool
 from aec_agent.db.models import ExtractionResult, SyncStatus
-from aec_agent.db.repository import ElementRepository
 from aec_agent.db.queries.relationships import compute_all_relationships
+from aec_agent.db.repository import ElementRepository
 from aec_agent.extraction.autocad_extractor import AutoCADExtractor
-from aec_agent.extraction.revit_extractor import RevitExtractor
 from aec_agent.extraction.base import ExtractionConfig
-from aec_agent.semantic.embeddings import EmbeddingService
+from aec_agent.extraction.revit_extractor import RevitExtractor
 from aec_agent.semantic.description_generator import generate_description
+from aec_agent.semantic.embeddings import EmbeddingService
 
 logger = structlog.get_logger(__name__)
 
@@ -44,7 +42,7 @@ class SyncManager:
     def __init__(
         self,
         pool: DatabasePool,
-        embedding_service: Optional[EmbeddingService] = None,
+        embedding_service: EmbeddingService | None = None,
     ):
         """
         Initialize sync manager.
@@ -62,9 +60,9 @@ class SyncManager:
         self._distance_threshold = settings.relationship_distance_threshold
 
         # Track pending syncs per project
-        self._pending_syncs: Dict[UUID, Set[str]] = {}
-        self._debounce_tasks: Dict[UUID, asyncio.Task] = {}
-        self._sync_status: Dict[UUID, SyncStatus] = {}
+        self._pending_syncs: dict[UUID, set[str]] = {}
+        self._debounce_tasks: dict[UUID, asyncio.Task] = {}
+        self._sync_status: dict[UUID, SyncStatus] = {}
 
     async def trigger_full_sync(
         self,
@@ -143,7 +141,7 @@ class SyncManager:
     async def trigger_incremental_sync(
         self,
         project_id: UUID,
-        changed_ids: List[str],
+        changed_ids: list[str],
         source: str = "autocad",
     ) -> ExtractionResult:
         """
@@ -200,7 +198,7 @@ class SyncManager:
     async def schedule_sync(
         self,
         project_id: UUID,
-        changed_ids: List[str],
+        changed_ids: list[str],
         source: str = "autocad",
     ) -> None:
         """
@@ -312,7 +310,7 @@ class SyncManager:
     async def _generate_embeddings_for_elements(
         self,
         project_id: UUID,
-        source_ids: List[str],
+        source_ids: list[str],
     ) -> int:
         """
         Generate embeddings for specific elements.
@@ -369,7 +367,7 @@ class SyncManager:
 
         return count
 
-    def get_sync_status(self, project_id: UUID) -> Optional[SyncStatus]:
+    def get_sync_status(self, project_id: UUID) -> SyncStatus | None:
         """Get sync status for a project."""
         return self._sync_status.get(project_id)
 

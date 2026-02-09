@@ -5,16 +5,16 @@ Connects to the local FastMCP server via SSE to discover and use tools.
 Provides an async interface for the agent to call MCP tools.
 """
 
-import os
 import json
-from typing import Any, Optional
-from dataclasses import dataclass
+import os
 from contextlib import AsyncExitStack
+from dataclasses import dataclass
+from typing import Any
 
 import structlog
+from mcp import types as mcp_types
 from mcp.client.session import ClientSession
 from mcp.client.sse import sse_client
-from mcp import types as mcp_types
 
 from aec_agent.config.settings import get_settings
 
@@ -155,11 +155,11 @@ class ToolResult:
     """Result from calling an MCP tool."""
 
     success: bool
-    data: Optional[dict[str, Any]] = None
-    error: Optional[dict[str, Any]] = None
-    raw_content: Optional[str] = None
+    data: dict[str, Any] | None = None
+    error: dict[str, Any] | None = None
+    raw_content: str | None = None
 
-    def to_message_content(self, max_length: Optional[int] = None, field_preset: Optional[str] = None) -> str:
+    def to_message_content(self, max_length: int | None = None, field_preset: str | None = None) -> str:
         """Convert result to a compact string for LLM context.
 
         Args:
@@ -364,8 +364,8 @@ class MCPClient:
 
     def __init__(
         self,
-        base_url: Optional[str] = None,
-        session_token: Optional[str] = None,
+        base_url: str | None = None,
+        session_token: str | None = None,
     ):
         """
         Initialize the MCP client.
@@ -380,8 +380,8 @@ class MCPClient:
         self.session_token = session_token or os.environ.get("SESSION_TOKEN", "")
 
         self._tools: dict[str, Tool] = {}
-        self._session: Optional[ClientSession] = None
-        self._exit_stack: Optional[AsyncExitStack] = None
+        self._session: ClientSession | None = None
+        self._exit_stack: AsyncExitStack | None = None
 
     async def __aenter__(self) -> "MCPClient":
         """Async context manager entry."""
@@ -481,7 +481,7 @@ class MCPClient:
             logger.error("Tool discovery failed", error=str(e))
             raise MCPToolError(f"Tool discovery failed: {e}") from e
 
-    def get_tools(self, filter_prefix: Optional[str] = None) -> list[Tool]:
+    def get_tools(self, filter_prefix: str | None = None) -> list[Tool]:
         """Get list of available tools.
 
         Args:
@@ -496,7 +496,7 @@ class MCPClient:
             tools = _filter_by_prefix(tools, filter_prefix)
         return tools
 
-    def get_tool(self, name: str) -> Optional[Tool]:
+    def get_tool(self, name: str) -> Tool | None:
         """Get a specific tool by name."""
         return self._tools.get(name)
 
@@ -504,8 +504,8 @@ class MCPClient:
         self,
         compress: bool = False,
         compression_mode: str = "standard",
-        filter_prefix: Optional[str] = None,
-        tool_tier: Optional[str] = None,
+        filter_prefix: str | None = None,
+        tool_tier: str | None = None,
         include_metadata: bool = True,
     ) -> list[dict[str, Any]]:
         """Get tools in OpenAI function calling format.
@@ -549,8 +549,8 @@ class MCPClient:
         self,
         compress: bool = False,
         compression_mode: str = "standard",
-        filter_prefix: Optional[str] = None,
-        tool_tier: Optional[str] = None,
+        filter_prefix: str | None = None,
+        tool_tier: str | None = None,
         include_metadata: bool = True,
     ) -> list[dict[str, Any]]:
         """Get tools in Anthropic tool use format.

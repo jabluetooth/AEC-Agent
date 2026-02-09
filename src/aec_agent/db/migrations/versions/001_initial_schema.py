@@ -10,7 +10,6 @@ Create Date: 2024-01-20
 """
 
 from alembic import op
-import sqlalchemy as sa
 
 # Revision identifiers
 revision = "001_initial_schema"

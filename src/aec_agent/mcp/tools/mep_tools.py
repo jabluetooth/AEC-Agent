@@ -5,17 +5,16 @@ These tools provide specialized operations for MEP (Mechanical, Electrical, Plum
 engineering workflows, building on the base metadata and drawing tools.
 """
 
-from typing import Optional, List
 from uuid import UUID
 
 import structlog
 
 from aec_agent.mcp.server import mcp
 from aec_agent.mcp.tools.base import (
-    success_result,
+    ErrorCode,
     error_result,
     safe_tool,
-    ErrorCode,
+    success_result,
 )
 
 logger = structlog.get_logger(__name__)
@@ -58,7 +57,7 @@ async def check_clearances(
     Returns:
         Clearance analysis with any violations found
     """
-    from aec_agent.mcp.tools.metadata import _get_services, _get_active_project_id
+    from aec_agent.mcp.tools.metadata import _get_active_project_id, _get_services
 
     pool, _ = await _get_services()
     if not pool:
@@ -139,7 +138,7 @@ async def check_clearances(
 @safe_tool
 async def validate_mep_spacing(
     domain: str,
-    level: Optional[str] = None,
+    level: str | None = None,
     check_type: str = "all",
 ) -> dict:
     """
@@ -160,8 +159,8 @@ async def validate_mep_spacing(
     Returns:
         Validation results with any violations
     """
-    from aec_agent.mcp.tools.metadata import _get_services, _get_active_project_id
     from aec_agent.frontend.tool_optimization import get_mep_category_filter
+    from aec_agent.mcp.tools.metadata import _get_active_project_id, _get_services
 
     pool, embeddings = await _get_services()
     if not pool:
@@ -255,7 +254,7 @@ async def validate_mep_spacing(
 @safe_tool
 async def trace_system(
     start_element_id: str,
-    system_type: Optional[str] = None,
+    system_type: str | None = None,
     max_depth: int = 50,
 ) -> dict:
     """
@@ -273,7 +272,7 @@ async def trace_system(
     Returns:
         Connected elements in the system path
     """
-    from aec_agent.mcp.tools.metadata import _get_services, _get_active_project_id
+    from aec_agent.mcp.tools.metadata import _get_active_project_id, _get_services
 
     pool, _ = await _get_services()
     if not pool:
@@ -365,10 +364,10 @@ async def trace_system(
 @mcp.tool()
 @safe_tool
 async def find_clashes(
-    system1: Optional[str] = None,
-    system2: Optional[str] = None,
+    system1: str | None = None,
+    system2: str | None = None,
     tolerance: float = 0.01,
-    level: Optional[str] = None,
+    level: str | None = None,
 ) -> dict:
     """
     Find clashes between MEP systems.
@@ -385,8 +384,8 @@ async def find_clashes(
     Returns:
         List of clashing elements with locations
     """
-    from aec_agent.mcp.tools.metadata import _get_services, _get_active_project_id
     from aec_agent.frontend.tool_optimization import get_mep_category_filter
+    from aec_agent.mcp.tools.metadata import _get_active_project_id, _get_services
 
     pool, _ = await _get_services()
     if not pool:
@@ -407,7 +406,7 @@ async def find_clashes(
     repo = ElementRepository(pool)
 
     # Get elements for each system
-    async def get_system_elements(system_name: Optional[str]) -> list:
+    async def get_system_elements(system_name: str | None) -> list:
         if system_name:
             category_filter = get_mep_category_filter(system_name)
             if category_filter and category_filter.get("revit_categories"):
@@ -485,8 +484,8 @@ async def find_clashes(
 @mcp.tool()
 @safe_tool
 async def get_mep_summary(
-    domain: Optional[str] = None,
-    level: Optional[str] = None,
+    domain: str | None = None,
+    level: str | None = None,
 ) -> dict:
     """
     Get a summary of MEP elements in the project.
@@ -502,8 +501,8 @@ async def get_mep_summary(
     Returns:
         Summary statistics including element counts by type
     """
-    from aec_agent.mcp.tools.metadata import _get_services, _get_active_project_id
     from aec_agent.frontend.tool_optimization import MEP_CATEGORY_FILTERS
+    from aec_agent.mcp.tools.metadata import _get_active_project_id, _get_services
 
     pool, _ = await _get_services()
     if not pool:
@@ -531,7 +530,7 @@ async def get_mep_summary(
         all_elements = [e for e in all_elements if e.level and level.lower() in e.level.lower()]
 
     # Categorize by domain
-    domain_counts = {d: 0 for d in MEP_CATEGORY_FILTERS.keys()}
+    domain_counts = dict.fromkeys(MEP_CATEGORY_FILTERS.keys(), 0)
     type_counts = {}
 
     for elem in all_elements:

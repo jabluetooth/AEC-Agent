@@ -5,21 +5,20 @@ These tools accept element references (natural language or IDs)
 and automatically resolve them to coordinates before executing.
 """
 
-from typing import Optional
 from uuid import UUID
 
 import structlog
 
-from aec_agent.mcp.server import mcp, get_lock
 from aec_agent.mcp.concurrency import with_tool_lock
+from aec_agent.mcp.server import get_lock, mcp
+from aec_agent.mcp.sidecar_client import call_autocad_command
 from aec_agent.mcp.tools.base import (
-    success_result,
+    ErrorCode,
     error_result,
     safe_tool,
-    ErrorCode,
+    success_result,
 )
-from aec_agent.mcp.tools.metadata import MetadataErrorCode, _get_services, _get_active_project_id
-from aec_agent.mcp.sidecar_client import call_autocad_command
+from aec_agent.mcp.tools.metadata import MetadataErrorCode, _get_active_project_id, _get_services
 
 logger = structlog.get_logger(__name__)
 
@@ -27,7 +26,7 @@ logger = structlog.get_logger(__name__)
 async def _resolve_element_to_point(
     reference: str,
     project_id: UUID,
-) -> Optional[dict]:
+) -> dict | None:
     """
     Resolve element reference to centroid coordinates.
 
@@ -63,7 +62,7 @@ async def _resolve_element_to_point(
 async def draw_line_between(
     from_element: str,
     to_element: str,
-    layer: Optional[str] = None,
+    layer: str | None = None,
 ) -> dict:
     """
     Draw a line between two elements, resolving coordinates automatically.
@@ -153,7 +152,7 @@ async def draw_line_between(
 async def draw_circle_at(
     element: str,
     radius: float,
-    layer: Optional[str] = None,
+    layer: str | None = None,
 ) -> dict:
     """
     Draw a circle centered on an element.
@@ -227,7 +226,7 @@ async def draw_circle_at(
 async def draw_rectangle_around(
     element: str,
     padding: float = 0.5,
-    layer: Optional[str] = None,
+    layer: str | None = None,
 ) -> dict:
     """
     Draw a rectangle around an element's bounding box.

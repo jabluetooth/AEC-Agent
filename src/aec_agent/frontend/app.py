@@ -5,12 +5,12 @@ Provides the user-facing chat interface with real-time tool execution display.
 """
 
 import chainlit as cl
-from chainlit.input_widget import Select
 import structlog
+from chainlit.input_widget import Select
 
 from aec_agent.config.settings import get_settings
-from aec_agent.frontend.mcp_client import MCPClient
 from aec_agent.frontend.agent import AECAgent
+from aec_agent.frontend.mcp_client import MCPClient
 
 logger = structlog.get_logger(__name__)
 

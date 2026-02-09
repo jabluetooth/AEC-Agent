@@ -5,8 +5,8 @@ Provides functions to check PostgreSQL cache before calling sidecars,
 reducing sidecar calls and improving response times.
 """
 
-from datetime import datetime, timezone
-from typing import Optional, Dict, Any, List
+from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 import structlog
@@ -19,10 +19,10 @@ logger = structlog.get_logger(__name__)
 async def get_element_with_context(
     source_id: str,
     source: str = "autocad",
-    project_id: Optional[UUID] = None,
+    project_id: UUID | None = None,
     include_related: bool = False,
     fallback_to_sidecar: bool = True,
-) -> Optional[Dict[str, Any]]:
+) -> dict[str, Any] | None:
     """
     Get element data, checking PostgreSQL cache first.
 
@@ -92,7 +92,7 @@ async def get_element_with_context(
     return None
 
 
-async def _get_active_project_id() -> Optional[UUID]:
+async def _get_active_project_id() -> UUID | None:
     """Get the currently active project ID from cache."""
     from aec_agent.mcp.server import get_cache
 
@@ -107,9 +107,9 @@ async def _get_active_project_id() -> Optional[UUID]:
     return None
 
 
-async def _get_from_sidecar(source_id: str, source: str) -> Optional[Dict[str, Any]]:
+async def _get_from_sidecar(source_id: str, source: str) -> dict[str, Any] | None:
     """Get element data from sidecar."""
-    from aec_agent.mcp.sidecar_client import call_sidecar, call_autocad_command
+    from aec_agent.mcp.sidecar_client import call_autocad_command, call_sidecar
 
     try:
         if source == "autocad":
@@ -136,17 +136,17 @@ async def _get_from_sidecar(source_id: str, source: str) -> Optional[Dict[str, A
 
 
 async def batch_get_elements(
-    source_ids: List[str],
+    source_ids: list[str],
     source: str = "autocad",
-    project_id: Optional[UUID] = None,
-) -> Dict[str, Optional[Dict[str, Any]]]:
+    project_id: UUID | None = None,
+) -> dict[str, dict[str, Any] | None]:
     """
     Batch get elements, using cache for available ones.
 
     Returns dict mapping source_id to element data (or None if not found).
     """
-    results: Dict[str, Optional[Dict[str, Any]]] = {}
-    cache_misses: List[str] = []
+    results: dict[str, dict[str, Any] | None] = {}
+    cache_misses: list[str] = []
 
     settings = get_settings()
 
@@ -226,7 +226,7 @@ async def is_cache_fresh(
         project = await repo.get_project(project_id)
 
         if project and project.extracted_at:
-            age = (datetime.now(timezone.utc) - project.extracted_at).total_seconds()
+            age = (datetime.now(UTC) - project.extracted_at).total_seconds()
             return age < max_age_seconds
     except Exception as e:
         logger.warning("Cache freshness check failed", error=str(e))
@@ -234,7 +234,7 @@ async def is_cache_fresh(
     return False
 
 
-async def get_cache_stats(project_id: Optional[UUID] = None) -> Dict[str, Any]:
+async def get_cache_stats(project_id: UUID | None = None) -> dict[str, Any]:
     """
     Get cache statistics for debugging and monitoring.
 

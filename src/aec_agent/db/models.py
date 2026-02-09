@@ -6,7 +6,7 @@ Pydantic models matching the PostgreSQL schema with PostGIS and pgvector fields.
 
 import json
 from datetime import datetime
-from typing import Optional, List, Literal, Dict, Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel, Field, field_validator
@@ -73,10 +73,10 @@ class Project(BaseModel):
     id: UUID = Field(default_factory=uuid4)
     name: str = Field(description="Project/drawing name")
     source: Literal["autocad", "revit"] = Field(description="Source application")
-    file_path: Optional[str] = Field(default=None, description="Full file path")
-    file_hash: Optional[str] = Field(default=None, description="File hash for change detection")
-    extracted_at: Optional[datetime] = Field(default=None, description="Last extraction time")
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    file_path: str | None = Field(default=None, description="Full file path")
+    file_hash: str | None = Field(default=None, description="File hash for change detection")
+    extracted_at: datetime | None = Field(default=None, description="Last extraction time")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -104,18 +104,18 @@ class Element(BaseModel):
 
     # Classification
     entity_type: str = Field(description="LINE, WALL, DOOR, etc.")
-    layer: Optional[str] = Field(default=None, description="AutoCAD layer")
-    category: Optional[str] = Field(default=None, description="Revit category")
-    family: Optional[str] = Field(default=None, description="Revit family")
-    type_name: Optional[str] = Field(default=None, description="Revit type")
+    layer: str | None = Field(default=None, description="AutoCAD layer")
+    category: str | None = Field(default=None, description="Revit category")
+    family: str | None = Field(default=None, description="Revit family")
+    type_name: str | None = Field(default=None, description="Revit type")
 
     # Geometry (stored as WKT strings for PostGIS)
-    geom_wkt: Optional[str] = Field(default=None, description="Geometry as WKT")
-    bounds: Optional[BoundsInfo] = Field(default=None, description="Bounding box")
-    centroid: Optional[CentroidInfo] = Field(default=None, description="Center point")
+    geom_wkt: str | None = Field(default=None, description="Geometry as WKT")
+    bounds: BoundsInfo | None = Field(default=None, description="Bounding box")
+    centroid: CentroidInfo | None = Field(default=None, description="Center point")
 
     # Properties
-    properties: Dict[str, Any] = Field(default_factory=dict, description="All parameters/xdata")
+    properties: dict[str, Any] = Field(default_factory=dict, description="All parameters/xdata")
 
     @field_validator("properties", mode="before")
     @classmethod
@@ -126,11 +126,11 @@ class Element(BaseModel):
         return v
 
     # Semantic search
-    description: Optional[str] = Field(default=None, description="Human-readable description")
-    embedding: Optional[List[float]] = Field(default=None, description="Vector embedding")
+    description: str | None = Field(default=None, description="Human-readable description")
+    embedding: list[float] | None = Field(default=None, description="Vector embedding")
 
     # Lifecycle
-    deleted_at: Optional[datetime] = Field(default=None, description="Soft delete timestamp")
+    deleted_at: datetime | None = Field(default=None, description="Soft delete timestamp")
     created_at: datetime = Field(default_factory=datetime.utcnow)
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
@@ -182,14 +182,14 @@ class ElementRelationship(BaseModel):
     relation_type: str = Field(
         description="Relationship type: intersects, near, hosts, connected_to, on_layer, same_block"
     )
-    distance: Optional[float] = Field(default=None, description="Distance in meters (if applicable)")
+    distance: float | None = Field(default=None, description="Distance in meters (if applicable)")
     confidence: float = Field(default=1.0, ge=0.0, le=1.0, description="Confidence score")
     source: str = Field(
         default="computed",
         description="How relationship was determined: computed, revit_api, user_defined"
     )
 
-    metadata: Dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
     @field_validator("metadata", mode="before")
     @classmethod
@@ -213,7 +213,7 @@ class ExtractionResult(BaseModel):
     relationships_computed: int = 0
     embeddings_generated: int = 0
     duration_ms: int = 0
-    errors: List[str] = Field(default_factory=list)
+    errors: list[str] = Field(default_factory=list)
 
     @property
     def success(self) -> bool:
@@ -225,8 +225,8 @@ class SyncStatus(BaseModel):
     """Status of metadata synchronization."""
 
     project_id: UUID
-    last_sync: Optional[datetime] = None
+    last_sync: datetime | None = None
     is_syncing: bool = False
     pending_changes: int = 0
-    file_hash: Optional[str] = None
+    file_hash: str | None = None
     needs_resync: bool = False

@@ -4,7 +4,7 @@ Embedding service using sentence-transformers.
 Generates vector embeddings for semantic search using pgvector.
 """
 
-from typing import List, Optional
+
 import structlog
 
 from aec_agent.config.settings import get_settings
@@ -33,7 +33,7 @@ class EmbeddingService:
     suitable for semantic search.
     """
 
-    def __init__(self, model_name: Optional[str] = None):
+    def __init__(self, model_name: str | None = None):
         """
         Initialize embedding service.
 
@@ -50,7 +50,7 @@ class EmbeddingService:
         settings = get_settings()
         self._model_name = model_name or settings.embedding_model
         self._expected_dimension = settings.embedding_dimension
-        self._model: Optional[SentenceTransformer] = None
+        self._model: SentenceTransformer | None = None
 
     def _ensure_model(self) -> SentenceTransformer:
         """Lazy load the model."""
@@ -76,7 +76,7 @@ class EmbeddingService:
 
         return self._model
 
-    def generate_embedding(self, text: str) -> List[float]:
+    def generate_embedding(self, text: str) -> list[float]:
         """
         Generate embedding for a single text.
 
@@ -93,7 +93,7 @@ class EmbeddingService:
         embedding = model.encode(text, convert_to_numpy=True)
         return embedding.tolist()
 
-    def generate_embeddings_batch(self, texts: List[str]) -> List[List[float]]:
+    def generate_embeddings_batch(self, texts: list[str]) -> list[list[float]]:
         """
         Generate embeddings for multiple texts.
 
@@ -147,15 +147,15 @@ class EmbeddingService:
 
 
 # Global instance (lazy initialized)
-_embedding_service: Optional[EmbeddingService] = None
+_embedding_service: EmbeddingService | None = None
 
 
-def get_embedding_service() -> Optional[EmbeddingService]:
+def get_embedding_service() -> EmbeddingService | None:
     """Get the global embedding service instance."""
     return _embedding_service
 
 
-def initialize_embedding_service(model_name: Optional[str] = None) -> EmbeddingService:
+def initialize_embedding_service(model_name: str | None = None) -> EmbeddingService:
     """
     Initialize the global embedding service.
 

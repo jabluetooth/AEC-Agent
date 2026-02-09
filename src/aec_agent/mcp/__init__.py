@@ -8,6 +8,6 @@ This package contains:
 - tools: MCP tool definitions
 """
 
-from .server import mcp, get_cache, get_lock
+from .server import get_cache, get_lock, mcp
 
 __all__ = ["mcp", "get_cache", "get_lock"]

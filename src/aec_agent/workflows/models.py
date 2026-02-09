@@ -2,11 +2,117 @@
 Data models for workflow templates and executions.
 """
 
+import ast
+import operator
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID, uuid4
+
+# Safe operators for expression evaluation
+_SAFE_OPERATORS = {
+    ast.Eq: operator.eq,
+    ast.NotEq: operator.ne,
+    ast.Lt: operator.lt,
+    ast.LtE: operator.le,
+    ast.Gt: operator.gt,
+    ast.GtE: operator.ge,
+    ast.And: lambda a, b: a and b,
+    ast.Or: lambda a, b: a or b,
+    ast.Not: operator.not_,
+    ast.In: lambda a, b: a in b,
+    ast.NotIn: lambda a, b: a not in b,
+    ast.Is: operator.is_,
+    ast.IsNot: operator.is_not,
+}
+
+
+def _safe_eval_expr(node: ast.AST, context: dict[str, Any]) -> Any:
+    """
+    Safely evaluate an AST node with restricted operations.
+
+    Only allows: comparisons, boolean ops, attribute access,
+    constants, names from context, and subscript access.
+    """
+    if isinstance(node, ast.Expression):
+        return _safe_eval_expr(node.body, context)
+    elif isinstance(node, ast.Constant):
+        return node.value
+    elif isinstance(node, ast.Name):
+        if node.id in context:
+            return context[node.id]
+        raise NameError(f"Name '{node.id}' is not defined in context")
+    elif isinstance(node, ast.Attribute):
+        value = _safe_eval_expr(node.value, context)
+        if isinstance(value, dict):
+            return value.get(node.attr)
+        return getattr(value, node.attr, None)
+    elif isinstance(node, ast.Subscript):
+        value = _safe_eval_expr(node.value, context)
+        key = _safe_eval_expr(node.slice, context)
+        return value[key]
+    elif isinstance(node, ast.Compare):
+        left = _safe_eval_expr(node.left, context)
+        for op, comparator in zip(node.ops, node.comparators):
+            op_func = _SAFE_OPERATORS.get(type(op))
+            if op_func is None:
+                raise ValueError(f"Unsupported comparison operator: {type(op).__name__}")
+            right = _safe_eval_expr(comparator, context)
+            if not op_func(left, right):
+                return False
+            left = right
+        return True
+    elif isinstance(node, ast.BoolOp):
+        op_func = _SAFE_OPERATORS.get(type(node.op))
+        if op_func is None:
+            raise ValueError(f"Unsupported boolean operator: {type(node.op).__name__}")
+        values = [_safe_eval_expr(v, context) for v in node.values]
+        result = values[0]
+        for v in values[1:]:
+            result = op_func(result, v)
+        return result
+    elif isinstance(node, ast.UnaryOp):
+        if isinstance(node.op, ast.Not):
+            return not _safe_eval_expr(node.operand, context)
+        raise ValueError(f"Unsupported unary operator: {type(node.op).__name__}")
+    elif isinstance(node, ast.IfExp):
+        test = _safe_eval_expr(node.test, context)
+        return _safe_eval_expr(node.body if test else node.orelse, context)
+    elif isinstance(node, (ast.List, ast.Tuple)):
+        return [_safe_eval_expr(elt, context) for elt in node.elts]
+    elif isinstance(node, ast.Dict):
+        return {
+            _safe_eval_expr(k, context): _safe_eval_expr(v, context)
+            for k, v in zip(node.keys, node.values)
+            if k is not None
+        }
+    else:
+        raise ValueError(f"Unsupported expression type: {type(node).__name__}")
+
+
+def safe_eval_condition(condition: str, context: dict[str, Any]) -> bool:
+    """
+    Safely evaluate a condition string.
+
+    Only allows safe operations: comparisons, boolean operations,
+    attribute access, and basic data structures.
+
+    Args:
+        condition: A Python expression string
+        context: Variables available to the expression
+
+    Returns:
+        Boolean result of the expression
+
+    Raises:
+        ValueError: If the expression contains unsafe operations
+    """
+    try:
+        tree = ast.parse(condition, mode='eval')
+        return bool(_safe_eval_expr(tree, context))
+    except (SyntaxError, ValueError, NameError, TypeError, KeyError):
+        return True  # Default to execute on error
 
 
 class WorkflowStatus(str, Enum):
@@ -38,7 +144,7 @@ class WorkflowStep:
     tool: str                           # MCP tool to call
     params_template: dict[str, Any] = field(default_factory=dict)  # Params with placeholders
     description: str = ""               # Human-readable description
-    condition: Optional[str] = None     # Python expression for conditional execution
+    condition: str | None = None     # Python expression for conditional execution
     on_error: str = "abort"             # "abort", "skip", "retry"
     max_retries: int = 1
     timeout_seconds: float = 120.0
@@ -84,10 +190,7 @@ class WorkflowStep:
         """Check if step should execute based on condition."""
         if not self.condition:
             return True
-        try:
-            return bool(eval(self.condition, {"__builtins__": {}}, context))
-        except Exception:
-            return True  # Execute if condition evaluation fails
+        return safe_eval_condition(self.condition, context)
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for storage."""
@@ -125,12 +228,12 @@ class WorkflowTemplate:
     id: UUID = field(default_factory=uuid4)
     name: str = ""
     domain: str = "mep"
-    subdomain: Optional[str] = None
+    subdomain: str | None = None
     description: str = ""
     steps: list[WorkflowStep] = field(default_factory=list)
     required_context: list[str] = field(default_factory=list)  # Required input fields
     default_params: dict[str, Any] = field(default_factory=dict)
-    estimated_tokens: Optional[int] = None  # Estimated token savings
+    estimated_tokens: int | None = None  # Estimated token savings
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     def validate_context(self, context: dict[str, Any]) -> list[str]:
@@ -182,7 +285,7 @@ class StepResult:
     step_name: str
     status: StepStatus
     data: dict[str, Any] = field(default_factory=dict)
-    error: Optional[str] = None
+    error: str | None = None
     duration_ms: float = 0
     retries: int = 0
 
@@ -207,18 +310,18 @@ class WorkflowExecution:
     A running or completed workflow execution.
     """
     id: UUID = field(default_factory=uuid4)
-    template_id: Optional[UUID] = None
+    template_id: UUID | None = None
     template_name: str = ""
-    project_id: Optional[UUID] = None
-    user_id: Optional[str] = None
-    user_session: Optional[str] = None
+    project_id: UUID | None = None
+    user_id: str | None = None
+    user_session: str | None = None
     status: WorkflowStatus = WorkflowStatus.PENDING
     current_step: int = 0
     context: dict[str, Any] = field(default_factory=dict)
     results: list[StepResult] = field(default_factory=list)
-    error_message: Optional[str] = None
+    error_message: str | None = None
     started_at: datetime = field(default_factory=datetime.utcnow)
-    completed_at: Optional[datetime] = None
+    completed_at: datetime | None = None
 
     @property
     def is_complete(self) -> bool:
@@ -263,7 +366,7 @@ class WorkflowResult:
     steps_total: int
     final_data: dict[str, Any] = field(default_factory=dict)
     summary: str = ""
-    error: Optional[str] = None
+    error: str | None = None
     duration_ms: float = 0
 
     @property

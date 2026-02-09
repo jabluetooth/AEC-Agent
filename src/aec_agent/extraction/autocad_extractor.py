@@ -6,24 +6,24 @@ and streams to PostgreSQL.
 """
 
 import hashlib
+import time
+from collections.abc import AsyncIterator
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, List, AsyncIterator
 from uuid import UUID, uuid4
-import time
 
 import structlog
 
 from aec_agent.db.connection import DatabasePool
-from aec_agent.db.models import Element, Project, ExtractionResult, CentroidInfo, BoundsInfo
+from aec_agent.db.models import Element, ExtractionResult, Project
 from aec_agent.db.repository import ElementRepository
 from aec_agent.extraction.base import BaseExtractor, ExtractionConfig
 from aec_agent.extraction.geometry import (
     autocad_geometry_to_wkt,
-    compute_centroid,
     compute_bounds,
+    compute_centroid,
 )
-from aec_agent.mcp.sidecar_client import call_autocad_command, SidecarError
+from aec_agent.mcp.sidecar_client import SidecarError, call_autocad_command
 
 logger = structlog.get_logger(__name__)
 
@@ -46,7 +46,7 @@ class AutoCADExtractor(BaseExtractor):
     def __init__(
         self,
         pool: DatabasePool,
-        config: Optional[ExtractionConfig] = None
+        config: ExtractionConfig | None = None
     ):
         """
         Initialize AutoCAD extractor.
@@ -140,7 +140,7 @@ class AutoCADExtractor(BaseExtractor):
     async def extract_incremental(
         self,
         project_id: UUID,
-        changed_ids: List[str]
+        changed_ids: list[str]
     ) -> ExtractionResult:
         """
         Extract only changed entities.
@@ -198,8 +198,8 @@ class AutoCADExtractor(BaseExtractor):
 
     async def stream_entities(
         self,
-        batch_size: Optional[int] = None
-    ) -> AsyncIterator[List[dict]]:
+        batch_size: int | None = None
+    ) -> AsyncIterator[list[dict]]:
         """
         Stream entities in batches from the sidecar.
 
@@ -288,7 +288,7 @@ class AutoCADExtractor(BaseExtractor):
         self,
         entity_data: dict,
         project_id: UUID
-    ) -> Optional[Element]:
+    ) -> Element | None:
         """
         Convert entity data from sidecar to Element model.
 

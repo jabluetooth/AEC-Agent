@@ -9,7 +9,7 @@ import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any, Optional
+from typing import Any
 from uuid import UUID, uuid4
 
 logger = logging.getLogger(__name__)
@@ -71,7 +71,7 @@ class UserShortcut:
     expansion: str = ""          # Full expansion (e.g., "route supply duct")
     description: str = ""
     usage_count: int = 0
-    last_used_at: Optional[datetime] = None
+    last_used_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     def to_dict(self) -> dict[str, Any]:
@@ -132,7 +132,7 @@ class UserPreferences:
         },
     }
 
-    def __init__(self, db_pool=None, user_id: Optional[str] = None):
+    def __init__(self, db_pool=None, user_id: str | None = None):
         """
         Initialize user preferences.
 
@@ -400,7 +400,7 @@ class UserPreferences:
 
         return shortcut
 
-    async def get_shortcut(self, alias: str) -> Optional[UserShortcut]:
+    async def get_shortcut(self, alias: str) -> UserShortcut | None:
         """
         Get a shortcut by alias.
 
@@ -580,12 +580,12 @@ class UserPreferences:
 
 
 # Global instance management
-_preferences: Optional[UserPreferences] = None
+_preferences: UserPreferences | None = None
 
 
 async def get_user_preferences(
     db_pool=None,
-    user_id: Optional[str] = None,
+    user_id: str | None = None,
 ) -> UserPreferences:
     """Get or create the global UserPreferences instance."""
     global _preferences
