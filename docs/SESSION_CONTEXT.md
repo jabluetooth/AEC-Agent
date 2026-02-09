@@ -2,16 +2,15 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Phase 2.5.1 YOLOv8 Symbol Detection — COMPLETE. Added neural network-based symbol detection as alternative to template matching.
-**Last Action:** Implemented Phase 2.5.1 YOLOv8 Symbol Detection:
-- Created `yolo_detection.py` module with `YOLOSymbolDetector` class supporting both ultralytics and ONNX Runtime backends
-- Created `train_yolo_symbols.py` training script with synthetic dataset generation for 42 MEP symbol classes
-- Updated `symbol_detection.py` with unified `detect_symbols()` interface supporting `backend="auto"|"yolo"|"template"`
-- Added `symbol_backend`, `yolo_model_path`, `yolo_confidence`, `yolo_iou_threshold` parameters to vectorizer pipeline
-- Created `models/` directory with README.md documenting model training and usage
-- Added `ultralytics>=8.0.0` and `onnxruntime>=1.15.0` as optional `[yolo]` dependencies
-- Created 34 unit tests for YOLO detection (all passing)
-- Total: **242 tests passing**
+**Objective:** Codebase Audit & Bug Fixes — COMPLETE. Comprehensive audit with mypy + ruff, fixed critical bugs.
+**Last Action:** Full codebase audit (2026-02-09):
+- Ran mypy (568 type errors found) and ruff (758 linting issues)
+- **CRITICAL FIX:** `repository.py:117` SQL bug — `update_project_hash` used `$1` twice (hash AND id), causing silent update failures
+- **SECURITY FIX:** `workflows/models.py:88` replaced dangerous `eval()` with safe AST-based expression evaluator
+- **SECURITY FIX:** `server.py:132` changed `0.0.0.0` to `127.0.0.1` (localhost only)
+- Fixed 6 type safety issues causing potential runtime errors (variable shadowing, missing imports)
+- Auto-fixed 759 style issues with `ruff --fix` (import sorting, modern type annotations)
+- All **237 tests passing** after fixes
 **Next Step:** End-to-end test with real PDF + running sidecar, then Phase 3 (Knowledge Base).
 
 ## 📊 Repository Status (as of 2026-02-02)

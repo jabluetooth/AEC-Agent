@@ -129,7 +129,7 @@ def main():
     try:
         uvicorn.run(
             app,
-            host="0.0.0.0",
+            host="127.0.0.1",
             port=settings.mcp_server_port,
             log_level="info",
         )
