@@ -93,6 +93,9 @@ class VectorizationResult:
     parsed_annotations: list = field(default_factory=list)  # List[ParsedAnnotation]
     text_associations: list = field(default_factory=list)  # List[TextAssociation]
     enriched_elements: list = field(default_factory=list)  # Elements with associated text
+    # Phase C: Symbol Intelligence
+    smart_symbols: list = field(default_factory=list)  # List[SmartSymbol] with Vision LLM classification
+    vision_llm_used: bool = False  # Whether Vision LLM was used for classification
 
 
 def vectorize_bitonal_image(
@@ -176,6 +179,10 @@ def vectorize_bitonal_image(
     yolo_model_path: str | None = None,  # Custom YOLO model path
     yolo_confidence: float = 0.5,  # YOLO confidence threshold
     yolo_iou_threshold: float = 0.45,  # YOLO IoU for NMS
+    # Phase C: Symbol Intelligence (Vision LLM)
+    vision_llm_classification: bool = True,  # Use Vision LLM for detailed subtyping
+    vision_llm_provider: str = "auto",  # Vision provider: "auto", "gemini", "openai", "anthropic"
+    vision_llm_confidence_threshold: float = 0.85,  # Use Vision LLM if YOLO confidence below this
     # AEC Geometric Heuristics
     aec_heuristics: bool = True,  # Enabled by default
     orthogonal_snap: bool = True,
@@ -581,42 +588,148 @@ def vectorize_bitonal_image(
                 logger.warning(f"OCR masking failed: {e}, continuing without text masking")
 
         # =================================================================
-        # PHASE 2.5 STAGE 2: SYMBOL DETECTION (Template or YOLO)
+        # PHASE C: SYMBOL INTELLIGENCE (Two-Stage Classification)
         #
-        # Detect standard AEC symbols using either:
-        # - Template matching (default, no training required)
-        # - YOLOv8 neural network (more robust, requires trained model)
+        # Two-stage symbol classification:
+        # Stage 1: YOLO/template matching for fast detection
+        # Stage 2: Vision LLM for detailed subtype classification
         #
         # Detected symbols are masked from the image to prevent them
         # from being traced as jagged polylines - instead they'll be
         # inserted as blocks.
         # =================================================================
         detected_blocks = []
+        smart_symbols = []
+
         if symbol_detection:
             try:
+                # Check if we should use the smart (Vision LLM) pipeline
                 from aec_agent.mcp.tools.symbol_detection import detect_symbols
 
-                binary, detected_blocks = detect_symbols(
-                    binary,
-                    scale=scale,
-                    backend=symbol_backend,
-                    # Template matching parameters
-                    match_threshold=symbol_threshold,
-                    nms_distance=symbol_nms_distance,
-                    # YOLO parameters (Phase 2.5.1)
-                    yolo_model_path=yolo_model_path,
-                    yolo_confidence=yolo_confidence,
-                    yolo_iou_threshold=yolo_iou_threshold,
-                    mask_detections=True,
-                )
+                use_smart_detection = vision_llm_classification
+                if use_smart_detection:
+                    try:
+                        from aec_agent.mcp.tools.vision_llm import is_vision_llm_available
+                        use_smart_detection = is_vision_llm_available()
+                    except ImportError:
+                        use_smart_detection = False
+
+                if use_smart_detection:
+                    # Use Phase C two-stage pipeline with Vision LLM
+                    import asyncio
+                    from aec_agent.mcp.tools.symbol_classifier import SymbolClassifier
+                    from aec_agent.mcp.tools.document_classifier import DrawingType
+
+                    # Get drawing type for context
+                    drawing_type_enum = DrawingType.MEP_PLAN
+                    if result.drawing_type:
+                        try:
+                            drawing_type_enum = DrawingType(result.drawing_type)
+                        except ValueError:
+                            drawing_type_enum = DrawingType.MEP_PLAN
+
+                    classifier = SymbolClassifier(
+                        yolo_confidence_threshold=vision_llm_confidence_threshold,
+                        enable_vision_llm=True,
+                        vision_provider=vision_llm_provider,
+                    )
+
+                    # Run async classifier (get or create event loop)
+                    try:
+                        loop = asyncio.get_event_loop()
+                        if loop.is_running():
+                            # We're already in an async context
+                            import concurrent.futures
+                            with concurrent.futures.ThreadPoolExecutor() as executor:
+                                future = executor.submit(
+                                    asyncio.run,
+                                    classifier.classify_symbols(
+                                        image=binary,
+                                        drawing_type=drawing_type_enum,
+                                        scale=scale,
+                                        parsed_annotations=result.parsed_annotations if semantic_ocr else None,
+                                        yolo_backend=symbol_backend,
+                                        yolo_confidence=yolo_confidence,
+                                    )
+                                )
+                                binary, smart_symbols = future.result()
+                        else:
+                            binary, smart_symbols = loop.run_until_complete(
+                                classifier.classify_symbols(
+                                    image=binary,
+                                    drawing_type=drawing_type_enum,
+                                    scale=scale,
+                                    parsed_annotations=result.parsed_annotations if semantic_ocr else None,
+                                    yolo_backend=symbol_backend,
+                                    yolo_confidence=yolo_confidence,
+                                )
+                            )
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(loop)
+                        binary, smart_symbols = loop.run_until_complete(
+                            classifier.classify_symbols(
+                                image=binary,
+                                drawing_type=drawing_type_enum,
+                                scale=scale,
+                                parsed_annotations=result.parsed_annotations if semantic_ocr else None,
+                                yolo_backend=symbol_backend,
+                                yolo_confidence=yolo_confidence,
+                            )
+                        )
+
+                    # Convert SmartSymbols to DetectedBlocks for backwards compatibility
+                    from aec_agent.mcp.tools.symbol_detection import DetectedBlock
+                    detected_blocks = [
+                        DetectedBlock(
+                            block_name=sym.block_name,
+                            position=sym.position,
+                            scale=sym.scale,
+                            rotation=sym.rotation,
+                            confidence=sym.confidence,
+                            category=sym.category,
+                        )
+                        for sym in smart_symbols
+                    ]
+
+                    result.smart_symbols = smart_symbols
+                    result.vision_llm_used = any(s.classification_source == "vision_llm" for s in smart_symbols)
+
+                    vision_classified = sum(1 for s in smart_symbols if s.classification_source == "vision_llm")
+                    logger.info(
+                        "Smart symbol detection complete (Phase C)",
+                        backend=symbol_backend,
+                        symbols_found=len(smart_symbols),
+                        vision_llm_classified=vision_classified,
+                    )
+                    print(f"[vectorize] Smart symbol detection: {len(smart_symbols)} symbols, "
+                          f"{vision_classified} classified by Vision LLM")
+
+                else:
+                    # Fall back to basic YOLO/template detection
+                    binary, detected_blocks = detect_symbols(
+                        binary,
+                        scale=scale,
+                        backend=symbol_backend,
+                        # Template matching parameters
+                        match_threshold=symbol_threshold,
+                        nms_distance=symbol_nms_distance,
+                        # YOLO parameters (Phase 2.5.1)
+                        yolo_model_path=yolo_model_path,
+                        yolo_confidence=yolo_confidence,
+                        yolo_iou_threshold=yolo_iou_threshold,
+                        mask_detections=True,
+                    )
+                    logger.info(
+                        "Symbol detection complete (basic)",
+                        backend=symbol_backend,
+                        symbols_found=len(detected_blocks),
+                    )
+                    print(f"[vectorize] Symbol detection ({symbol_backend}): {len(detected_blocks)} symbols detected")
+
                 result.blocks = detected_blocks
-                logger.info(
-                    "Symbol detection complete",
-                    backend=symbol_backend,
-                    symbols_found=len(detected_blocks),
-                )
-                print(f"[vectorize] Symbol detection ({symbol_backend}): {len(detected_blocks)} symbols detected and masked")
                 _save_debug("04b_symbols_masked", binary)
+
             except ImportError as e:
                 logger.warning(f"Symbol detection dependencies not available: {e}")
             except Exception as e:

@@ -2,14 +2,15 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Semantic Intelligence Pipeline (Phase B) — COMPLETE. Implemented semantic OCR and text-element association.
-**Last Action:** Phase B Implementation (2026-02-09):
-- Created `semantic_ocr.py` — Pattern-based annotation parsing (20+ annotation types: equipment_tag, flow_rate, cfm, room_number, dimensions, etc.)
-- Created `text_associator.py` — Text-to-element association (links parsed text to nearby symbols)
-- Created `prompts/annotation_parsing.py` — Domain-specific LLM prompts for complex annotations
-- Updated `image_vectorizer.py` — Integrated semantic OCR and text association into pipeline
-- Added 69 new unit tests for Phase B components
-- All **367 tests passing** after implementation
+**Objective:** Semantic Intelligence Pipeline (Phase C) — COMPLETE. Implemented two-stage symbol classification with Vision LLM.
+**Last Action:** Phase C Implementation (2026-02-10):
+- Created `vision_llm.py` — Vision LLM integration (Gemini/GPT-4o/Claude) for symbol classification
+- Created `symbol_classifier.py` — Two-stage detection pipeline (YOLO → Vision LLM)
+- Created `prompts/symbol_classification.py` — Domain-specific Vision LLM prompts for symbol ID
+- Updated `symbol_detection.py` — Added `detect_symbols_smart()` with Vision LLM support
+- Updated `image_vectorizer.py` — Integrated Phase C smart symbol classification
+- Added 89 new unit tests for Phase C components
+- All **456 tests passing** after implementation
 
 **Phase A (COMPLETE):**
 - `document_classifier.py` — Drawing type classification (14 types)
@@ -23,7 +24,15 @@
 - `enrich_elements_with_text()` — Creates enriched elements with tags, specs, annotations
 - Pipeline parameters: `semantic_ocr`, `text_association`, `semantic_llm_fallback`
 
-**Next Step:** Phase C (Symbol Intelligence) or Phase D (Relationship Inference) from SEMANTIC_INTELLIGENCE_PLAN.md.
+**Phase C (COMPLETE):**
+- `VisionLLMClassifier` class supporting Gemini, OpenAI, and Anthropic vision models
+- `SmartSymbol` dataclass with full semantic data (subtype, direction, system, specs, associated text)
+- `SymbolClassifier` orchestrates two-stage pipeline (YOLO confidence threshold → Vision LLM)
+- `SYMBOL_SUBTYPES` dictionary with 50+ subtypes across 5 MEP categories
+- Specialized prompts for valves, diffusers, outlets, and detectors
+- Pipeline parameters: `vision_llm_classification`, `vision_llm_provider`, `vision_llm_confidence_threshold`
+
+**Next Step:** Phase D (Relationship Inference) or Phase E (Knowledge Grounding) from SEMANTIC_INTELLIGENCE_PLAN.md.
 
 ## 📊 Repository Status (as of 2026-02-02)
 
@@ -111,7 +120,16 @@
     - [x] `models/` directory with README.md
     - [x] Optional dependencies: `ultralytics>=8.0.0`, `onnxruntime>=1.15.0` via `pip install aec-agent[yolo]`
     - [x] 34 unit tests for YOLO detection
-- [ ] **Phase 2.5.2: Vision LLM Symbol Classification** (Pending)
+- [x] **Phase 2.5.2: Vision LLM Symbol Classification** (COMPLETE)
+    - [x] `vision_llm.py` — VisionLLMClassifier with Gemini/GPT-4o/Claude support
+    - [x] `symbol_classifier.py` — Two-stage pipeline (YOLO → Vision LLM for ambiguous symbols)
+    - [x] `prompts/symbol_classification.py` — Domain-specific Vision LLM prompts for symbol ID
+    - [x] `SmartSymbol` dataclass with subtype, direction, system, specs, associated text
+    - [x] SYMBOL_SUBTYPES with 50+ subtypes across 5 MEP categories
+    - [x] Updated `symbol_detection.py` with `detect_symbols_smart()` async function
+    - [x] Updated `image_vectorizer.py` with Vision LLM integration
+    - [x] 89 unit tests for Phase C components
+    - [x] All 456 tests passing
 - [x] **Phase 2.5.3: Semantic OCR Parsing** (COMPLETE)
     - [x] `semantic_ocr.py` — Pattern-based annotation parsing (20+ types)
     - [x] `text_associator.py` — Text-to-element association
@@ -128,10 +146,10 @@
 ## 📈 Metrics
 | Metric | Value |
 |--------|-------|
-| Python LOC | ~17,500 |
+| Python LOC | ~19,500 |
 | MCP Tools | 50 (7 categories) |
-| Config Parameters | 42 env vars |
-| Test Files | 12 (242 tests) |
+| Config Parameters | 45 env vars |
+| Test Files | 17 (456 tests) |
 | DB Tables | 15 (projects, elements, relationships, + 12 MEP/domain tables) |
 | Sidecar Files | 29 total (15 C#, 14 Python) |
 
@@ -169,11 +187,18 @@
 - **New files (Phase B):** `src/aec_agent/mcp/tools/semantic_ocr.py` (pattern-based annotation parsing), `src/aec_agent/mcp/tools/text_associator.py` (text-element association), `src/aec_agent/prompts/annotation_parsing.py` (LLM prompts), `tests/unit/test_semantic_ocr.py` (44 tests), `tests/unit/test_text_associator.py` (25 tests).
 - **Phase B key functions:** `parse_annotation_by_patterns()` — fast regex parsing for CFM, equipment tags, room numbers, sizes, etc. `associate_text_to_elements()` — distance-based association with type-specific rules. `enrich_elements_with_text()` — combine symbols with their associated text data.
 - **New VectorizationResult fields (Phase B):** `parsed_annotations` (List[ParsedAnnotation]), `text_associations` (List[TextAssociation]), `enriched_elements` (elements with associated text).
+- **New files (Phase C / Phase 2.5.2):** `src/aec_agent/mcp/tools/vision_llm.py` (Vision LLM integration), `src/aec_agent/mcp/tools/symbol_classifier.py` (two-stage classifier), `src/aec_agent/prompts/symbol_classification.py` (Vision prompts), `tests/unit/test_vision_llm.py` (25 tests), `tests/unit/test_symbol_classifier.py` (27 tests), `tests/unit/test_symbol_classification_prompts.py` (37 tests).
+- **Phase C key components:** `VisionLLMClassifier` supports Gemini, OpenAI GPT-4o, and Anthropic Claude for symbol image classification. `SmartSymbol` dataclass extends DetectedBlock with subtype, direction, system, specs, and associated text. `SymbolClassifier` orchestrates two-stage pipeline: YOLO for fast detection, Vision LLM for ambiguous/low-confidence symbols.
+- **Phase C key functions:** `detect_symbols_smart()` — async wrapper for two-stage detection. `classify_symbols()` — main classifier method. `detect_and_classify_symbols()` — convenience function. Specialized prompts: `get_valve_classification_prompt()`, `get_diffuser_classification_prompt()`, `get_outlet_classification_prompt()`, `get_detector_classification_prompt()`.
+- **New VectorizationResult fields (Phase C):** `smart_symbols` (List[SmartSymbol]), `vision_llm_used` (bool).
+- **New Pipeline Parameters (Phase C):** `vision_llm_classification` (bool), `vision_llm_provider` ("auto"|"gemini"|"openai"|"anthropic"), `vision_llm_confidence_threshold` (float, default 0.85).
+- **SYMBOL_SUBTYPES:** Comprehensive dictionary with 50+ subtypes across 5 MEP categories: mechanical (valves, diffusers, dampers, equipment, fittings), electrical (outlets, switches, lights, panels, devices), fire (detection, notification, suppression, control), plumbing (valves, fixtures, equipment, fittings), low_voltage (data, security, audio_visual, control).
 - **New files (Phase 2.5.1):** `src/aec_agent/mcp/tools/yolo_detection.py` (YOLOv8 detector), `scripts/train_yolo_symbols.py` (training script), `models/README.md` (model docs), `tests/unit/test_yolo_detection.py` (34 tests).
 - **New files (Phase 2):** `src/aec_agent/mcp/tools/image_vectorizer.py` (OpenCV detection), `src/aec_agent/mcp/tools/pdf_converter.py` (PDF→bitonal TIFF).
+- **New dependencies (optional Vision LLM):** `google-generativeai>=0.3.0` (Gemini), `openai>=1.0.0`, `anthropic>=0.8.0` — any one provider sufficient.
 - **New dependencies (optional YOLO):** `ultralytics>=8.0.0`, `onnxruntime>=1.15.0` — install via `pip install aec-agent[yolo]`.
 - **New dependencies (Phase 2):** `opencv-python-headless>=4.8.0` (or `opencv-contrib-python` for FastLineDetector), `numpy>=1.24.0`, `PyMuPDF>=1.24.0`, `Pillow>=10.0.0`, `networkx>=3.0` (topology cleanup).
-- **Next priority:** End-to-end integration test with real PDF + running sidecar, then Phase 2.5.2 (Vision LLM) or Phase 3 (Knowledge Base).
+- **Next priority:** Phase D (Geometry Intelligence / Relationship Inference) or Phase E (Knowledge Base Grounding) from SEMANTIC_INTELLIGENCE_PLAN.md.
 
 ## 📂 Key Files to Read First
 1. `docs/SESSION_CONTEXT.md` (This file)

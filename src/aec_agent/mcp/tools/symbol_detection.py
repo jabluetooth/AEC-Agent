@@ -472,3 +472,101 @@ def detect_symbols(
             nms_distance=nms_distance,
             padding_px=2 if mask_detections else 0,
         )
+
+
+# =============================================================================
+# Two-Stage Pipeline (Phase C: Symbol Intelligence)
+# =============================================================================
+
+
+def is_smart_detection_available() -> bool:
+    """
+    Check if smart detection (Vision LLM) is available.
+
+    Returns:
+        True if Vision LLM can be used for enhanced classification.
+    """
+    try:
+        from .vision_llm import is_vision_llm_available
+
+        return is_vision_llm_available()
+    except ImportError:
+        return False
+
+
+async def detect_symbols_smart(
+    image: "np.ndarray",
+    scale: float = 1.0,
+    drawing_type: str = "mep_plan",
+    parsed_annotations: list | None = None,
+    backend: str = "auto",
+    yolo_confidence: float = 0.5,
+    enable_vision_llm: bool = True,
+    vision_provider: str = "auto",
+) -> tuple["np.ndarray", list]:
+    """
+    Smart symbol detection with two-stage classification pipeline.
+
+    This is the Phase C enhanced detection that uses:
+    1. YOLO/template matching for fast detection
+    2. Vision LLM for detailed subtype classification
+
+    Args:
+        image: Binary image (white = background, black = ink).
+        scale: Coordinate scale factor (pixel to drawing units).
+        drawing_type: Type of drawing for context (floor_plan, hvac, electrical, etc.).
+        parsed_annotations: Pre-parsed text annotations from semantic_ocr.
+        backend: Detection backend ("auto", "yolo", "template").
+        yolo_confidence: YOLO detection confidence threshold.
+        enable_vision_llm: Whether to use Vision LLM for enhanced classification.
+        vision_provider: Vision LLM provider (gemini, openai, anthropic, auto).
+
+    Returns:
+        Tuple of (masked_image, list of SmartSymbol objects).
+
+    Example:
+        >>> from aec_agent.mcp.tools.symbol_detection import detect_symbols_smart
+        >>> masked, smart_symbols = await detect_symbols_smart(
+        ...     image=binary_img,
+        ...     scale=1/300,
+        ...     drawing_type="hvac",
+        ...     enable_vision_llm=True,
+        ... )
+        >>> for sym in smart_symbols:
+        ...     print(f"{sym.subtype} ({sym.confidence:.2f}) at {sym.position}")
+    """
+    try:
+        from .symbol_classifier import SymbolClassifier
+        from .document_classifier import DrawingType
+    except ImportError as e:
+        logger.warning(
+            "Smart detection not available, falling back to basic detection",
+            error=str(e),
+        )
+        # Fallback to basic detection
+        return detect_symbols(
+            image=image,
+            scale=scale,
+            backend=backend,
+            yolo_confidence=yolo_confidence,
+        )
+
+    # Convert string to DrawingType enum
+    try:
+        dt = DrawingType(drawing_type.lower())
+    except ValueError:
+        dt = DrawingType.MEP_PLAN
+
+    classifier = SymbolClassifier(
+        enable_vision_llm=enable_vision_llm,
+        vision_provider=vision_provider,
+    )
+
+    return await classifier.classify_symbols(
+        image=image,
+        drawing_type=dt,
+        scale=scale,
+        parsed_annotations=parsed_annotations,
+        yolo_backend=backend,
+        yolo_confidence=yolo_confidence,
+    )
