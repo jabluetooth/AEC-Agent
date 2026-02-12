@@ -1,0 +1,346 @@
+# Electrical CAD Standards
+# Based on National CAD Standard (NCS) with LA-specific conventions
+# Jurisdiction: Los Angeles, CA (CEC - California Electrical Code, Title 24)
+
+electrical:
+  discipline_prefix: "E"
+  description: "Electrical systems including power, lighting, and emergency systems"
+
+  systems:
+    power:
+      abbreviation: "PWR"
+      layer_prefix: "E-POWR"
+      color: 1  # Red
+      linetype: "CONTINUOUS"
+      description: "Normal power distribution"
+
+    lighting:
+      abbreviation: "LITE"
+      layer_prefix: "E-LITE"
+      color: 2  # Yellow
+      linetype: "CONTINUOUS"
+      description: "Lighting circuits"
+
+    emergency_power:
+      abbreviation: "EMER"
+      layer_prefix: "E-EMER"
+      color: 1  # Red
+      linetype: "DASHED"
+      description: "Emergency/life safety power"
+
+    standby_power:
+      abbreviation: "STBY"
+      layer_prefix: "E-STBY"
+      color: 6  # Magenta
+      linetype: "CONTINUOUS"
+      description: "Standby power (optional)"
+
+    grounding:
+      abbreviation: "GRND"
+      layer_prefix: "E-GRND"
+      color: 3  # Green
+      linetype: "CONTINUOUS"
+      description: "Grounding system"
+
+  elements:
+    outlet:
+      duplex:
+        block_name: "E-OUTL-DUP"
+        layer_suffix: "-OUTL"
+        description: "Standard 120V duplex receptacle"
+        attributes:
+          CIRCUIT: ""
+          VOLTAGE: "120V"
+          TAG: ""
+
+      quad:
+        block_name: "E-OUTL-QUAD"
+        layer_suffix: "-OUTL"
+        description: "Quad receptacle"
+        attributes:
+          CIRCUIT: ""
+          VOLTAGE: "120V"
+          TAG: ""
+
+      gfci:
+        block_name: "E-OUTL-GFCI"
+        layer_suffix: "-OUTL"
+        description: "GFCI protected receptacle"
+        attributes:
+          CIRCUIT: ""
+          VOLTAGE: "120V"
+          TAG: ""
+
+      dedicated:
+        block_name: "E-OUTL-DED"
+        layer_suffix: "-OUTL"
+        description: "Dedicated/isolated ground receptacle"
+        attributes:
+          CIRCUIT: ""
+          VOLTAGE: ""
+          EQUIPMENT: ""
+          TAG: ""
+
+      floor:
+        block_name: "E-OUTL-FLR"
+        layer_suffix: "-OUTL"
+        description: "Floor-mounted receptacle/power pole"
+        attributes:
+          CIRCUIT: ""
+          VOLTAGE: "120V"
+          TAG: ""
+
+      twist_lock:
+        block_name: "E-OUTL-TWLK"
+        layer_suffix: "-OUTL"
+        description: "Twist-lock receptacle"
+        attributes:
+          CIRCUIT: ""
+          VOLTAGE: ""
+          NEMA: ""  # L5-20R, L6-30R, etc.
+          TAG: ""
+
+      welder:
+        block_name: "E-OUTL-WELD"
+        layer_suffix: "-OUTL"
+        description: "Welder outlet (50A)"
+        attributes:
+          CIRCUIT: ""
+          VOLTAGE: "208V"
+          AMPS: "50"
+          TAG: ""
+
+      range:
+        block_name: "E-OUTL-RANG"
+        layer_suffix: "-OUTL"
+        description: "Range/oven outlet"
+        attributes:
+          CIRCUIT: ""
+          VOLTAGE: "240V"
+          AMPS: "50"
+          TAG: ""
+
+      dryer:
+        block_name: "E-OUTL-DRYR"
+        layer_suffix: "-OUTL"
+        description: "Dryer outlet"
+        attributes:
+          CIRCUIT: ""
+          VOLTAGE: "240V"
+          AMPS: "30"
+          TAG: ""
+
+    switch:
+      single:
+        block_name: "E-SWTC-1P"
+        layer_suffix: "-SWTC"
+        description: "Single pole switch"
+        attributes:
+          CIRCUIT: ""
+          CONTROLS: ""
+          TAG: ""
+
+      3way:
+        block_name: "E-SWTC-3W"
+        layer_suffix: "-SWTC"
+        description: "3-way switch"
+        attributes:
+          CIRCUIT: ""
+          CONTROLS: ""
+          TAG: ""
+
+      4way:
+        block_name: "E-SWTC-4W"
+        layer_suffix: "-SWTC"
+        description: "4-way switch"
+        attributes:
+          CIRCUIT: ""
+          CONTROLS: ""
+          TAG: ""
+
+      dimmer:
+        block_name: "E-SWTC-DIM"
+        layer_suffix: "-SWTC"
+        description: "Dimmer switch"
+        attributes:
+          CIRCUIT: ""
+          WATTS: ""
+          CONTROLS: ""
+          TAG: ""
+
+      occupancy:
+        block_name: "E-SWTC-OCC"
+        layer_suffix: "-SWTC"
+        description: "Occupancy sensor switch"
+        attributes:
+          CIRCUIT: ""
+          TYPE: ""  # PIR, ULTRASONIC, DUAL
+          CONTROLS: ""
+          TAG: ""
+
+      keyed:
+        block_name: "E-SWTC-KEY"
+        layer_suffix: "-SWTC"
+        description: "Key switch"
+        attributes:
+          CIRCUIT: ""
+          CONTROLS: ""
+          TAG: ""
+
+      timer:
+        block_name: "E-SWTC-TMR"
+        layer_suffix: "-SWTC"
+        description: "Timer switch"
+        attributes:
+          CIRCUIT: ""
+          TIME: ""
+          CONTROLS: ""
+          TAG: ""
+
+    light:
+      recessed:
+        block_name: "E-LITE-REC"
+        layer_suffix: "-FIXT"
+        description: "Recessed downlight"
+        attributes:
+          WATTS: ""
+          TYPE: ""  # LED, FLUOR, etc.
+          CIRCUIT: ""
+          TAG: ""
+
+      pendant:
+        block_name: "E-LITE-PND"
+        layer_suffix: "-FIXT"
+        description: "Pendant light fixture"
+        attributes:
+          WATTS: ""
+          TYPE: ""
+          CIRCUIT: ""
+          TAG: ""
+
+      surface:
+        block_name: "E-LITE-SRF"
+        layer_suffix: "-FIXT"
+        description: "Surface-mounted fixture"
+        attributes:
+          WATTS: ""
+          TYPE: ""
+          CIRCUIT: ""
+          TAG: ""
+
+      linear:
+        block_name: "E-LITE-LIN"
+        layer_suffix: "-FIXT"
+        description: "Linear/troffer fixture"
+        attributes:
+          SIZE: ""  # 2x2, 2x4, 1x4
+          WATTS: ""
+          LUMENS: ""
+          CIRCUIT: ""
+          TAG: ""
+
+      emergency:
+        block_name: "E-LITE-EMR"
+        layer_suffix: "-FIXT"
+        description: "Emergency egress lighting"
+        attributes:
+          WATTS: ""
+          BATTERY: ""
+          CIRCUIT: ""
+          TAG: ""
+
+      exit:
+        block_name: "E-LITE-EXIT"
+        layer_suffix: "-FIXT"
+        description: "Exit sign"
+        attributes:
+          FACES: ""  # 1, 2
+          ARROWS: ""  # LEFT, RIGHT, BOTH, NONE
+          CIRCUIT: ""
+          TAG: ""
+
+      wall_sconce:
+        block_name: "E-LITE-SCON"
+        layer_suffix: "-FIXT"
+        description: "Wall sconce"
+        attributes:
+          WATTS: ""
+          TYPE: ""
+          CIRCUIT: ""
+          TAG: ""
+
+      track:
+        block_name: "E-LITE-TRAK"
+        layer_suffix: "-FIXT"
+        description: "Track lighting"
+        attributes:
+          LENGTH: ""
+          HEADS: ""
+          WATTS: ""
+          CIRCUIT: ""
+          TAG: ""
+
+    panel:
+      distribution:
+        block_name: "E-PANL-DIST"
+        layer_suffix: "-PANL"
+        description: "Panelboard"
+        attributes:
+          VOLTS: ""  # 120/208V, 277/480V
+          PHASE: ""  # 1PH, 3PH
+          AMPS: ""
+          MAIN: ""  # MLO, MB
+          TAG: ""
+
+      transformer:
+        block_name: "E-XFMR"
+        layer_suffix: "-XFMR"
+        description: "Transformer"
+        attributes:
+          KVA: ""
+          PRIMARY: ""
+          SECONDARY: ""
+          TAG: ""
+
+      disconnect:
+        block_name: "E-DISC"
+        layer_suffix: "-DISC"
+        description: "Disconnect switch"
+        attributes:
+          AMPS: ""
+          FUSED: ""  # YES, NO
+          TAG: ""
+
+      motor_starter:
+        block_name: "E-MSTR"
+        layer_suffix: "-MSTR"
+        description: "Motor starter/VFD"
+        attributes:
+          HP: ""
+          VOLTS: ""
+          TYPE: ""  # ACROSS-LINE, SOFT, VFD
+          TAG: ""
+
+    conduit:
+      emt:
+        layer_suffix: "-COND"
+        linetype: "CONTINUOUS"
+        description: "EMT conduit"
+
+      rigid:
+        layer_suffix: "-COND"
+        linetype: "CONTINUOUS"
+        description: "Rigid conduit"
+
+      flexible:
+        layer_suffix: "-FLEX"
+        linetype: "ZIGZAG"
+        description: "Flexible conduit/MC cable"
+
+    junction_box:
+      block_name: "E-JBOX"
+      layer_suffix: "-JBOX"
+      description: "Junction box"
+      attributes:
+        SIZE: ""
+        TAG: ""

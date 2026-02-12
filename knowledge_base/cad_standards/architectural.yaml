@@ -1,0 +1,255 @@
+# Architectural CAD Standards
+# Based on National CAD Standard (NCS)
+# Used for room boundaries, doors, windows, and architectural annotations
+
+architectural:
+  discipline_prefix: "A"
+  description: "Architectural elements including walls, doors, windows, and room data"
+
+  layers:
+    wall:
+      layer: "A-WALL"
+      color: 7  # White
+      linetype: "CONTINUOUS"
+      lineweight: 0.50
+      description: "Wall boundaries"
+
+    wall_fire:
+      layer: "A-WALL-FIRE"
+      color: 1  # Red
+      linetype: "CONTINUOUS"
+      lineweight: 0.70
+      description: "Fire-rated walls"
+
+    door:
+      layer: "A-DOOR"
+      color: 4  # Cyan
+      linetype: "CONTINUOUS"
+      description: "Doors"
+
+    window:
+      layer: "A-GLAZ"
+      color: 5  # Blue
+      linetype: "CONTINUOUS"
+      description: "Windows and glazing"
+
+    room:
+      layer: "A-AREA-IDEN"
+      color: 3  # Green
+      linetype: "CONTINUOUS"
+      description: "Room names and numbers"
+
+    ceiling:
+      layer: "A-CLNG"
+      color: 8  # Gray
+      linetype: "CONTINUOUS"
+      description: "Ceiling elements"
+
+    floor:
+      layer: "A-FLOR"
+      color: 8  # Gray
+      linetype: "CONTINUOUS"
+      description: "Floor elements"
+
+    column:
+      layer: "A-COLS"
+      color: 7  # White
+      linetype: "CONTINUOUS"
+      description: "Columns"
+
+    stair:
+      layer: "A-FLOR-STRS"
+      color: 4  # Cyan
+      linetype: "CONTINUOUS"
+      description: "Stairs"
+
+    elevator:
+      layer: "A-FLOR-EVTR"
+      color: 6  # Magenta
+      linetype: "CONTINUOUS"
+      description: "Elevators"
+
+    annotation:
+      layer: "A-ANNO"
+      color: 7  # White
+      linetype: "CONTINUOUS"
+      description: "General annotations"
+
+    dimension:
+      layer: "A-ANNO-DIMS"
+      color: 7  # White
+      linetype: "CONTINUOUS"
+      description: "Dimensions"
+
+  elements:
+    room:
+      layer: "A-AREA-IDEN"
+      block_name: "A-ROOM-TAG"
+      description: "Room tag/identifier"
+      attributes:
+        ROOM_NUMBER: ""
+        ROOM_NAME: ""
+        AREA_SF: ""
+        DEPARTMENT: ""
+        FINISH: ""
+
+    door:
+      single:
+        block_name: "A-DOOR-SGL"
+        layer: "A-DOOR"
+        description: "Single door"
+        attributes:
+          WIDTH: ""
+          HEIGHT: ""
+          FRAME: ""
+          HARDWARE: ""
+          FIRE_RATING: ""
+          TAG: ""
+
+      double:
+        block_name: "A-DOOR-DBL"
+        layer: "A-DOOR"
+        description: "Double door"
+        attributes:
+          WIDTH: ""
+          HEIGHT: ""
+          FRAME: ""
+          HARDWARE: ""
+          FIRE_RATING: ""
+          TAG: ""
+
+      sliding:
+        block_name: "A-DOOR-SLD"
+        layer: "A-DOOR"
+        description: "Sliding door"
+        attributes:
+          WIDTH: ""
+          HEIGHT: ""
+          TAG: ""
+
+      overhead:
+        block_name: "A-DOOR-OH"
+        layer: "A-DOOR"
+        description: "Overhead/roll-up door"
+        attributes:
+          WIDTH: ""
+          HEIGHT: ""
+          TAG: ""
+
+    window:
+      fixed:
+        block_name: "A-GLAZ-FXD"
+        layer: "A-GLAZ"
+        description: "Fixed window"
+        attributes:
+          WIDTH: ""
+          HEIGHT: ""
+          SILL: ""
+          TAG: ""
+
+      operable:
+        block_name: "A-GLAZ-OPR"
+        layer: "A-GLAZ"
+        description: "Operable window"
+        attributes:
+          WIDTH: ""
+          HEIGHT: ""
+          SILL: ""
+          TAG: ""
+
+      curtain_wall:
+        block_name: "A-GLAZ-CW"
+        layer: "A-GLAZ"
+        description: "Curtain wall"
+        attributes:
+          TAG: ""
+
+    column:
+      structural:
+        block_name: "A-COLS-STR"
+        layer: "A-COLS"
+        description: "Structural column"
+        attributes:
+          SIZE: ""
+          MATERIAL: ""
+          GRID: ""
+
+      architectural:
+        block_name: "A-COLS-ARC"
+        layer: "A-COLS"
+        description: "Architectural column/pilaster"
+        attributes:
+          SIZE: ""
+
+    stair:
+      block_name: "A-STRS"
+      layer: "A-FLOR-STRS"
+      description: "Stair"
+      attributes:
+        RISERS: ""
+        TREAD: ""
+        WIDTH: ""
+        TAG: ""
+
+    elevator:
+      passenger:
+        block_name: "A-EVTR-PASS"
+        layer: "A-FLOR-EVTR"
+        description: "Passenger elevator"
+        attributes:
+          CAPACITY: ""
+          SPEED: ""
+          STOPS: ""
+          TAG: ""
+
+      freight:
+        block_name: "A-EVTR-FRT"
+        layer: "A-FLOR-EVTR"
+        description: "Freight elevator"
+        attributes:
+          CAPACITY: ""
+          SIZE: ""
+          TAG: ""
+
+    toilet_room:
+      men:
+        block_name: "A-TOIL-MEN"
+        layer: "A-AREA-IDEN"
+        description: "Men's restroom"
+        attributes:
+          TAG: ""
+
+      women:
+        block_name: "A-TOIL-WMN"
+        layer: "A-AREA-IDEN"
+        description: "Women's restroom"
+        attributes:
+          TAG: ""
+
+      accessible:
+        block_name: "A-TOIL-ADA"
+        layer: "A-AREA-IDEN"
+        description: "Accessible restroom"
+        attributes:
+          TAG: ""
+
+  text_styles:
+    room_name:
+      height: 0.125  # 1/8" plotted
+      font: "Arial"
+      style: "STANDARD"
+
+    room_number:
+      height: 0.1875  # 3/16" plotted
+      font: "Arial"
+      style: "STANDARD"
+
+    annotation:
+      height: 0.09375  # 3/32" plotted
+      font: "Arial"
+      style: "STANDARD"
+
+    dimension:
+      height: 0.09375
+      font: "Arial"
+      style: "STANDARD"

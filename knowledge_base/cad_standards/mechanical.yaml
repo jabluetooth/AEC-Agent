@@ -1,0 +1,387 @@
+# Mechanical (HVAC) CAD Standards
+# Based on National CAD Standard (NCS) with LA-specific conventions
+# Jurisdiction: Los Angeles, CA (CMC - California Mechanical Code)
+
+mechanical:
+  discipline_prefix: "M"
+  description: "HVAC systems including air distribution, hydronic, and refrigerant"
+
+  systems:
+    supply_air:
+      abbreviation: "SA"
+      layer_prefix: "M-HVAC-SPLY"
+      color: 5  # Blue
+      linetype: "CONTINUOUS"
+      description: "Supply air distribution"
+
+    return_air:
+      abbreviation: "RA"
+      layer_prefix: "M-HVAC-RETN"
+      color: 4  # Cyan
+      linetype: "CONTINUOUS"
+      description: "Return air"
+
+    exhaust_air:
+      abbreviation: "EA"
+      layer_prefix: "M-HVAC-EXHA"
+      color: 6  # Magenta
+      linetype: "CONTINUOUS"
+      description: "Exhaust air"
+
+    outside_air:
+      abbreviation: "OA"
+      layer_prefix: "M-HVAC-OTSD"
+      color: 3  # Green
+      linetype: "CONTINUOUS"
+      description: "Outside/fresh air intake"
+
+    chilled_water_supply:
+      abbreviation: "CHWS"
+      layer_prefix: "M-HVAC-CHWS"
+      color: 5  # Blue
+      linetype: "CONTINUOUS"
+      description: "Chilled water supply"
+
+    chilled_water_return:
+      abbreviation: "CHWR"
+      layer_prefix: "M-HVAC-CHWR"
+      color: 5  # Blue
+      linetype: "DASHED"
+      description: "Chilled water return"
+
+    hot_water_supply:
+      abbreviation: "HWS"
+      layer_prefix: "M-HVAC-HWTS"
+      color: 1  # Red
+      linetype: "CONTINUOUS"
+      description: "Heating hot water supply"
+
+    hot_water_return:
+      abbreviation: "HWR"
+      layer_prefix: "M-HVAC-HWTR"
+      color: 1  # Red
+      linetype: "DASHED"
+      description: "Heating hot water return"
+
+    refrigerant:
+      abbreviation: "REF"
+      layer_prefix: "M-HVAC-REFR"
+      color: 4  # Cyan
+      linetype: "CONTINUOUS"
+      description: "Refrigerant piping"
+
+    condensate:
+      abbreviation: "COND"
+      layer_prefix: "M-HVAC-COND"
+      color: 2  # Yellow
+      linetype: "DASHED"
+      description: "Condensate drain"
+
+  elements:
+    duct:
+      rectangular:
+        layer_suffix: "-DUCT"
+        linetype: "CONTINUOUS"
+        description: "Rectangular ductwork"
+        lineweight_by_size:
+          "small": 0.35  # Up to 12" dimension
+          "medium": 0.50  # 12" to 24"
+          "large": 0.70  # Over 24"
+
+      round:
+        layer_suffix: "-DUCT"
+        linetype: "CONTINUOUS"
+        description: "Round/spiral ductwork"
+
+      flexible:
+        layer_suffix: "-FLEX"
+        linetype: "ZIGZAG"
+        description: "Flexible ductwork"
+
+    diffuser:
+      square:
+        block_name: "M-DIFF-SQ"
+        layer_suffix: "-DIFF"
+        description: "Square ceiling diffuser"
+        attributes:
+          SIZE: ""  # e.g., "24x24"
+          CFM: ""
+          NC: ""  # Noise criteria
+          TAG: ""
+        sizes: ["6x6", "8x8", "10x10", "12x12", "14x14", "24x24"]
+
+      round:
+        block_name: "M-DIFF-RD"
+        layer_suffix: "-DIFF"
+        description: "Round ceiling diffuser"
+        attributes:
+          SIZE: ""  # Diameter
+          CFM: ""
+          TAG: ""
+        sizes: ["6", "8", "10", "12", "14"]
+
+      linear:
+        block_name: "M-DIFF-LN"
+        layer_suffix: "-DIFF"
+        description: "Linear slot diffuser"
+        attributes:
+          SIZE: ""  # Length x slots
+          CFM_LF: ""  # CFM per linear foot
+          TAG: ""
+
+      slot:
+        block_name: "M-DIFF-SLOT"
+        layer_suffix: "-DIFF"
+        description: "Slot diffuser"
+        attributes:
+          SIZE: ""
+          SLOTS: ""
+          CFM: ""
+          TAG: ""
+
+      perforated:
+        block_name: "M-DIFF-PERF"
+        layer_suffix: "-DIFF"
+        description: "Perforated face diffuser"
+        attributes:
+          SIZE: ""
+          CFM: ""
+          TAG: ""
+
+    grille:
+      return:
+        block_name: "M-GRIL-RTN"
+        layer_suffix: "-GRIL"
+        description: "Return air grille"
+        attributes:
+          SIZE: ""
+          CFM: ""
+          TAG: ""
+
+      transfer:
+        block_name: "M-GRIL-XFR"
+        layer_suffix: "-GRIL"
+        description: "Transfer grille (door/wall)"
+        attributes:
+          SIZE: ""
+          CFM: ""
+          TAG: ""
+
+      exhaust:
+        block_name: "M-GRIL-EXH"
+        layer_suffix: "-GRIL"
+        description: "Exhaust grille"
+        attributes:
+          SIZE: ""
+          CFM: ""
+          TAG: ""
+
+      louver:
+        block_name: "M-GRIL-LOVR"
+        layer_suffix: "-GRIL"
+        description: "Exterior louver"
+        attributes:
+          SIZE: ""
+          CFM: ""
+          FREE_AREA: ""
+          TAG: ""
+
+    register:
+      supply:
+        block_name: "M-REGI-SPLY"
+        layer_suffix: "-REGI"
+        description: "Supply register"
+        attributes:
+          SIZE: ""
+          CFM: ""
+          TAG: ""
+
+      return:
+        block_name: "M-REGI-RTN"
+        layer_suffix: "-REGI"
+        description: "Return register"
+        attributes:
+          SIZE: ""
+          CFM: ""
+          TAG: ""
+
+    damper:
+      fire:
+        block_name: "M-DAMP-FIRE"
+        layer_suffix: "-DAMP"
+        description: "Fire damper (UL 555)"
+        attributes:
+          SIZE: ""
+          RATING: ""  # 1.5HR, 3HR
+          TAG: ""
+
+      smoke:
+        block_name: "M-DAMP-SMOK"
+        layer_suffix: "-DAMP"
+        description: "Smoke damper (UL 555S)"
+        attributes:
+          SIZE: ""
+          LEAKAGE_CLASS: ""
+          TAG: ""
+
+      combination:
+        block_name: "M-DAMP-COMB"
+        layer_suffix: "-DAMP"
+        description: "Combination fire/smoke damper"
+        attributes:
+          SIZE: ""
+          RATING: ""
+          TAG: ""
+
+      volume:
+        block_name: "M-DAMP-VOL"
+        layer_suffix: "-DAMP"
+        description: "Volume/balancing damper"
+        attributes:
+          SIZE: ""
+          TAG: ""
+
+      backdraft:
+        block_name: "M-DAMP-BD"
+        layer_suffix: "-DAMP"
+        description: "Backdraft damper"
+        attributes:
+          SIZE: ""
+          TAG: ""
+
+      motorized:
+        block_name: "M-DAMP-MOT"
+        layer_suffix: "-DAMP"
+        description: "Motorized control damper"
+        attributes:
+          SIZE: ""
+          ACTUATOR: ""
+          TAG: ""
+
+    equipment:
+      ahu:
+        block_name: "M-EQPM-AHU"
+        layer_suffix: "-EQPM"
+        description: "Air handling unit"
+        attributes:
+          CFM: ""
+          TONS: ""
+          STATIC: ""
+          TAG: ""
+
+      rtu:
+        block_name: "M-EQPM-RTU"
+        layer_suffix: "-EQPM"
+        description: "Rooftop unit"
+        attributes:
+          CFM: ""
+          TONS: ""
+          EER: ""
+          TAG: ""
+
+      vav:
+        block_name: "M-EQPM-VAV"
+        layer_suffix: "-EQPM"
+        description: "Variable air volume box"
+        attributes:
+          CFM_MIN: ""
+          CFM_MAX: ""
+          INLET_SIZE: ""
+          TAG: ""
+
+      fcu:
+        block_name: "M-EQPM-FCU"
+        layer_suffix: "-EQPM"
+        description: "Fan coil unit"
+        attributes:
+          CFM: ""
+          MBH_HEAT: ""
+          MBH_COOL: ""
+          TAG: ""
+
+      exhaust_fan:
+        block_name: "M-EQPM-EF"
+        layer_suffix: "-EQPM"
+        description: "Exhaust fan"
+        attributes:
+          CFM: ""
+          STATIC: ""
+          HP: ""
+          TAG: ""
+
+      split_system:
+        block_name: "M-EQPM-SPLT"
+        layer_suffix: "-EQPM"
+        description: "Split system (indoor unit)"
+        attributes:
+          CFM: ""
+          TONS: ""
+          TAG: ""
+
+      condenser:
+        block_name: "M-EQPM-CDU"
+        layer_suffix: "-EQPM"
+        description: "Condensing unit (outdoor)"
+        attributes:
+          TONS: ""
+          SEER: ""
+          TAG: ""
+
+      chiller:
+        block_name: "M-EQPM-CHLR"
+        layer_suffix: "-EQPM"
+        description: "Chiller"
+        attributes:
+          TONS: ""
+          KW_TON: ""
+          TAG: ""
+
+      boiler:
+        block_name: "M-EQPM-BOIL"
+        layer_suffix: "-EQPM"
+        description: "Boiler"
+        attributes:
+          MBH_INPUT: ""
+          MBH_OUTPUT: ""
+          EFFICIENCY: ""
+          TAG: ""
+
+      pump:
+        block_name: "M-EQPM-PUMP"
+        layer_suffix: "-EQPM"
+        description: "Pump"
+        attributes:
+          GPM: ""
+          HEAD_FT: ""
+          HP: ""
+          TAG: ""
+
+    valve:
+      # HVAC-specific valves
+      control:
+        block_name: "M-VALV-CTRL"
+        layer_suffix: "-VALV"
+        description: "Control valve (2-way or 3-way)"
+        attributes:
+          SIZE: ""
+          CV: ""
+          TYPE: ""  # 2W, 3W
+          TAG: ""
+
+      balancing:
+        block_name: "M-VALV-BAL"
+        layer_suffix: "-VALV"
+        description: "Balancing valve"
+        attributes:
+          SIZE: ""
+          CV: ""
+          TAG: ""
+
+      isolation:
+        block_name: "M-VALV-ISO"
+        layer_suffix: "-VALV"
+        description: "Isolation valve"
+        attributes:
+          SIZE: ""
+          TYPE: ""
+          TAG: ""

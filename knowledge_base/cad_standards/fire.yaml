@@ -1,0 +1,435 @@
+# Fire Protection CAD Standards
+# Based on National CAD Standard (NCS) with LA-specific conventions
+# Jurisdiction: Los Angeles, CA (CFC - California Fire Code, NFPA 72)
+
+fire:
+  discipline_prefix: "F"
+  description: "Fire protection systems including fire alarm and suppression"
+
+  systems:
+    fire_alarm:
+      abbreviation: "FA"
+      layer_prefix: "F-ALRM"
+      color: 1  # Red
+      linetype: "CONTINUOUS"
+      description: "Fire alarm detection and notification"
+
+    fire_suppression:
+      abbreviation: "FP"
+      layer_prefix: "F-SPKL"
+      color: 1  # Red
+      linetype: "CONTINUOUS"
+      description: "Automatic fire sprinkler system"
+
+    fire_standpipe:
+      abbreviation: "STPF"
+      layer_prefix: "F-STPF"
+      color: 1  # Red
+      linetype: "CONTINUOUS"
+      description: "Standpipe and hose system"
+
+    clean_agent:
+      abbreviation: "CLN"
+      layer_prefix: "F-CLAG"
+      color: 4  # Cyan
+      linetype: "CONTINUOUS"
+      description: "Clean agent suppression (FM-200, etc.)"
+
+    kitchen_hood:
+      abbreviation: "KHD"
+      layer_prefix: "F-KHOD"
+      color: 2  # Yellow
+      linetype: "CONTINUOUS"
+      description: "Kitchen hood suppression"
+
+  elements:
+    # Fire Alarm Detection
+    smoke_detector:
+      photoelectric:
+        block_name: "F-DETC-SMOK-P"
+        layer_suffix: "-DETC"
+        description: "Photoelectric smoke detector"
+        attributes:
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+      ionization:
+        block_name: "F-DETC-SMOK-I"
+        layer_suffix: "-DETC"
+        description: "Ionization smoke detector"
+        attributes:
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+      duct:
+        block_name: "F-DETC-SMOK-D"
+        layer_suffix: "-DETC"
+        description: "Duct smoke detector"
+        attributes:
+          DUCT_SIZE: ""
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+      beam:
+        block_name: "F-DETC-SMOK-B"
+        layer_suffix: "-DETC"
+        description: "Beam smoke detector"
+        attributes:
+          COVERAGE_FT: ""
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+      aspiring:
+        block_name: "F-DETC-SMOK-A"
+        layer_suffix: "-DETC"
+        description: "Aspirating smoke detector (VESDA)"
+        attributes:
+          PORTS: ""
+          COVERAGE: ""
+          ZONE: ""
+          TAG: ""
+
+    heat_detector:
+      fixed_temp:
+        block_name: "F-DETC-HEAT-FT"
+        layer_suffix: "-DETC"
+        description: "Fixed temperature heat detector"
+        attributes:
+          TEMP: ""  # 135F, 200F
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+      rate_of_rise:
+        block_name: "F-DETC-HEAT-RR"
+        layer_suffix: "-DETC"
+        description: "Rate of rise heat detector"
+        attributes:
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+      combination:
+        block_name: "F-DETC-HEAT-CB"
+        layer_suffix: "-DETC"
+        description: "Combination heat detector (fixed + ROR)"
+        attributes:
+          TEMP: ""
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+    # Fire Alarm Notification
+    horn_strobe:
+      wall:
+        block_name: "F-ANUN-HS-W"
+        layer_suffix: "-ANUN"
+        description: "Wall-mount horn/strobe"
+        attributes:
+          CANDELA: ""  # 15, 30, 75, 110, etc.
+          DB: ""
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+      ceiling:
+        block_name: "F-ANUN-HS-C"
+        layer_suffix: "-ANUN"
+        description: "Ceiling-mount horn/strobe"
+        attributes:
+          CANDELA: ""
+          DB: ""
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+    strobe:
+      wall:
+        block_name: "F-ANUN-STR-W"
+        layer_suffix: "-ANUN"
+        description: "Wall-mount strobe (visual only)"
+        attributes:
+          CANDELA: ""
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+      ceiling:
+        block_name: "F-ANUN-STR-C"
+        layer_suffix: "-ANUN"
+        description: "Ceiling-mount strobe"
+        attributes:
+          CANDELA: ""
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+    horn:
+      block_name: "F-ANUN-HRN"
+      layer_suffix: "-ANUN"
+      description: "Horn (audible only)"
+      attributes:
+        DB: ""
+        ZONE: ""
+        ADDRESS: ""
+        TAG: ""
+
+    speaker:
+      block_name: "F-ANUN-SPKR"
+      layer_suffix: "-ANUN"
+      description: "Voice evacuation speaker"
+      attributes:
+        WATTS: ""
+        ZONE: ""
+        ADDRESS: ""
+        TAG: ""
+
+    pull_station:
+      single_action:
+        block_name: "F-ANUN-PULL-SA"
+        layer_suffix: "-ANUN"
+        description: "Single action pull station"
+        attributes:
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+      dual_action:
+        block_name: "F-ANUN-PULL-DA"
+        layer_suffix: "-ANUN"
+        description: "Dual action pull station"
+        attributes:
+          ZONE: ""
+          ADDRESS: ""
+          TAG: ""
+
+    # Fire Alarm Control
+    facp:
+      block_name: "F-CTRL-FACP"
+      layer_suffix: "-CTRL"
+      description: "Fire alarm control panel"
+      attributes:
+        LOOPS: ""
+        POINTS: ""
+        MODEL: ""
+        TAG: ""
+
+    annunciator:
+      block_name: "F-CTRL-ANN"
+      layer_suffix: "-CTRL"
+      description: "Remote annunciator"
+      attributes:
+        ZONES: ""
+        TAG: ""
+
+    relay_module:
+      block_name: "F-CTRL-RMOD"
+      layer_suffix: "-CTRL"
+      description: "Relay/control module"
+      attributes:
+        TYPE: ""
+        ADDRESS: ""
+        TAG: ""
+
+    monitor_module:
+      block_name: "F-CTRL-MMOD"
+      layer_suffix: "-CTRL"
+      description: "Monitor module (input)"
+      attributes:
+        TYPE: ""
+        ADDRESS: ""
+        TAG: ""
+
+    # Fire Suppression
+    sprinkler:
+      pendant:
+        block_name: "F-SPKL-PND"
+        layer_suffix: "-SPKL"
+        description: "Pendant sprinkler head"
+        attributes:
+          SIZE: ""  # 1/2", 3/4"
+          K_FACTOR: ""  # 5.6, 8.0, 11.2
+          TEMP: ""  # 155F, 200F, etc.
+          COVERAGE: ""
+          TAG: ""
+
+      upright:
+        block_name: "F-SPKL-UPR"
+        layer_suffix: "-SPKL"
+        description: "Upright sprinkler head"
+        attributes:
+          SIZE: ""
+          K_FACTOR: ""
+          TEMP: ""
+          COVERAGE: ""
+          TAG: ""
+
+      sidewall:
+        block_name: "F-SPKL-SW"
+        layer_suffix: "-SPKL"
+        description: "Sidewall sprinkler head"
+        attributes:
+          SIZE: ""
+          K_FACTOR: ""
+          TEMP: ""
+          COVERAGE: ""
+          TAG: ""
+
+      concealed:
+        block_name: "F-SPKL-CON"
+        layer_suffix: "-SPKL"
+        description: "Concealed sprinkler head"
+        attributes:
+          SIZE: ""
+          K_FACTOR: ""
+          TEMP: ""
+          COVER_PLATE: ""
+          TAG: ""
+
+      esfr:
+        block_name: "F-SPKL-ESFR"
+        layer_suffix: "-SPKL"
+        description: "ESFR sprinkler"
+        attributes:
+          SIZE: ""
+          K_FACTOR: ""  # 14.0, 16.8, 22.4, 25.2
+          TEMP: ""
+          TAG: ""
+
+      dry:
+        block_name: "F-SPKL-DRY"
+        layer_suffix: "-SPKL"
+        description: "Dry pendent sprinkler"
+        attributes:
+          SIZE: ""
+          K_FACTOR: ""
+          TEMP: ""
+          DROP_LENGTH: ""
+          TAG: ""
+
+    valve:
+      osny:
+        block_name: "F-VALV-OSNY"
+        layer_suffix: "-VALV"
+        description: "OS&Y gate valve"
+        attributes:
+          SIZE: ""
+          SUPERVISED: ""
+          TAG: ""
+
+      piv:
+        block_name: "F-VALV-PIV"
+        layer_suffix: "-VALV"
+        description: "Post indicator valve"
+        attributes:
+          SIZE: ""
+          TAG: ""
+
+      butterfly:
+        block_name: "F-VALV-BTRF"
+        layer_suffix: "-VALV"
+        description: "Butterfly valve"
+        attributes:
+          SIZE: ""
+          SUPERVISED: ""
+          TAG: ""
+
+      check:
+        block_name: "F-VALV-CHEK"
+        layer_suffix: "-VALV"
+        description: "Check valve"
+        attributes:
+          SIZE: ""
+          TAG: ""
+
+      alarm_check:
+        block_name: "F-VALV-ACK"
+        layer_suffix: "-VALV"
+        description: "Alarm check valve"
+        attributes:
+          SIZE: ""
+          TAG: ""
+
+      dry_valve:
+        block_name: "F-VALV-DRY"
+        layer_suffix: "-VALV"
+        description: "Dry pipe valve"
+        attributes:
+          SIZE: ""
+          TAG: ""
+
+      fpv:
+        block_name: "F-VALV-FPV"
+        layer_suffix: "-VALV"
+        description: "Fire pump test valve"
+        attributes:
+          SIZE: ""
+          TAG: ""
+
+    equipment:
+      fdc:
+        block_name: "F-EQPM-FDC"
+        layer_suffix: "-CONN"
+        description: "Fire department connection"
+        attributes:
+          SIZE: ""
+          CONNECTIONS: ""  # 2.5x2, etc.
+          TYPE: ""  # SIAMESE, STORZ
+          TAG: ""
+
+      fire_pump:
+        block_name: "F-EQPM-PUMP"
+        layer_suffix: "-EQPM"
+        description: "Fire pump"
+        attributes:
+          GPM: ""
+          PSI: ""
+          HP: ""
+          TYPE: ""  # ELECTRIC, DIESEL
+          TAG: ""
+
+      jockey_pump:
+        block_name: "F-EQPM-JPMP"
+        layer_suffix: "-EQPM"
+        description: "Jockey/pressure maintenance pump"
+        attributes:
+          GPM: ""
+          PSI: ""
+          HP: ""
+          TAG: ""
+
+      fire_hose_cabinet:
+        block_name: "F-EQPM-FHC"
+        layer_suffix: "-EQPM"
+        description: "Fire hose cabinet"
+        attributes:
+          HOSE_LENGTH: ""
+          TAG: ""
+
+      fire_extinguisher:
+        block_name: "F-EQPM-FEXT"
+        layer_suffix: "-EXTN"
+        description: "Fire extinguisher"
+        attributes:
+          TYPE: ""  # ABC, CO2, K-CLASS
+          SIZE: ""  # 5LB, 10LB, etc.
+          TAG: ""
+
+    pipe:
+      layer_suffix: "-PIPE"
+      linetype: "CONTINUOUS"
+      color: 1  # Red
+      lineweight_by_size:
+        "1\"": 0.35
+        "1-1/4\"": 0.40
+        "1-1/2\"": 0.45
+        "2\"": 0.50
+        "2-1/2\"": 0.55
+        "3\"": 0.60
+        "4\"": 0.70
+        "6\"": 0.80
+        "8\"": 0.90

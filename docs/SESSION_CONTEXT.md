@@ -2,15 +2,47 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Semantic Intelligence Pipeline (Phase C) — COMPLETE. Implemented two-stage symbol classification with Vision LLM.
-**Last Action:** Phase C Implementation (2026-02-10):
+**Objective:** Semantic Intelligence Pipeline (Phase F) — COMPLETE with Gemini LLM integration.
+**Last Action:** Gemini LLM Integration (2026-02-12):
+- Added `KnowledgeLLM` class for LLM-powered CAD standards queries
+- Added `LLMQueryResult` dataclass for LLM query responses
+- Added `query_with_llm()` convenience function
+- Supports Gemini (primary), OpenAI, and Anthropic providers with auto-fallback
+- Methods: `query()`, `classify_element()`, `get_code_reference()`, `suggest_attributes()`
+- System prompt with NCS layer naming, MEP standards, and building code knowledge
+- JSON response parsing with fallback for plain text
+- Added 20 new unit tests for KnowledgeLLM class
+- All 132 knowledge_query tests passing
+
+**Previous Action:** Phase F Implementation (2026-02-12):
+- Created `knowledge_query.py` — CAD standards lookup module with 1500+ lines
+- Added `CADStandards` dataclass (layer, color, linetype, lineweight, block_name, attributes)
+- Added `Discipline` enum (ARCHITECTURAL, MECHANICAL, ELECTRICAL, PLUMBING, FIRE, LOW_VOLTAGE)
+- Added `SystemType` enum with 25+ MEP system types (supply_air, domestic_cold_water, fire_alarm, etc.)
+- Added `GroundedElement` dataclass for elements with standards applied
+- Created `knowledge_base/cad_standards/` directory with 6 YAML files (plumbing, mechanical, electrical, fire, low_voltage, architectural)
+- Added `query_cad_standards()` async function — Priority lookup: project → company → YAML → defaults
+- Added `ground_element()` and `ground_elements()` for batch standards application
+- Added convenience functions: `get_layer_for_element()`, `get_block_name()`, `get_color_for_system()`
+- 50+ block name patterns across all MEP categories (valves, diffusers, outlets, detectors, etc.)
+- NCS-based layer naming (P-DOMW-VALV, M-HVAC-DIFF, E-POWR-OUTL, F-ALRM-DETC, T-DATA-OUTL)
+- Updated `image_vectorizer.py` with Phase F integration and new parameters
+- Added 132 unit tests for Phase F components (including Gemini LLM tests)
+- All tests passing (700+ total)
+
+**Previous Action:** Phase E Implementation (2026-02-11):
+- Created `relationship_builder.py` — Relationship inference engine with 20+ relationship types
+- Added 39 unit tests for Phase E components
+
+**Previous Action:** Phase D Implementation (2026-02-11):
+- Created `geometry_classifier.py` — Pattern-based geometry classification (walls, ducts, pipes)
+- Created `topology_analyzer.py` — Graph-based system connectivity analysis
+- Added 88 new unit tests for Phase D components
+
+**Previous Action:** Phase C Implementation (2026-02-10):
 - Created `vision_llm.py` — Vision LLM integration (Gemini/GPT-4o/Claude) for symbol classification
 - Created `symbol_classifier.py` — Two-stage detection pipeline (YOLO → Vision LLM)
-- Created `prompts/symbol_classification.py` — Domain-specific Vision LLM prompts for symbol ID
-- Updated `symbol_detection.py` — Added `detect_symbols_smart()` with Vision LLM support
-- Updated `image_vectorizer.py` — Integrated Phase C smart symbol classification
 - Added 89 new unit tests for Phase C components
-- All **456 tests passing** after implementation
 
 **Phase A (COMPLETE):**
 - `document_classifier.py` — Drawing type classification (14 types)
@@ -32,7 +64,53 @@
 - Specialized prompts for valves, diffusers, outlets, and detectors
 - Pipeline parameters: `vision_llm_classification`, `vision_llm_provider`, `vision_llm_confidence_threshold`
 
-**Next Step:** Phase D (Relationship Inference) or Phase E (Knowledge Grounding) from SEMANTIC_INTELLIGENCE_PLAN.md.
+**Phase D (COMPLETE):**
+- `GeometryClassifier` class for pattern-based geometry classification (parallel lines → walls/ducts)
+- `TopologyAnalyzer` class for graph-based MEP system connectivity analysis
+- `GeometryType` enum with 30+ types (wall, duct, pipe, conduit, dimension_line, leader, etc.)
+- `GeometrySystem` enum with 15 MEP systems (supply_air, return_air, domestic_cold, power, etc.)
+- `TopologyGraph` with BFS/DFS pathfinding, connected components, branch identification
+- Classification based on: parallel line spacing, linetype, drawing context, nearby symbols/text
+- Pipeline parameters: `geometry_classification` (bool, default True)
+
+**Phase E (COMPLETE):**
+- `RelationshipBuilder` class for multi-strategy relationship inference
+- `RelationType` enum with 20+ types (contains, connected_to, branches_from, feeds, serves, adjacent_to, near, etc.)
+- `InferredRelationship` dataclass with confidence, distance, system, bidirectional, reasoning
+- Point-in-polygon containment detection (room CONTAINS equipment)
+- Endpoint proximity connectivity detection (pipe CONNECTED_TO valve)
+- Spatial analysis (room ADJACENT_TO room, symbol NEAR symbol)
+- Flow path detection from TopologyGraph (source FEEDS terminal, branch BRANCHES_FROM main)
+- Text labeling detection (annotation LABELS symbol)
+- Repository methods: `create_relationships_batch()`, `get_connectivity_graph()`, `find_path_between_elements()`
+- Pipeline parameters: `relationship_inference` (bool, default True)
+
+**Phase F (COMPLETE):**
+- `knowledge_query.py` — CAD standards lookup module with hierarchical lookup (project → company → YAML → defaults)
+- `CADStandards` dataclass with layer, color, linetype, lineweight, block_name, attributes
+- `Discipline` enum (8 disciplines: architectural, mechanical, electrical, plumbing, fire, low_voltage, civil, structural)
+- `SystemType` enum with 25+ MEP system types (domestic_cold_water, supply_air, fire_alarm, data, security, etc.)
+- `GroundedElement` dataclass for elements with standards applied
+- `ground_elements()` async function for batch standards application with statistics
+- Created `knowledge_base/cad_standards/` directory with 6 YAML files:
+  - `plumbing.yaml` — Valves, pipes, fittings, fixtures, equipment (CPC standards)
+  - `mechanical.yaml` — Ducts, diffusers, grilles, dampers, VAV, AHU (CMC standards)
+  - `electrical.yaml` — Outlets, switches, lights, panels, conduit (CEC/Title 24)
+  - `fire.yaml` — Smoke/heat detectors, horn/strobes, sprinklers, FACP (NFPA 72)
+  - `low_voltage.yaml` — Data, voice, security cameras, access control (TIA/EIA)
+  - `architectural.yaml` — Walls, doors, windows, rooms (NCS)
+- 50+ block name patterns: P-VALV-GATE, M-DIFF-SQ, E-OUTL-DUP, F-DETC-SMOK, T-DATA-RJ45
+- NCS-based layer naming: discipline-major-minor (P-DOMW-VALV, M-HVAC-DIFF, E-POWR-OUTL)
+- Color coding by system: Blue=cold water/supply air, Red=hot water/power/fire, Cyan=return air
+- Convenience functions: `get_layer_for_element()`, `get_block_name()`, `get_color_for_system()`
+- Pipeline parameters: `knowledge_grounding` (bool), `project_standards`, `company_standards`
+- 112 unit tests covering all components
+
+**Semantic Intelligence Pipeline: COMPLETE (Phases A-F)**
+- All 6 phases of the Semantic Intelligence Pipeline are now implemented
+- Full pipeline: Document Classification → Region Segmentation → Semantic OCR → Symbol Intelligence → Geometry Intelligence → Relationship Inference → Knowledge Grounding
+
+**Next Step:** Phase 3 (Knowledge Base Query Tools) from FUTURE_ROADMAP.md — Building `query_knowledge_base` MCP tool for codes, standards, and engineering formulas.
 
 ## 📊 Repository Status (as of 2026-02-02)
 
@@ -137,7 +215,50 @@
     - [x] Pipeline integration with `semantic_ocr` and `text_association` parameters
     - [x] 69 unit tests for Phase B components
     - [x] All 367 tests passing
-- [ ] **Phase 3: Knowledge Base** (Pending — `knowledge_base/` dir not yet created)
+- [x] **Phase D: Geometry Intelligence** (COMPLETE)
+    - [x] `geometry_classifier.py` — Pattern-based geometry classification (walls, ducts, pipes)
+    - [x] `topology_analyzer.py` — Graph-based system connectivity analysis
+    - [x] `GeometryType` enum with 30+ AEC element types
+    - [x] `GeometrySystem` enum with 15 MEP systems
+    - [x] `TopologyGraph` with BFS/DFS pathfinding and connected components
+    - [x] `ClassifiedLine`, `ParallelLinePair`, `TopologyNode`, `TopologyEdge` dataclasses
+    - [x] Classification rules: wall thickness detection, duct sizing, pipe run identification
+    - [x] Pipeline integration with `geometry_classification` parameter
+    - [x] 88 unit tests for Phase D components
+    - [x] All tests passing
+- [x] **Phase E: Relationship Inference** (COMPLETE)
+    - [x] `relationship_builder.py` — Multi-strategy relationship inference engine
+    - [x] `RelationType` enum with 20+ relationship types
+    - [x] `InferredRelationship` dataclass with confidence scoring
+    - [x] Point-in-polygon containment detection (rooms contain equipment)
+    - [x] Endpoint proximity connectivity detection (pipes connect to valves)
+    - [x] Spatial analysis (room adjacency, symbol proximity)
+    - [x] Flow relationship detection from topology (source feeds terminal)
+    - [x] Updated `repository.py` with batch relationship creation
+    - [x] Pipeline integration with `relationship_inference` parameter
+    - [x] 39 unit tests for Phase E components
+    - [x] All tests passing
+- [x] **Phase F: Knowledge Grounding** (COMPLETE with Gemini LLM)
+    - [x] `knowledge_query.py` — CAD standards lookup module (1500+ lines)
+    - [x] `CADStandards` dataclass with layer, color, linetype, lineweight, block_name, attributes
+    - [x] `Discipline` enum (8 disciplines) and `SystemType` enum (25+ systems)
+    - [x] `GroundedElement` dataclass for elements with standards applied
+    - [x] Hierarchical lookup: project → company → YAML → built-in defaults
+    - [x] Created `knowledge_base/cad_standards/` directory with 6 YAML files
+    - [x] 50+ block name patterns (P-VALV-GATE, M-DIFF-SQ, E-OUTL-DUP, etc.)
+    - [x] NCS-based layer naming (P-DOMW-VALV, M-HVAC-DIFF, E-POWR-OUTL)
+    - [x] Color coding by system (Blue=cold/supply, Red=hot/power/fire)
+    - [x] Convenience functions: `get_layer_for_element()`, `get_block_name()`, `get_color_for_system()`
+    - [x] Pipeline parameters: `knowledge_grounding`, `project_standards`, `company_standards`
+    - [x] **Gemini LLM Integration:**
+        - [x] `KnowledgeLLM` class for LLM-powered CAD standards queries
+        - [x] `LLMQueryResult` dataclass for structured LLM responses
+        - [x] Methods: `query()`, `classify_element()`, `get_code_reference()`, `suggest_attributes()`
+        - [x] Auto-fallback provider chain: Gemini → OpenAI → Anthropic
+        - [x] `query_with_llm()` convenience function for quick queries
+    - [x] 132 unit tests for Phase F components (including 20 LLM tests)
+    - [x] All tests passing
+- [ ] **Phase 3: Knowledge Base Query Tools** (Pending — MCP tool for codes/standards/formulas)
 - [ ] **Phase 4: HVAC Autonomous Design** (Pending)
 - [ ] **Phase 5-8: Fire/LV/Electrical/Plumbing** (Pending)
 - [ ] **Phase 9: Multi-System Coordination** (Pending)
@@ -146,12 +267,13 @@
 ## 📈 Metrics
 | Metric | Value |
 |--------|-------|
-| Python LOC | ~19,500 |
+| Python LOC | ~24,000 |
 | MCP Tools | 50 (7 categories) |
-| Config Parameters | 45 env vars |
-| Test Files | 17 (456 tests) |
+| Config Parameters | 48 env vars |
+| Test Files | 21 (695+ tests) |
 | DB Tables | 15 (projects, elements, relationships, + 12 MEP/domain tables) |
 | Sidecar Files | 29 total (15 C#, 14 Python) |
+| Knowledge Base YAML Files | 6 (plumbing, mechanical, electrical, fire, low_voltage, architectural) |
 
 ## 🧠 Brain Dump (Context for Next Session)
 - **Phase 2.5.1 YOLOv8 Symbol Detection is COMPLETE.** Neural network-based symbol detection added as alternative to template matching. Files: `yolo_detection.py`, `train_yolo_symbols.py`, `models/README.md`. Use `symbol_backend="yolo"` or `"auto"` to enable. Supports 42 MEP symbol classes across mechanical, electrical, fire, plumbing, and low_voltage categories. Install with `pip install aec-agent[yolo]`.
@@ -182,7 +304,7 @@
 - `FUTURE_ROADMAP.md` has the 10-phase vision, tool gap analysis, and knowledge base architecture.
 - Extraction pipeline has debounced sync (2s) and file hash detection to skip unchanged files.
 - Tool lock enforces max 1 concurrent operation (STA constraint).
-- The `knowledge_base/` directory structure is planned in FUTURE_ROADMAP.md but not yet created.
+- The `knowledge_base/cad_standards/` directory now contains 6 YAML files for CAD standards (plumbing, mechanical, electrical, fire, low_voltage, architectural).
 - MEP domain seed data exists inline in `src/aec_agent/domain/seed_data.py` (HVAC clearance rules).
 - **New files (Phase B):** `src/aec_agent/mcp/tools/semantic_ocr.py` (pattern-based annotation parsing), `src/aec_agent/mcp/tools/text_associator.py` (text-element association), `src/aec_agent/prompts/annotation_parsing.py` (LLM prompts), `tests/unit/test_semantic_ocr.py` (44 tests), `tests/unit/test_text_associator.py` (25 tests).
 - **Phase B key functions:** `parse_annotation_by_patterns()` — fast regex parsing for CFM, equipment tags, room numbers, sizes, etc. `associate_text_to_elements()` — distance-based association with type-specific rules. `enrich_elements_with_text()` — combine symbols with their associated text data.
@@ -197,8 +319,34 @@
 - **New files (Phase 2):** `src/aec_agent/mcp/tools/image_vectorizer.py` (OpenCV detection), `src/aec_agent/mcp/tools/pdf_converter.py` (PDF→bitonal TIFF).
 - **New dependencies (optional Vision LLM):** `google-generativeai>=0.3.0` (Gemini), `openai>=1.0.0`, `anthropic>=0.8.0` — any one provider sufficient.
 - **New dependencies (optional YOLO):** `ultralytics>=8.0.0`, `onnxruntime>=1.15.0` — install via `pip install aec-agent[yolo]`.
+- **New files (Phase D):** `src/aec_agent/mcp/tools/geometry_classifier.py` (pattern-based geometry classification), `src/aec_agent/mcp/tools/topology_analyzer.py` (graph-based connectivity), `tests/unit/test_geometry_classifier.py` (48 tests), `tests/unit/test_topology_analyzer.py` (40 tests).
+- **Phase D key classes:** `GeometryClassifier` — classifies lines/polylines/circles into AEC elements based on parallel spacing, linetype, and context. `TopologyAnalyzer` — builds graph from classified geometry and symbols for connectivity analysis.
+- **Phase D key functions:** `classify_geometry()` — main entry point for geometry classification. `build_system_graph()` — creates TopologyGraph from lines and symbols. `find_connected_equipment()` — traces connectivity between equipment.
+- **Phase D classification rules:** Walls detected by parallel lines 3-12" apart. Ducts detected by parallel lines 4-48" apart near diffuser symbols. Pipes detected by single lines connecting valve/fitting symbols. Dimension lines detected by lines with numeric text at midpoint.
+- **Phase D topology features:** `TopologyGraph.find_path()` — BFS pathfinding between nodes. `TopologyGraph.find_connected_components()` — identifies isolated system segments. `TopologyAnalyzer.find_system_paths()` — traces from sources to terminals. `TopologyAnalyzer.identify_branches()` — identifies main vs branch runs.
+- **New VectorizationResult fields (Phase D):** `classified_geometry` (List[ClassifiedLine]), `geometry_classification_stats` (dict), `parallel_pairs` (List[ParallelLinePair]), `wall_centerlines`, `duct_boundaries`, `pipe_runs`, `system_topology` (TopologyGraph).
+- **New Pipeline Parameter (Phase D):** `geometry_classification` (bool, default True) — enables pattern-based geometry classification.
+- **New files (Phase E):** `src/aec_agent/mcp/tools/relationship_builder.py` (relationship inference), `tests/unit/test_relationship_builder.py` (39 tests).
+- **Phase E key classes:** `RelationshipBuilder` — builds relationships using containment, connectivity, spatial, and flow strategies. `InferredRelationship` — captures source, target, type, confidence, distance, system, and metadata.
+- **Phase E relationship types (20+):** CONTAINS, CONTAINED_BY, CONNECTED_TO, BRANCHES_FROM, MERGES_INTO, FEEDS, FED_BY, SUPPLIES, RETURNS_TO, SERVES, SERVED_BY, ADJACENT_TO, NEAR, ABOVE, BELOW, ON_LEVEL, HOSTS, HOSTED_BY, LABELS, LABELED_BY, REFERENCES, REFERENCED_BY.
+- **Phase E key functions:** `build_relationships()` — main entry point. `find_elements_in_room()` — point-in-polygon test. `find_connected_chain()` — traces connected symbols through geometry.
+- **Phase E algorithms:** Point-in-polygon (ray casting) for containment. Endpoint proximity for connectivity. Edge overlap detection for room adjacency. BFS pathfinding for flow relationships.
+- **Repository updates (Phase E):** `create_relationships_batch()` — batch upsert. `get_relationships_by_type()` — filter by type. `get_containment_relationships()` — room-contains queries. `get_connectivity_graph()` — adjacency list. `find_path_between_elements()` — BFS pathfinding.
+- **New VectorizationResult fields (Phase E):** `inferred_relationships` (List[InferredRelationship]), `containment_relationships`, `connectivity_relationships`, `relationship_statistics`.
+- **New Pipeline Parameter (Phase E):** `relationship_inference` (bool, default True) — enables relationship inference.
 - **New dependencies (Phase 2):** `opencv-python-headless>=4.8.0` (or `opencv-contrib-python` for FastLineDetector), `numpy>=1.24.0`, `PyMuPDF>=1.24.0`, `Pillow>=10.0.0`, `networkx>=3.0` (topology cleanup).
-- **Next priority:** Phase D (Geometry Intelligence / Relationship Inference) or Phase E (Knowledge Base Grounding) from SEMANTIC_INTELLIGENCE_PLAN.md.
+- **New files (Phase F):** `src/aec_agent/mcp/tools/knowledge_query.py` (CAD standards lookup + Gemini LLM integration, 1500+ lines), `knowledge_base/cad_standards/plumbing.yaml`, `knowledge_base/cad_standards/mechanical.yaml`, `knowledge_base/cad_standards/electrical.yaml`, `knowledge_base/cad_standards/fire.yaml`, `knowledge_base/cad_standards/low_voltage.yaml`, `knowledge_base/cad_standards/architectural.yaml`, `tests/unit/test_knowledge_query.py` (132 tests).
+- **Phase F key classes:** `CADStandards` — layer, color, linetype, lineweight, block_name, attributes. `Discipline` — 8 AEC disciplines (architectural, mechanical, electrical, plumbing, fire, low_voltage, civil, structural). `SystemType` — 25+ MEP system types (domestic_cold_water, supply_air, fire_alarm, data, security, etc.). `GroundedElement` — element with standards applied.
+- **Phase F key functions:** `query_cad_standards()` — async hierarchical lookup (project → company → YAML → defaults). `ground_element()` — apply standards to single element. `ground_elements()` — batch grounding with statistics. `get_layer_for_element()`, `get_block_name()`, `get_color_for_system()` — convenience functions. `query_with_llm()` — LLM-powered natural language query for CAD standards.
+- **Phase F Gemini LLM integration:** `KnowledgeLLM` class supports Gemini (primary), OpenAI, and Anthropic providers with auto-fallback. Methods include `query()` (natural language CAD standards questions), `classify_element()` (element classification from text description), `get_code_reference()` (building code references for elements), and `suggest_attributes()` (attribute suggestions for blocks). System prompt includes NCS layer naming conventions, MEP standards, building codes (CMC, CEC, CPC, CFC, NFPA 72), and color coding rules. Uses `gemini-1.5-flash` model for cost-effective queries.
+- **Phase F block name patterns (50+):** Valves (P-VALV-GATE, P-VALV-BALL, P-VALV-BTRF), Diffusers (M-DIFF-SQ, M-DIFF-RD, M-DIFF-LN), Outlets (E-OUTL-DUP, E-OUTL-GFCI), Fire (F-DETC-SMOK, F-ANUN-HS, F-SPKL-PND), Low Voltage (T-DATA-RJ45, T-SECU-CAM-D).
+- **Phase F layer naming (NCS-based):** Format is `{Discipline}-{Major}-{Minor}-{Suffix}`. Examples: P-DOMW-VALV (plumbing domestic water valve), M-HVAC-DIFF (mechanical HVAC diffuser), E-POWR-OUTL (electrical power outlet), F-ALRM-DETC (fire alarm detector).
+- **Phase F color coding:** Blue(5)=cold water/supply air/data, Red(1)=hot water/power/fire, Cyan(4)=return air/storm, Green(3)=sanitary/voice, Magenta(6)=vent/exhaust/AV, Yellow(2)=gas/lighting.
+- **New VectorizationResult fields (Phase F):** `grounded_elements` (List[GroundedElement]), `knowledge_grounding_stats` (dict with applied/missing/coverage).
+- **New Pipeline Parameters (Phase F):** `knowledge_grounding` (bool, default True), `project_standards` (dict), `company_standards` (dict).
+- **New dependency (optional YAML):** `PyYAML>=6.0` — for loading custom standards from YAML files.
+- **Semantic Intelligence Pipeline COMPLETE.** All 6 phases (A-F) now implemented. Full pipeline transforms raw geometry into semantically-rich AEC objects with proper layers, blocks, attributes, and relationships.
+- **Next priority:** Phase 3 (Knowledge Base Query Tools) from FUTURE_ROADMAP.md — building `query_knowledge_base` MCP tool for codes, standards, and engineering formulas.
 
 ## 📂 Key Files to Read First
 1. `docs/SESSION_CONTEXT.md` (This file)

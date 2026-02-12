@@ -96,6 +96,22 @@ class VectorizationResult:
     # Phase C: Symbol Intelligence
     smart_symbols: list = field(default_factory=list)  # List[SmartSymbol] with Vision LLM classification
     vision_llm_used: bool = False  # Whether Vision LLM was used for classification
+    # Phase D: Geometry Intelligence
+    classified_geometry: list = field(default_factory=list)  # List[ClassifiedLine] with pattern classification
+    geometry_classification_stats: dict = field(default_factory=dict)  # Classification statistics
+    parallel_pairs: list = field(default_factory=list)  # List[ParallelLinePair] detected
+    wall_centerlines: list = field(default_factory=list)  # List[DetectedLine] wall centerlines
+    duct_boundaries: list = field(default_factory=list)  # List[ParallelLinePair] duct boundaries
+    pipe_runs: list = field(default_factory=list)  # List[ClassifiedLine] pipe runs
+    system_topology: object = None  # TopologyGraph for system connectivity
+    # Phase E: Relationship Inference
+    inferred_relationships: list = field(default_factory=list)  # List[InferredRelationship]
+    containment_relationships: list = field(default_factory=list)  # Room-contains-equipment
+    connectivity_relationships: list = field(default_factory=list)  # Element-connects-to-element
+    relationship_statistics: dict = field(default_factory=dict)  # Relationship statistics
+    # Phase F: Knowledge Grounding
+    grounded_elements: list = field(default_factory=list)  # List[GroundedElement] with CAD standards
+    knowledge_grounding_stats: dict = field(default_factory=dict)  # Grounding statistics
 
 
 def vectorize_bitonal_image(
@@ -183,6 +199,14 @@ def vectorize_bitonal_image(
     vision_llm_classification: bool = True,  # Use Vision LLM for detailed subtyping
     vision_llm_provider: str = "auto",  # Vision provider: "auto", "gemini", "openai", "anthropic"
     vision_llm_confidence_threshold: float = 0.85,  # Use Vision LLM if YOLO confidence below this
+    # Phase D: Geometry Intelligence
+    geometry_classification: bool = True,  # Classify geometry (walls, ducts, pipes)
+    # Phase E: Relationship Inference
+    relationship_inference: bool = True,  # Infer element relationships
+    # Phase F: Knowledge Grounding
+    knowledge_grounding: bool = True,  # Apply CAD standards to elements
+    project_standards: dict | None = None,  # Project-specific CAD standards
+    company_standards: dict | None = None,  # Company-wide CAD standards
     # AEC Geometric Heuristics
     aec_heuristics: bool = True,  # Enabled by default
     orthogonal_snap: bool = True,
@@ -1632,6 +1656,205 @@ def vectorize_bitonal_image(
                 logger.warning(f"AEC heuristics module not available: {e}")
             except Exception as e:
                 logger.warning(f"AEC heuristics failed: {e}, keeping original lines")
+
+        # =================================================================
+        # PHASE D: GEOMETRY INTELLIGENCE
+        #
+        # Classify raw geometry (lines, polylines, circles) into meaningful
+        # AEC elements like walls, ducts, pipes, conduits based on:
+        # - Pattern recognition (parallel lines, spacing)
+        # - Drawing type context
+        # - Nearby symbols and text
+        # =================================================================
+        if geometry_classification:
+            try:
+                import asyncio
+                from aec_agent.mcp.tools.geometry_classifier import (
+                    classify_geometry,
+                    GeometryClassifier,
+                )
+                from aec_agent.mcp.tools.document_classifier import DrawingType
+
+                # Determine drawing type for context
+                drawing_type_enum = DrawingType.UNKNOWN
+                if result.drawing_type:
+                    try:
+                        drawing_type_enum = DrawingType(result.drawing_type)
+                    except (ValueError, KeyError):
+                        pass
+
+                # Run geometry classification (async function called synchronously)
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+
+                async def _classify():
+                    return await classify_geometry(
+                        lines=result.lines,
+                        circles=result.circles,
+                        polylines=result.polylines,
+                        drawing_type=drawing_type_enum,
+                        nearby_symbols=result.smart_symbols,
+                        nearby_text=result.parsed_annotations,
+                    )
+
+                if loop:
+                    # We're in an async context
+                    geo_result = asyncio.create_task(_classify())
+                else:
+                    # We're in a sync context
+                    geo_result = asyncio.run(_classify())
+
+                # Store Phase D results
+                result.classified_geometry = geo_result.classified_lines
+                result.geometry_classification_stats = geo_result.statistics
+                result.parallel_pairs = geo_result.parallel_pairs
+                result.wall_centerlines = geo_result.wall_centerlines
+                result.duct_boundaries = geo_result.duct_boundaries
+                result.pipe_runs = geo_result.pipe_runs
+
+                logger.info(
+                    "Geometry classification complete",
+                    classified=geo_result.statistics.get("classified_elements", 0),
+                    walls=len(geo_result.wall_centerlines),
+                    ducts=len(geo_result.duct_boundaries),
+                    pipes=len(geo_result.pipe_runs),
+                )
+                print(f"[vectorize] Phase D: Classified {geo_result.statistics.get('classified_elements', 0)} elements "
+                      f"(walls={len(geo_result.wall_centerlines)}, ducts={len(geo_result.duct_boundaries)}, "
+                      f"pipes={len(geo_result.pipe_runs)})")
+
+            except ImportError as e:
+                logger.warning(f"Geometry classification module not available: {e}")
+            except Exception as e:
+                logger.warning(f"Geometry classification failed: {e}")
+
+        # =================================================================
+        # PHASE E: RELATIONSHIP INFERENCE
+        #
+        # Infer relationships between detected elements:
+        # - Containment (room contains equipment)
+        # - Connectivity (pipe connects to valve)
+        # - Spatial (room adjacent to room)
+        # - Flow (source feeds terminal)
+        # =================================================================
+        if relationship_inference:
+            try:
+                import asyncio
+                from aec_agent.mcp.tools.relationship_builder import (
+                    build_relationships,
+                    RoomBoundary,
+                )
+
+                # Build room boundaries from detected polylines (if any closed polylines)
+                rooms = []
+                for i, poly in enumerate(result.polylines):
+                    if poly.closed and len(poly.points) >= 4:
+                        rooms.append(RoomBoundary(
+                            id=f"room_{i}",
+                            boundary=poly.points,
+                            center=(
+                                sum(p[0] for p in poly.points) / len(poly.points),
+                                sum(p[1] for p in poly.points) / len(poly.points),
+                            ),
+                        ))
+
+                # Run relationship inference (async function called synchronously)
+                try:
+                    loop = asyncio.get_running_loop()
+                except RuntimeError:
+                    loop = None
+
+                async def _build_rels():
+                    return await build_relationships(
+                        rooms=rooms,
+                        symbols=result.smart_symbols,
+                        geometry=result.classified_geometry,
+                        topology=result.system_topology,
+                        texts=result.parsed_annotations,
+                    )
+
+                if loop:
+                    # We're in an async context
+                    rel_result = asyncio.create_task(_build_rels())
+                else:
+                    # We're in a sync context
+                    rel_result = asyncio.run(_build_rels())
+
+                # Store Phase E results
+                result.inferred_relationships = rel_result.relationships
+                result.containment_relationships = rel_result.containment_relationships
+                result.connectivity_relationships = rel_result.connectivity_relationships
+                result.relationship_statistics = rel_result.statistics
+
+                logger.info(
+                    "Relationship inference complete",
+                    total=rel_result.statistics.get("total_relationships", 0),
+                    containment=len(rel_result.containment_relationships),
+                    connectivity=len(rel_result.connectivity_relationships),
+                )
+                print(f"[vectorize] Phase E: Inferred {rel_result.statistics.get('total_relationships', 0)} relationships "
+                      f"(containment={len(rel_result.containment_relationships)}, "
+                      f"connectivity={len(rel_result.connectivity_relationships)})")
+
+            except ImportError as e:
+                logger.warning(f"Relationship builder module not available: {e}")
+            except Exception as e:
+                logger.warning(f"Relationship inference failed: {e}")
+
+        # =================================================================
+        # PHASE F: KNOWLEDGE GROUNDING
+        #
+        # Apply CAD standards (layers, blocks, colors, attributes) to
+        # detected elements. Uses knowledge base lookup with priority:
+        # 1. Project-specific standards
+        # 2. Company standards
+        # 3. Default NCS-based standards
+        # =================================================================
+        if knowledge_grounding and result.smart_symbols:
+            try:
+                import asyncio
+                from aec_agent.mcp.tools.knowledge_query import (
+                    ground_elements,
+                )
+
+                async def _ground():
+                    return await ground_elements(
+                        elements=result.smart_symbols,
+                        project_standards=project_standards,
+                        company_standards=company_standards,
+                    )
+
+                # Run async function
+                try:
+                    loop = asyncio.get_running_loop()
+                    # We're in an async context
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        grounding_result = loop.run_in_executor(pool, lambda: asyncio.run(_ground()))
+                        grounding_result = asyncio.get_event_loop().run_until_complete(grounding_result)
+                except RuntimeError:
+                    # We're in a sync context
+                    grounding_result = asyncio.run(_ground())
+
+                # Store Phase F results
+                result.grounded_elements = grounding_result.grounded_elements
+                result.knowledge_grounding_stats = grounding_result.statistics
+
+                logger.info(
+                    "Knowledge grounding complete",
+                    applied=grounding_result.standards_applied,
+                    missing=grounding_result.standards_missing,
+                    coverage=f"{grounding_result.statistics.get('coverage_percent', 0):.1f}%",
+                )
+                print(f"[vectorize] Phase F: Grounded {grounding_result.standards_applied} elements "
+                      f"({grounding_result.statistics.get('coverage_percent', 0):.1f}% coverage)")
+
+            except ImportError as e:
+                logger.warning(f"Knowledge query module not available: {e}")
+            except Exception as e:
+                logger.warning(f"Knowledge grounding failed: {e}")
 
         total = (
             len(result.lines) + len(result.circles) + len(result.arcs)

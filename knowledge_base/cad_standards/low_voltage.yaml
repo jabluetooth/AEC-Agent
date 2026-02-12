@@ -1,0 +1,393 @@
+# Low Voltage / Telecommunications CAD Standards
+# Based on National CAD Standard (NCS) with LA-specific conventions
+# Jurisdiction: Los Angeles, CA (TIA/EIA, BICSI standards)
+
+low_voltage:
+  discipline_prefix: "T"
+  description: "Low voltage systems including data, voice, security, and audio-visual"
+
+  systems:
+    data:
+      abbreviation: "DATA"
+      layer_prefix: "T-DATA"
+      color: 5  # Blue
+      linetype: "CONTINUOUS"
+      description: "Data/network cabling"
+
+    voice:
+      abbreviation: "VOIC"
+      layer_prefix: "T-VOIC"
+      color: 3  # Green
+      linetype: "CONTINUOUS"
+      description: "Voice/telephone cabling"
+
+    security:
+      abbreviation: "SECU"
+      layer_prefix: "T-SECU"
+      color: 1  # Red
+      linetype: "CONTINUOUS"
+      description: "Security systems (access control, intrusion, CCTV)"
+
+    audio_visual:
+      abbreviation: "AV"
+      layer_prefix: "T-AUDV"
+      color: 6  # Magenta
+      linetype: "CONTINUOUS"
+      description: "Audio-visual systems"
+
+    intercom:
+      abbreviation: "ICOM"
+      layer_prefix: "T-ICOM"
+      color: 2  # Yellow
+      linetype: "CONTINUOUS"
+      description: "Intercom and paging"
+
+    building_automation:
+      abbreviation: "BAS"
+      layer_prefix: "T-BAUT"
+      color: 4  # Cyan
+      linetype: "CONTINUOUS"
+      description: "Building automation system"
+
+  elements:
+    # Data/Network
+    data_outlet:
+      rj45:
+        block_name: "T-DATA-RJ45"
+        layer_suffix: "-OUTL"
+        description: "RJ45 data outlet"
+        attributes:
+          PORTS: ""  # 1, 2, 4
+          CATEGORY: ""  # CAT5E, CAT6, CAT6A
+          TAG: ""
+
+      fiber:
+        block_name: "T-DATA-FBR"
+        layer_suffix: "-OUTL"
+        description: "Fiber optic outlet"
+        attributes:
+          PORTS: ""
+          TYPE: ""  # SM, MM, OM3, OM4
+          TAG: ""
+
+      wireless_ap:
+        block_name: "T-DATA-WAP"
+        layer_suffix: "-EQUP"
+        description: "Wireless access point"
+        attributes:
+          TYPE: ""  # WIFI6, WIFI6E
+          POE: ""  # YES, NO
+          TAG: ""
+
+      network_switch:
+        block_name: "T-DATA-SWCH"
+        layer_suffix: "-EQUP"
+        description: "Network switch"
+        attributes:
+          PORTS: ""
+          POE: ""
+          TAG: ""
+
+    # Voice/Telephone
+    voice_outlet:
+      rj11:
+        block_name: "T-VOIC-RJ11"
+        layer_suffix: "-OUTL"
+        description: "RJ11 voice outlet"
+        attributes:
+          LINES: ""
+          TAG: ""
+
+      rj45:
+        block_name: "T-VOIC-RJ45"
+        layer_suffix: "-OUTL"
+        description: "RJ45 voice outlet (VoIP)"
+        attributes:
+          TAG: ""
+
+    # Security - Access Control
+    card_reader:
+      proximity:
+        block_name: "T-SECU-CRDR-P"
+        layer_suffix: "-ACCS"
+        description: "Proximity card reader"
+        attributes:
+          TECHNOLOGY: ""  # HID, MIFARE
+          TAG: ""
+
+      keypad:
+        block_name: "T-SECU-CRDR-K"
+        layer_suffix: "-ACCS"
+        description: "Keypad reader"
+        attributes:
+          TAG: ""
+
+      biometric:
+        block_name: "T-SECU-CRDR-B"
+        layer_suffix: "-ACCS"
+        description: "Biometric reader"
+        attributes:
+          TYPE: ""  # FINGERPRINT, FACIAL
+          TAG: ""
+
+      multi_tech:
+        block_name: "T-SECU-CRDR-M"
+        layer_suffix: "-ACCS"
+        description: "Multi-technology reader"
+        attributes:
+          TECHNOLOGIES: ""
+          TAG: ""
+
+    door_contact:
+      block_name: "T-SECU-DCNT"
+      layer_suffix: "-ACCS"
+      description: "Door position switch"
+      attributes:
+        TYPE: ""  # SURFACE, CONCEALED
+        TAG: ""
+
+    rex:
+      block_name: "T-SECU-REX"
+      layer_suffix: "-ACCS"
+      description: "Request to exit sensor"
+      attributes:
+        TYPE: ""  # MOTION, BUTTON
+        TAG: ""
+
+    electric_strike:
+      block_name: "T-SECU-STRK"
+      layer_suffix: "-ACCS"
+      description: "Electric strike"
+      attributes:
+        FAIL_MODE: ""  # FAIL-SAFE, FAIL-SECURE
+        TAG: ""
+
+    mag_lock:
+      block_name: "T-SECU-MGLK"
+      layer_suffix: "-ACCS"
+      description: "Magnetic lock"
+      attributes:
+        HOLDING_FORCE: ""  # 600LB, 1200LB
+        TAG: ""
+
+    # Security - CCTV
+    camera:
+      dome:
+        block_name: "T-SECU-CAM-D"
+        layer_suffix: "-CCTV"
+        description: "Dome camera"
+        attributes:
+          RESOLUTION: ""  # 2MP, 4MP, 8MP
+          LENS: ""  # FIXED, VARIFOCAL
+          POE: ""
+          TAG: ""
+
+      bullet:
+        block_name: "T-SECU-CAM-B"
+        layer_suffix: "-CCTV"
+        description: "Bullet camera"
+        attributes:
+          RESOLUTION: ""
+          LENS: ""
+          POE: ""
+          TAG: ""
+
+      ptz:
+        block_name: "T-SECU-CAM-PTZ"
+        layer_suffix: "-CCTV"
+        description: "PTZ camera"
+        attributes:
+          RESOLUTION: ""
+          ZOOM: ""  # 20X, 30X, etc.
+          POE: ""
+          TAG: ""
+
+      fisheye:
+        block_name: "T-SECU-CAM-F"
+        layer_suffix: "-CCTV"
+        description: "Fisheye/panoramic camera"
+        attributes:
+          RESOLUTION: ""
+          POE: ""
+          TAG: ""
+
+      lpr:
+        block_name: "T-SECU-CAM-LPR"
+        layer_suffix: "-CCTV"
+        description: "License plate recognition camera"
+        attributes:
+          RESOLUTION: ""
+          RANGE: ""
+          TAG: ""
+
+    # Security - Intrusion
+    motion_detector:
+      pir:
+        block_name: "T-SECU-MOT-PIR"
+        layer_suffix: "-INTR"
+        description: "PIR motion detector"
+        attributes:
+          COVERAGE: ""
+          TAG: ""
+
+      dual_tech:
+        block_name: "T-SECU-MOT-DT"
+        layer_suffix: "-INTR"
+        description: "Dual technology motion detector"
+        attributes:
+          COVERAGE: ""
+          TAG: ""
+
+    glass_break:
+      block_name: "T-SECU-GLBK"
+      layer_suffix: "-INTR"
+      description: "Glass break detector"
+      attributes:
+        COVERAGE: ""
+        TAG: ""
+
+    intrusion_keypad:
+      block_name: "T-SECU-IKPD"
+      layer_suffix: "-INTR"
+      description: "Intrusion alarm keypad"
+      attributes:
+        TAG: ""
+
+    # Audio-Visual
+    speaker:
+      ceiling:
+        block_name: "T-AUDV-SPKR-C"
+        layer_suffix: "-SPKR"
+        description: "Ceiling speaker"
+        attributes:
+          WATTS: ""
+          SIZE: ""
+          TAG: ""
+
+      wall:
+        block_name: "T-AUDV-SPKR-W"
+        layer_suffix: "-SPKR"
+        description: "Wall speaker"
+        attributes:
+          WATTS: ""
+          TAG: ""
+
+      pendant:
+        block_name: "T-AUDV-SPKR-P"
+        layer_suffix: "-SPKR"
+        description: "Pendant speaker"
+        attributes:
+          WATTS: ""
+          TAG: ""
+
+    display:
+      tv:
+        block_name: "T-AUDV-DISP-TV"
+        layer_suffix: "-DISP"
+        description: "Television/display"
+        attributes:
+          SIZE: ""
+          TYPE: ""  # LED, OLED
+          TAG: ""
+
+      projector:
+        block_name: "T-AUDV-DISP-PRJ"
+        layer_suffix: "-DISP"
+        description: "Projector"
+        attributes:
+          LUMENS: ""
+          THROW: ""  # SHORT, STANDARD, LONG
+          TAG: ""
+
+      screen:
+        block_name: "T-AUDV-DISP-SCR"
+        layer_suffix: "-DISP"
+        description: "Projection screen"
+        attributes:
+          SIZE: ""
+          TYPE: ""  # FIXED, MOTORIZED
+          TAG: ""
+
+    av_outlet:
+      hdmi:
+        block_name: "T-AUDV-OUTL-HDMI"
+        layer_suffix: "-OUTL"
+        description: "HDMI wall plate"
+        attributes:
+          PORTS: ""
+          TAG: ""
+
+      vga:
+        block_name: "T-AUDV-OUTL-VGA"
+        layer_suffix: "-OUTL"
+        description: "VGA wall plate"
+        attributes:
+          TAG: ""
+
+      composite:
+        block_name: "T-AUDV-OUTL-COMP"
+        layer_suffix: "-OUTL"
+        description: "Composite A/V wall plate"
+        attributes:
+          TAG: ""
+
+    # Intercom/Paging
+    intercom_station:
+      master:
+        block_name: "T-ICOM-MSTR"
+        layer_suffix: "-ICOM"
+        description: "Master intercom station"
+        attributes:
+          TAG: ""
+
+      sub:
+        block_name: "T-ICOM-SUB"
+        layer_suffix: "-ICOM"
+        description: "Sub intercom station"
+        attributes:
+          TAG: ""
+
+      door:
+        block_name: "T-ICOM-DOOR"
+        layer_suffix: "-ICOM"
+        description: "Door intercom station"
+        attributes:
+          VIDEO: ""  # YES, NO
+          TAG: ""
+
+    paging_speaker:
+      block_name: "T-ICOM-PSPK"
+      layer_suffix: "-PAGE"
+      description: "Paging speaker/horn"
+      attributes:
+        WATTS: ""
+        TAG: ""
+
+    # Infrastructure
+    telecom_room:
+      mdf:
+        block_name: "T-INFR-MDF"
+        layer_suffix: "-ROOM"
+        description: "Main distribution frame"
+        attributes:
+          TAG: ""
+
+      idf:
+        block_name: "T-INFR-IDF"
+        layer_suffix: "-ROOM"
+        description: "Intermediate distribution frame"
+        attributes:
+          TAG: ""
+
+    rack:
+      block_name: "T-INFR-RACK"
+      layer_suffix: "-EQUP"
+      description: "Equipment rack"
+      attributes:
+        HEIGHT_U: ""
+        TAG: ""
+
+    cable_tray:
+      layer_suffix: "-TRAY"
+      linetype: "CONTINUOUS"
+      description: "Cable tray"

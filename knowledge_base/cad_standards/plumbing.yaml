@@ -1,0 +1,286 @@
+# Plumbing CAD Standards
+# Based on National CAD Standard (NCS) with LA-specific conventions
+# Jurisdiction: Los Angeles, CA (CPC - California Plumbing Code)
+
+plumbing:
+  discipline_prefix: "P"
+  description: "Plumbing systems including domestic water, sanitary, vent, storm, and gas"
+
+  systems:
+    domestic_cold_water:
+      abbreviation: "DCW"
+      layer_prefix: "P-DOMW-COLD"
+      color: 5  # Blue
+      linetype: "CONTINUOUS"
+      description: "Domestic cold water supply"
+
+    domestic_hot_water:
+      abbreviation: "DHW"
+      layer_prefix: "P-DOMW-HOT"
+      color: 1  # Red
+      linetype: "CONTINUOUS"
+      description: "Domestic hot water supply"
+
+    domestic_hot_water_return:
+      abbreviation: "DHWR"
+      layer_prefix: "P-DOMW-HWRT"
+      color: 1  # Red
+      linetype: "DASHED"
+      description: "Domestic hot water recirculation return"
+
+    sanitary:
+      abbreviation: "SAN"
+      layer_prefix: "P-SNTY"
+      color: 3  # Green
+      linetype: "CONTINUOUS"
+      description: "Sanitary drainage and waste"
+
+    vent:
+      abbreviation: "VENT"
+      layer_prefix: "P-VENT"
+      color: 6  # Magenta
+      linetype: "HIDDEN"
+      description: "Plumbing vent system"
+
+    storm_drain:
+      abbreviation: "SD"
+      layer_prefix: "P-STRM"
+      color: 4  # Cyan
+      linetype: "CONTINUOUS"
+      description: "Storm drainage system"
+
+    natural_gas:
+      abbreviation: "NG"
+      layer_prefix: "P-NGAS"
+      color: 2  # Yellow
+      linetype: "CONTINUOUS"
+      description: "Natural gas piping"
+
+  elements:
+    valve:
+      gate:
+        block_name: "P-VALV-GATE"
+        layer_suffix: "-VALV"
+        description: "Gate valve - full bore, used for isolation"
+        attributes:
+          SIZE: ""
+          TYPE: "GATE"
+          TAG: ""
+        sizes: ["1/2\"", "3/4\"", "1\"", "1-1/4\"", "1-1/2\"", "2\"", "2-1/2\"", "3\"", "4\"", "6\""]
+
+      ball:
+        block_name: "P-VALV-BALL"
+        layer_suffix: "-VALV"
+        description: "Ball valve - quarter turn, good for throttling"
+        attributes:
+          SIZE: ""
+          TYPE: "BALL"
+          TAG: ""
+
+      butterfly:
+        block_name: "P-VALV-BTRF"
+        layer_suffix: "-VALV"
+        description: "Butterfly valve - large bore applications"
+        attributes:
+          SIZE: ""
+          TYPE: "BUTTERFLY"
+          TAG: ""
+        sizes: ["2\"", "2-1/2\"", "3\"", "4\"", "6\"", "8\"", "10\"", "12\""]
+
+      check:
+        block_name: "P-VALV-CHEK"
+        layer_suffix: "-VALV"
+        description: "Check valve - prevents backflow"
+        attributes:
+          SIZE: ""
+          TYPE: "CHECK"
+          TAG: ""
+
+      pressure_reducing:
+        block_name: "P-VALV-PRV"
+        layer_suffix: "-VALV"
+        description: "Pressure reducing valve"
+        attributes:
+          SIZE: ""
+          TYPE: "PRV"
+          SET_PSI: ""
+          TAG: ""
+
+      pressure_relief:
+        block_name: "P-VALV-PRF"
+        layer_suffix: "-VALV"
+        description: "Pressure/temperature relief valve"
+        attributes:
+          SIZE: ""
+          TYPE: "P&T RELIEF"
+          SET_PSI: ""
+          TAG: ""
+
+      balancing:
+        block_name: "P-VALV-BAL"
+        layer_suffix: "-VALV"
+        description: "Balancing valve for flow regulation"
+        attributes:
+          SIZE: ""
+          TYPE: "BALANCING"
+          CV: ""
+          TAG: ""
+
+      backflow_preventer:
+        block_name: "P-VALV-BFP"
+        layer_suffix: "-VALV"
+        description: "Backflow preventer (RPZ, DCVA, AVB)"
+        attributes:
+          SIZE: ""
+          TYPE: ""  # RPZ, DCVA, AVB
+          TAG: ""
+
+    pipe:
+      layer_suffix: "-PIPE"
+      linetype: "CONTINUOUS"
+      lineweight_by_size:
+        "1/2\"": 0.25
+        "3/4\"": 0.30
+        "1\"": 0.35
+        "1-1/2\"": 0.40
+        "2\"": 0.50
+        "3\"": 0.60
+        "4\"": 0.70
+        "6\"": 0.80
+
+    fitting:
+      elbow_90:
+        block_name: "P-FTTG-EL90"
+        layer_suffix: "-FTTG"
+      elbow_45:
+        block_name: "P-FTTG-EL45"
+        layer_suffix: "-FTTG"
+      tee:
+        block_name: "P-FTTG-TEE"
+        layer_suffix: "-FTTG"
+      cross:
+        block_name: "P-FTTG-CROS"
+        layer_suffix: "-FTTG"
+      reducer:
+        block_name: "P-FTTG-RED"
+        layer_suffix: "-FTTG"
+      cap:
+        block_name: "P-FTTG-CAP"
+        layer_suffix: "-FTTG"
+      union:
+        block_name: "P-FTTG-UNI"
+        layer_suffix: "-FTTG"
+      coupling:
+        block_name: "P-FTTG-CPL"
+        layer_suffix: "-FTTG"
+
+    fixture:
+      water_closet:
+        block_name: "P-FIXT-WC"
+        layer_suffix: "-FIXT"
+        description: "Water closet (toilet)"
+        attributes:
+          MODEL: ""
+          GPF: "1.28"  # CPC requirement
+          TAG: ""
+
+      urinal:
+        block_name: "P-FIXT-URN"
+        layer_suffix: "-FIXT"
+        description: "Urinal"
+        attributes:
+          MODEL: ""
+          GPF: "0.5"
+          TAG: ""
+
+      lavatory:
+        block_name: "P-FIXT-LAV"
+        layer_suffix: "-FIXT"
+        description: "Lavatory (sink)"
+        attributes:
+          MODEL: ""
+          GPM: "1.5"
+          TAG: ""
+
+      sink:
+        block_name: "P-FIXT-SINK"
+        layer_suffix: "-FIXT"
+        description: "Kitchen/utility sink"
+        attributes:
+          MODEL: ""
+          COMPARTMENTS: ""
+          TAG: ""
+
+      shower:
+        block_name: "P-FIXT-SHWR"
+        layer_suffix: "-FIXT"
+        description: "Shower"
+        attributes:
+          MODEL: ""
+          GPM: "2.0"
+          TAG: ""
+
+      drinking_fountain:
+        block_name: "P-FIXT-DF"
+        layer_suffix: "-FIXT"
+        description: "Drinking fountain / water cooler"
+        attributes:
+          MODEL: ""
+          GPH: ""
+          TAG: ""
+
+      floor_drain:
+        block_name: "P-DRAN-FD"
+        layer_suffix: "-DRAN"
+        description: "Floor drain"
+        attributes:
+          SIZE: ""
+          TRAP_PRIMER: ""
+          TAG: ""
+
+      cleanout:
+        block_name: "P-CLEN-CO"
+        layer_suffix: "-CLEN"
+        description: "Cleanout access"
+        attributes:
+          SIZE: ""
+          TYPE: ""  # WALL, FLOOR
+          TAG: ""
+
+    equipment:
+      water_heater:
+        block_name: "P-EQPM-WH"
+        layer_suffix: "-EQPM"
+        description: "Water heater"
+        attributes:
+          CAPACITY_GAL: ""
+          INPUT_BTU: ""
+          RECOVERY_GPH: ""
+          TAG: ""
+
+      booster_pump:
+        block_name: "P-EQPM-BPMP"
+        layer_suffix: "-EQPM"
+        description: "Domestic water booster pump"
+        attributes:
+          GPM: ""
+          HEAD_FT: ""
+          HP: ""
+          TAG: ""
+
+      expansion_tank:
+        block_name: "P-EQPM-XTANK"
+        layer_suffix: "-EQPM"
+        description: "Expansion tank"
+        attributes:
+          SIZE_GAL: ""
+          TAG: ""
+
+      grease_interceptor:
+        block_name: "P-EQPM-GI"
+        layer_suffix: "-EQPM"
+        description: "Grease interceptor"
+        attributes:
+          GPM: ""
+          RETENTION: ""
+          TAG: ""

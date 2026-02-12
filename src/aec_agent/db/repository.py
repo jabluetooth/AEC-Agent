@@ -677,6 +677,243 @@ class ElementRepository:
         count = int(result.split()[-1]) if result.startswith("DELETE") else 0
         return count
 
+    async def create_relationships_batch(
+        self,
+        relationships: list[ElementRelationship],
+    ) -> int:
+        """
+        Create multiple relationships in a single transaction.
+
+        Uses COPY for performance with large batches.
+
+        Args:
+            relationships: List of relationships to create
+
+        Returns:
+            Number of relationships created
+        """
+        if not relationships:
+            return 0
+
+        # Use INSERT with ON CONFLICT for upsert behavior
+        query = """
+            INSERT INTO element_relationships (
+                id, project_id, from_element_id, to_element_id,
+                relation_type, distance, confidence, source, metadata
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+            ON CONFLICT (project_id, from_element_id, to_element_id, relation_type)
+            DO UPDATE SET
+                distance = EXCLUDED.distance,
+                confidence = EXCLUDED.confidence,
+                metadata = EXCLUDED.metadata
+        """
+
+        count = 0
+        for rel in relationships:
+            try:
+                await self._pool.execute(
+                    query,
+                    rel.id,
+                    rel.project_id,
+                    rel.from_element_id,
+                    rel.to_element_id,
+                    rel.relation_type,
+                    rel.distance,
+                    rel.confidence,
+                    rel.source,
+                    json.dumps(rel.metadata) if isinstance(rel.metadata, dict) else rel.metadata,
+                )
+                count += 1
+            except Exception as e:
+                logger.warning(f"Failed to create relationship: {e}")
+
+        logger.info(f"Created {count} relationships")
+        return count
+
+    async def get_relationships_by_type(
+        self,
+        project_id: UUID,
+        relation_types: list[str],
+        limit: int = 1000,
+    ) -> list[ElementRelationship]:
+        """
+        Get relationships filtered by type.
+
+        Args:
+            project_id: Project to query
+            relation_types: Types to filter
+            limit: Maximum results
+
+        Returns:
+            List of matching relationships
+        """
+        query = """
+            SELECT id, project_id, from_element_id, to_element_id,
+                   relation_type, distance, confidence, source, metadata
+            FROM element_relationships
+            WHERE project_id = $1 AND relation_type = ANY($2)
+            LIMIT $3
+        """
+        rows = await self._pool.fetch(query, project_id, relation_types, limit)
+
+        return [
+            ElementRelationship(
+                id=row["id"],
+                project_id=row["project_id"],
+                from_element_id=row["from_element_id"],
+                to_element_id=row["to_element_id"],
+                relation_type=row["relation_type"],
+                distance=row["distance"],
+                confidence=row["confidence"],
+                source=row["source"],
+                metadata=row["metadata"] if row["metadata"] else {},
+            )
+            for row in rows
+        ]
+
+    async def get_containment_relationships(
+        self,
+        project_id: UUID,
+        container_id: UUID | None = None,
+    ) -> list[ElementRelationship]:
+        """
+        Get containment relationships (room contains equipment).
+
+        Args:
+            project_id: Project to query
+            container_id: Optional filter for specific container
+
+        Returns:
+            List of containment relationships
+        """
+        if container_id:
+            query = """
+                SELECT id, project_id, from_element_id, to_element_id,
+                       relation_type, distance, confidence, source, metadata
+                FROM element_relationships
+                WHERE project_id = $1
+                  AND from_element_id = $2
+                  AND relation_type = 'contains'
+            """
+            rows = await self._pool.fetch(query, project_id, container_id)
+        else:
+            query = """
+                SELECT id, project_id, from_element_id, to_element_id,
+                       relation_type, distance, confidence, source, metadata
+                FROM element_relationships
+                WHERE project_id = $1 AND relation_type = 'contains'
+            """
+            rows = await self._pool.fetch(query, project_id)
+
+        return [
+            ElementRelationship(
+                id=row["id"],
+                project_id=row["project_id"],
+                from_element_id=row["from_element_id"],
+                to_element_id=row["to_element_id"],
+                relation_type=row["relation_type"],
+                distance=row["distance"],
+                confidence=row["confidence"],
+                source=row["source"],
+                metadata=row["metadata"] if row["metadata"] else {},
+            )
+            for row in rows
+        ]
+
+    async def get_connectivity_graph(
+        self,
+        project_id: UUID,
+        system: str | None = None,
+    ) -> dict[str, list[str]]:
+        """
+        Get connectivity graph as adjacency list.
+
+        Args:
+            project_id: Project to query
+            system: Optional filter for MEP system
+
+        Returns:
+            Adjacency list mapping element IDs to connected element IDs
+        """
+        if system:
+            query = """
+                SELECT from_element_id, to_element_id
+                FROM element_relationships
+                WHERE project_id = $1
+                  AND relation_type = 'connected_to'
+                  AND metadata->>'system' = $2
+            """
+            rows = await self._pool.fetch(query, project_id, system)
+        else:
+            query = """
+                SELECT from_element_id, to_element_id
+                FROM element_relationships
+                WHERE project_id = $1 AND relation_type = 'connected_to'
+            """
+            rows = await self._pool.fetch(query, project_id)
+
+        adjacency: dict[str, list[str]] = {}
+        for row in rows:
+            from_id = str(row["from_element_id"])
+            to_id = str(row["to_element_id"])
+
+            if from_id not in adjacency:
+                adjacency[from_id] = []
+            if to_id not in adjacency:
+                adjacency[to_id] = []
+
+            adjacency[from_id].append(to_id)
+            adjacency[to_id].append(from_id)
+
+        return adjacency
+
+    async def find_path_between_elements(
+        self,
+        project_id: UUID,
+        start_id: UUID,
+        end_id: UUID,
+        max_depth: int = 20,
+    ) -> list[str] | None:
+        """
+        Find path between two elements using BFS on relationships.
+
+        Args:
+            project_id: Project to search in
+            start_id: Starting element
+            end_id: Target element
+            max_depth: Maximum path length
+
+        Returns:
+            List of element IDs forming path, or None if no path exists
+        """
+        adjacency = await self.get_connectivity_graph(project_id)
+
+        start_str = str(start_id)
+        end_str = str(end_id)
+
+        if start_str not in adjacency or end_str not in adjacency:
+            return None
+
+        visited = {start_str}
+        queue = [(start_str, [start_str])]
+
+        while queue:
+            current, path = queue.pop(0)
+
+            if len(path) > max_depth:
+                continue
+
+            if current == end_str:
+                return path
+
+            for neighbor in adjacency.get(current, []):
+                if neighbor not in visited:
+                    visited.add(neighbor)
+                    queue.append((neighbor, path + [neighbor]))
+
+        return None
+
     # =========================================================================
     # Helper Methods
     # =========================================================================
