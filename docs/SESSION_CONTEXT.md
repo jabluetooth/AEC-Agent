@@ -2,8 +2,27 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Semantic Intelligence Pipeline (Phase F) — COMPLETE with Gemini LLM integration.
-**Last Action:** Gemini LLM Integration (2026-02-12):
+**Objective:** Gemini-First PDF to AutoCAD Pipeline — Phase 1 & 2 COMPLETE
+**Last Action:** Gemini-First Phase 2 Implementation (2026-02-13):
+- Created `gemini_understanding.py` — Gemini Vision drawing analysis module (~550 lines)
+- Analyzes drawings BEFORE extraction to understand content
+- Output: DrawingAnalysis with elements, regions, calibration hints, extraction strategy
+- Dataclasses: DrawingAnalysis, DrawingElements, DetectedLine, DetectedArc, DetectedCircle, DetectedText, DetectedSymbol, DetectedDimension, CalibrationHint, SpecialRegion
+- MCP Tools: `gemini_analyze_drawing`, `gemini_analyze_pdf`, `gemini_get_extraction_strategy`
+- 38 unit tests passing for Phase 2 components
+
+**Previous Action:** Gemini-First Phase 1 Implementation (2026-02-13):
+- Created `gemini_first/` package for quality-preserving PDF vectorization
+- Created `pdf_intake.py` — high-quality PDF rendering (NO bitonal conversion)
+- Created `mcp_tools.py` — MCP tool wrappers (7 tools registered total)
+- Key difference: Preserves grayscale/color information for Gemini Vision analysis
+- Tools: `gemini_render_pdf`, `gemini_get_pdf_info`, `gemini_render_all_pages`, `gemini_compare_rendering_quality`
+- Dataclasses: `PDFRenderResult`, `PDFInfo`
+- Functions: `render_pdf_high_quality()`, `render_pdf_high_quality_async()`, `is_effectively_grayscale()`
+- Integrated with existing MCP server (direct `@mcp.tool()` decorators)
+- 20 unit tests passing for Phase 1 components
+
+**Previous Action:** Gemini LLM Integration (2026-02-12):
 - Added `KnowledgeLLM` class for LLM-powered CAD standards queries
 - Added `LLMQueryResult` dataclass for LLM query responses
 - Added `query_with_llm()` convenience function
@@ -110,7 +129,15 @@
 - All 6 phases of the Semantic Intelligence Pipeline are now implemented
 - Full pipeline: Document Classification → Region Segmentation → Semantic OCR → Symbol Intelligence → Geometry Intelligence → Relationship Inference → Knowledge Grounding
 
-**Next Step:** Phase 3 (Knowledge Base Query Tools) from FUTURE_ROADMAP.md — Building `query_knowledge_base` MCP tool for codes, standards, and engineering formulas.
+**Next Step:** Gemini-First Phase 3 (Coordinate Calibration) — Convert pixel coordinates to DWG units using calibration hints.
+
+**Gemini-First Architecture:** This is a new approach to PDF vectorization that addresses noise issues in the current bitonal pipeline. Instead of preprocessing first (which destroys information), Gemini-First:
+1. **Phase 1 (COMPLETE):** Render PDF to high-quality PNG (preserves grayscale/color, anti-aliasing)
+2. **Phase 2 (COMPLETE):** Gemini Vision analyzes the original image to understand drawing content
+3. **Phase 3 (NEXT):** Coordinate calibration (pixels → DWG units)
+4. **Phase 4:** Adaptive extraction (direct/guided/selective strategies)
+5. **Phase 5:** AutoCAD entity creation
+6. **Phase 6:** Validation & self-correction (Gemini verifies output)
 
 ## 📊 Repository Status (as of 2026-02-02)
 
@@ -142,6 +169,7 @@
 | **End-to-end extraction test** (real CAD file → DB) | Needs running sidecar | Phase 1 (integration) |
 | **Knowledge base files** (codes, standards, formulas) | Content creation | Phase 3 |
 | **Raster Design integration** (PDF → DWG) | Full pipeline built w/ bitonal conversion, needs e2e test with real PDF | Phase 2 (complete, needs testing) |
+| **Gemini-First Pipeline** (quality-preserving PDF → DWG) | Phase 1 complete (PDF intake), Phase 2-6 pending | Phase 2.6 (in progress) |
 | **Element placement tools** (`place_revit_family`, `place_autocad_block`) | Tool development | Phase 4 |
 | **Engineering calculations** (`calculate_ventilation`, `calculate_duct_size`, etc.) | Tool development | Phase 4 |
 | **Routing/pathfinding** (`find_route`, `create_duct_run`) | Algorithm dev | Phase 4 |
@@ -346,7 +374,12 @@
 - **New Pipeline Parameters (Phase F):** `knowledge_grounding` (bool, default True), `project_standards` (dict), `company_standards` (dict).
 - **New dependency (optional YAML):** `PyYAML>=6.0` — for loading custom standards from YAML files.
 - **Semantic Intelligence Pipeline COMPLETE.** All 6 phases (A-F) now implemented. Full pipeline transforms raw geometry into semantically-rich AEC objects with proper layers, blocks, attributes, and relationships.
-- **Next priority:** Phase 3 (Knowledge Base Query Tools) from FUTURE_ROADMAP.md — building `query_knowledge_base` MCP tool for codes, standards, and engineering formulas.
+- **CURRENT PRIORITY: Gemini-First Pipeline.** This is a new approach to PDF vectorization that puts Gemini Vision FIRST (before preprocessing) to understand drawing content before extraction. Addresses noise issues in the current bitonal pipeline. Phase 1 (PDF Intake) and Phase 2 (Gemini Understanding) are COMPLETE. Phase 3 (Coordinate Calibration) is NEXT.
+- **Gemini-First Phase 1 (COMPLETE):** High-quality PDF rendering without bitonal conversion. Files: `src/aec_agent/mcp/tools/gemini_first/pdf_intake.py`. MCP tools: `gemini_render_pdf`, `gemini_get_pdf_info`, `gemini_render_all_pages`, `gemini_compare_rendering_quality`. Key difference: preserves grayscale/color for AI analysis.
+- **Gemini-First Phase 2 (COMPLETE):** Gemini Vision drawing analysis. Files: `src/aec_agent/mcp/tools/gemini_first/gemini_understanding.py`. MCP tools: `gemini_analyze_drawing`, `gemini_analyze_pdf`, `gemini_get_extraction_strategy`. Key outputs: `DrawingAnalysis` dataclass with elements, regions, calibration hints, and recommended extraction strategy. 38 unit tests.
+- **Gemini-First architecture docs:** `docs/autocad-rasterization-architecture.md` (full architecture), `docs/GEMINI-FIRST-PHASES.md` (phase breakdown with code snippets).
+- **Next priority (Phase 3):** Implement coordinate calibration to convert pixel coordinates to DWG units using dimension hints, scale notation, and sheet size from Phase 2 analysis.
+- **Future priority:** Phase 3 (Knowledge Base Query Tools) from FUTURE_ROADMAP.md — building `query_knowledge_base` MCP tool for codes, standards, and engineering formulas.
 
 ## 📂 Key Files to Read First
 1. `docs/SESSION_CONTEXT.md` (This file)
