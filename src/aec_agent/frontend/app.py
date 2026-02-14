@@ -198,10 +198,14 @@ async def on_message(message: cl.Message):
             name = getattr(el, "name", os.path.basename(path))
             ext = os.path.splitext(name)[1].lower()
             mime = getattr(el, "mime", None) or ""
+            hint = f"→ Use gemini_analyze_pdf(file_path=\"{path}\") for Gemini-First analysis."
+            if ext in [".png", ".jpg", ".jpeg", ".tiff", ".bmp", ".png"]:
+                hint = f"→ Use gemini_analyze_drawing(img_path=\"{path}\") for Gemini Vision analysis."
+            
             file_descriptions.append(
                 f"[Uploaded file: {name}, type: {ext or mime}, "
                 f"path: {path}] "
-                f"→ Use raster_pdf_to_vector_pipeline with file_path=\"{path}\" to vectorize."
+                f"{hint}"
             )
         if file_descriptions:
             user_text = user_text + "\n\n" + "\n".join(file_descriptions)

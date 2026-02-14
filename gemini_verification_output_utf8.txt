@@ -1,0 +1,11 @@
+﻿--- Verifying Gemini Setup ---
+Gemini API Key configured: True
+OpenAI API Key configured: False
+is_vision_llm_available(): True
+2026-02-14 10:09:19 [info     ] Symbol templates loaded        count=29 directory=None
+Templates loaded: 29
+First template: diffuser_4way -> DIFFUSER-4WAY
+Classifier enable_vision_llm: True
+Needs Vision LLM (VALVE-GATE, conf=0.9): True
+Needs Vision LLM (UNKNOWN, conf=0.9): False
+Needs Vision LLM (UNKNOWN, conf=0.4): True
