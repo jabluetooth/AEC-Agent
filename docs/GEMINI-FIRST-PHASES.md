@@ -332,7 +332,7 @@ Return ONLY the JSON, no markdown formatting.
 
 async def analyze_drawing_with_gemini(
     image_path: Path,
-    model: str = "gemini-1.5-pro"
+    model: str = "gemini-2.0-flash"  # Flash has free tier, Pro does not
 ) -> DrawingAnalysis:
     """
     Use Gemini Vision to fully understand the drawing.
@@ -1523,5 +1523,6 @@ asyncio.run(main())
 
 ---
 
-*Document Version: 1.0*
-*Last Updated: 2025*
+*Document Version: 1.1*
+*Last Updated: 2026-02-16*
+*Note: Uses gemini-2.0-flash by default (has free tier). Pro models do not have free tier.*

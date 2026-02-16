@@ -70,6 +70,22 @@ class LLMProvider(str, Enum):
     GEMINI = "gemini"
 
 
+def _find_env_file() -> Path | None:
+    """Find .env file by searching up from this file's location."""
+    # Start from this file's directory (src/aec_agent/config/)
+    current = Path(__file__).resolve().parent
+    # Go up to project root (3 levels: config -> aec_agent -> src -> root)
+    project_root = current.parent.parent.parent
+    env_file = project_root / ".env"
+    if env_file.exists():
+        return env_file
+    # Fallback: check current working directory
+    cwd_env = Path.cwd() / ".env"
+    if cwd_env.exists():
+        return cwd_env
+    return None
+
+
 class Settings(BaseSettings):
     """
     Application settings loaded from environment variables.
@@ -78,7 +94,7 @@ class Settings(BaseSettings):
     """
 
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=_find_env_file(),
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",
@@ -151,8 +167,8 @@ class Settings(BaseSettings):
     )
 
     gemini_model: str = Field(
-        default="gemini-1.5-flash",
-        description="Gemini model to use (gemini-1.5-flash, gemini-1.5-pro, gemini-2.0-flash-exp)"
+        default="gemini-2.0-flash",
+        description="Gemini model to use (gemini-2.0-flash recommended - has free tier)"
     )
 
     # Provider fallback chain

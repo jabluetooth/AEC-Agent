@@ -501,7 +501,7 @@ class DrawingAnalyzer:
     Supports Gemini Pro Vision with fallback to other providers.
 
     Args:
-        model: Gemini model to use (gemini-pro-latest, gemini-flash-latest, or legacy gemini-1.5-pro/flash which auto-map to 2.x).
+        model: Gemini model to use (gemini-2.0-flash recommended - has free tier).
         temperature: LLM temperature (lower = more deterministic).
         max_output_tokens: Maximum tokens in response.
 
@@ -514,7 +514,7 @@ class DrawingAnalyzer:
 
     def __init__(
         self,
-        model: str = "gemini-pro-latest",
+        model: str = "gemini-2.0-flash",
         temperature: float = 0.1,
         max_output_tokens: int = 8192,
     ):
@@ -537,14 +537,16 @@ class DrawingAnalyzer:
 
                 genai.configure(api_key=self.settings.gemini_api_key)
                 
-                # Map legacy model names to current Gemini 2.x models
-                # Gemini 1.5 models have been deprecated and replaced with Gemini 2.x
+                # Map legacy model names to Gemini 2.0 Flash (has free tier)
+                # Pro models don't have free tier - always use Flash for cost savings
                 model_name = self.model_name
                 model_mapping = {
-                    "gemini-1.5-pro": "gemini-pro-latest",  # Maps to gemini-2.5-pro
-                    "gemini-1.5-flash": "gemini-flash-latest",  # Maps to gemini-2.5-flash
-                    "gemini-1.5-pro-latest": "gemini-pro-latest",
-                    "gemini-1.5-flash-latest": "gemini-flash-latest",
+                    "gemini-1.5-pro": "gemini-2.0-flash",
+                    "gemini-1.5-flash": "gemini-2.0-flash",
+                    "gemini-1.5-pro-latest": "gemini-2.0-flash",
+                    "gemini-1.5-flash-latest": "gemini-2.0-flash",
+                    "gemini-pro-latest": "gemini-2.0-flash",  # Pro has no free tier
+                    "gemini-flash-latest": "gemini-2.0-flash",
                 }
                 
                 # Apply mapping if needed
@@ -829,7 +831,7 @@ class DrawingAnalyzer:
 
 async def analyze_drawing(
     image_path: Path | str,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
     context: Optional[str] = None,
 ) -> DrawingAnalysis:
     """

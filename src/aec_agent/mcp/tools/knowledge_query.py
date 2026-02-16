@@ -1161,7 +1161,7 @@ class KnowledgeLLM:
 
                 genai.configure(api_key=api_key)
                 self._gemini_model = genai.GenerativeModel(
-                    "gemini-1.5-flash",
+                    "gemini-2.0-flash",  # Flash has free tier, Pro does not
                     generation_config=genai.GenerationConfig(
                         temperature=self.temperature,
                         max_output_tokens=self.max_tokens,

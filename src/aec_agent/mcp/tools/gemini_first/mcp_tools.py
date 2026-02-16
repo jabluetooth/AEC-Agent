@@ -349,7 +349,7 @@ async def gemini_compare_rendering_quality(
 @mcp.tool()
 async def gemini_analyze_drawing(
     image_path: str,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
     context: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -364,7 +364,7 @@ async def gemini_analyze_drawing(
 
     Args:
         image_path: Path to the drawing image (PNG, JPG, etc.)
-        model: Gemini model to use ("gemini-pro-latest" or "gemini-flash-latest", legacy names auto-mapped)
+        model: Gemini model to use ("gemini-2.0-flash" recommended - has free tier)
         context: Optional context/hints about the drawing
 
     Returns:
@@ -431,7 +431,7 @@ async def gemini_analyze_pdf(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
     context: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -525,7 +525,7 @@ async def gemini_analyze_pdf(
 @mcp.tool()
 async def gemini_get_extraction_strategy(
     image_path: str,
-    model: str = "gemini-flash-latest",
+    model: str = "gemini-2.0-flash",
 ) -> dict[str, Any]:
     """
     Get recommended extraction strategy for a drawing without full analysis.
@@ -599,7 +599,7 @@ async def gemini_calibrate_coordinates(
     image_width: int,
     image_height: int,
     image_dpi: int = 300,
-    model: str = "gemini-flash-latest",
+    model: str = "gemini-2.0-flash",
     prefer_units: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -984,7 +984,7 @@ async def gemini_analyze_pdf_calibrated(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
     prefer_units: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -1108,7 +1108,7 @@ async def gemini_extract_entities(
     image_width: int,
     image_height: int,
     image_dpi: int = 300,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
     include_opencv: bool = True,
 ) -> dict[str, Any]:
     """
@@ -1211,7 +1211,7 @@ async def gemini_extract_pdf_entities(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
     include_opencv: bool = True,
 ) -> dict[str, Any]:
     """
@@ -1402,7 +1402,7 @@ async def gemini_get_required_layers(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-flash-latest",
+    model: str = "gemini-2.0-flash",
 ) -> dict[str, Any]:
     """
     Get list of layers required for a PDF drawing.
@@ -1478,7 +1478,7 @@ async def gemini_get_required_blocks(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-flash-latest",
+    model: str = "gemini-2.0-flash",
 ) -> dict[str, Any]:
     """
     Get list of block definitions required for a PDF drawing.
@@ -1559,7 +1559,7 @@ async def gemini_create_entities(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
     include_opencv: bool = True,
     create_layers: bool = True,
 ) -> dict[str, Any]:
@@ -1707,7 +1707,7 @@ async def gemini_vectorize_pdf(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
     include_opencv: bool = True,
     create_layers: bool = True,
 ) -> dict[str, Any]:
@@ -1728,7 +1728,7 @@ async def gemini_vectorize_pdf(
         file_path: Path to the PDF file
         page: Page number to vectorize (1-indexed)
         dpi: Resolution for rendering (72-1200, default 300)
-        model: Gemini model for analysis (gemini-pro-latest recommended)
+        model: Gemini model for analysis (gemini-2.0-flash recommended - has free tier)
         include_opencv: Use OpenCV for special regions (default True)
         create_layers: Create layers that don't exist (default True)
 
@@ -1983,7 +1983,7 @@ async def gemini_validate_extraction(
     failed_count: int,
     max_iterations: int = 3,
     apply_corrections: bool = True,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
 ) -> dict[str, Any]:
     """
     Validate created AutoCAD entities against the original drawing.
@@ -2076,7 +2076,7 @@ async def gemini_complete_pipeline(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-pro-latest",
+    model: str = "gemini-2.0-flash",
     include_opencv: bool = True,
     create_layers: bool = True,
     validate: bool = True,

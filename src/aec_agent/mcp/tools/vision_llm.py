@@ -125,7 +125,7 @@ class VisionLLMClassifier:
                 import google.generativeai as genai
 
                 genai.configure(api_key=self.settings.gemini_api_key)
-                self._gemini_model = genai.GenerativeModel("gemini-1.5-flash")
+                self._gemini_model = genai.GenerativeModel("gemini-2.0-flash")  # Flash has free tier
                 logger.debug("Gemini model initialized")
             except ImportError:
                 logger.warning(
