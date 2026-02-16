@@ -2,17 +2,23 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Gemini-First PDF to AutoCAD Pipeline — Phase 1, 2, 3 & 4 COMPLETE
-**Last Action:** Gemini-First Phase 4 Implementation (2026-02-14):
+**Objective:** Gemini-First PDF to AutoCAD Pipeline — Phases 1-5 COMPLETE
+**Last Action:** Gemini-First Phase 5 Implementation (2026-02-16):
+- Created `autocad_creation.py` — AutoCAD entity creation module (~900 lines)
+- Creates entities in AutoCAD from Phase 4 ExtractionResult
+- Dataclasses: `EntityCreationResult`, `LayerCreationResult`, `CreationStatistics`, `AutoCADCreationResult`
+- Core functions: `create_entities_in_autocad()`, `create_entities_batch()`, `create_single_entity()`, `create_layer_if_needed()`
+- Entity creators: `create_line_entity()`, `create_arc_entity()`, `create_circle_entity()`, `create_text_entity()`, `create_block_entity()`, `create_polyline_entity()`
+- MCP Tools: `gemini_create_entities` (extract + create), `gemini_vectorize_pdf` (complete PDF-to-AutoCAD pipeline), `gemini_create_from_extraction` (create from saved JSON)
+- NCS-compliant layer colors: `LAYER_PREFIX_COLORS` (A-=white, M-=cyan, E-=red, P-=blue, F-=red, T-=green)
+- Automatic layer creation for required layers
+- Progress tracking with success/failure statistics
+- 55 unit tests passing for Phase 5 components
+
+**Previous Action:** Gemini-First Phase 4 Implementation (2026-02-14):
 - Created `adaptive_extraction.py` — Adaptive entity extraction module (~750 lines)
 - Three extraction strategies: Direct, Guided Rasterization, Selective OpenCV
 - Dataclasses: `EntityToCreate`, `RasterCommand`, `ExtractionResult`
-- Enums: `ExtractionSource`, `EntityType`
-- MCP Tools: `gemini_extract_entities`, `gemini_extract_pdf_entities`, `gemini_get_layer_mapping`, `gemini_get_block_mapping`, `gemini_get_required_layers`, `gemini_get_required_blocks`
-- NCS-compliant layer mapping: `ELEMENT_TYPE_TO_LAYER`, `TEXT_TYPE_TO_LAYER`, `SYMBOL_TYPE_TO_LAYER`
-- Block name mapping: `SYMBOL_TO_BLOCK` for MEP symbols (diffusers, outlets, valves, detectors, etc.)
-- VTool mapping: `VTOOL_MAPPING` for Raster Design commands
-- Helper functions: `get_layer_for_element_type()`, `get_block_name()`, `get_entities_by_type()`, `get_required_layers()`, `get_required_blocks()`
 - 58 unit tests passing for Phase 4 components
 
 **Previous Action:** Gemini-First Phase 3 Implementation (2026-02-14):
@@ -149,15 +155,15 @@
 - All 6 phases of the Semantic Intelligence Pipeline are now implemented
 - Full pipeline: Document Classification → Region Segmentation → Semantic OCR → Symbol Intelligence → Geometry Intelligence → Relationship Inference → Knowledge Grounding
 
-**Next Step:** Gemini-First Phase 5 (AutoCAD Entity Creation) — Create entities in AutoCAD using existing MCP tools.
+**Next Step:** Gemini-First Phase 6 (Validation & Self-Correction) — Gemini verifies output and corrects errors.
 
 **Gemini-First Architecture:** This is a new approach to PDF vectorization that addresses noise issues in the current bitonal pipeline. Instead of preprocessing first (which destroys information), Gemini-First:
 1. **Phase 1 (COMPLETE):** Render PDF to high-quality PNG (preserves grayscale/color, anti-aliasing)
 2. **Phase 2 (COMPLETE):** Gemini Vision analyzes the original image to understand drawing content
 3. **Phase 3 (COMPLETE):** Coordinate calibration (pixels → DWG units)
 4. **Phase 4 (COMPLETE):** Adaptive extraction (direct/guided/selective strategies)
-5. **Phase 5 (NEXT):** AutoCAD entity creation (draw lines, arcs, text, blocks)
-6. **Phase 6:** Validation & self-correction (Gemini verifies output)
+5. **Phase 5 (COMPLETE):** AutoCAD entity creation (draw lines, arcs, text, blocks)
+6. **Phase 6 (NEXT):** Validation & self-correction (Gemini verifies output)
 
 ## 📊 Repository Status (as of 2026-02-02)
 
@@ -189,7 +195,7 @@
 | **End-to-end extraction test** (real CAD file → DB) | Needs running sidecar | Phase 1 (integration) |
 | **Knowledge base files** (codes, standards, formulas) | Content creation | Phase 3 |
 | **Raster Design integration** (PDF → DWG) | Full pipeline built w/ bitonal conversion, needs e2e test with real PDF | Phase 2 (complete, needs testing) |
-| **Gemini-First Pipeline** (quality-preserving PDF → DWG) | Phases 1-4 complete, Phase 5-6 pending | Phase 2.6 (in progress) |
+| **Gemini-First Pipeline** (quality-preserving PDF → DWG) | Phases 1-5 complete, Phase 6 pending | Phase 2.6 (in progress) |
 | **Element placement tools** (`place_revit_family`, `place_autocad_block`) | Tool development | Phase 4 |
 | **Engineering calculations** (`calculate_ventilation`, `calculate_duct_size`, etc.) | Tool development | Phase 4 |
 | **Routing/pathfinding** (`find_route`, `create_duct_run`) | Algorithm dev | Phase 4 |
@@ -318,7 +324,7 @@
 | Python LOC | ~24,000 |
 | MCP Tools | 50 (7 categories) |
 | Config Parameters | 48 env vars |
-| Test Files | 21 (695+ tests) |
+| Test Files | 22 (750+ tests) |
 | DB Tables | 15 (projects, elements, relationships, + 12 MEP/domain tables) |
 | Sidecar Files | 29 total (15 C#, 14 Python) |
 | Knowledge Base YAML Files | 6 (plumbing, mechanical, electrical, fire, low_voltage, architectural) |
@@ -394,13 +400,14 @@
 - **New Pipeline Parameters (Phase F):** `knowledge_grounding` (bool, default True), `project_standards` (dict), `company_standards` (dict).
 - **New dependency (optional YAML):** `PyYAML>=6.0` — for loading custom standards from YAML files.
 - **Semantic Intelligence Pipeline COMPLETE.** All 6 phases (A-F) now implemented. Full pipeline transforms raw geometry into semantically-rich AEC objects with proper layers, blocks, attributes, and relationships.
-- **CURRENT PRIORITY: Gemini-First Pipeline.** This is a new approach to PDF vectorization that puts Gemini Vision FIRST (before preprocessing) to understand drawing content before extraction. Addresses noise issues in the current bitonal pipeline. Phases 1-4 are COMPLETE (PDF Intake → Gemini Understanding → Coordinate Calibration → Adaptive Extraction). Phase 5 (AutoCAD Entity Creation) is NEXT.
+- **CURRENT PRIORITY: Gemini-First Pipeline.** This is a new approach to PDF vectorization that puts Gemini Vision FIRST (before preprocessing) to understand drawing content before extraction. Addresses noise issues in the current bitonal pipeline. Phases 1-5 are COMPLETE (PDF Intake → Gemini Understanding → Coordinate Calibration → Adaptive Extraction → AutoCAD Entity Creation). Phase 6 (Validation & Self-Correction) is NEXT.
 - **Gemini-First Phase 1 (COMPLETE):** High-quality PDF rendering without bitonal conversion. Files: `src/aec_agent/mcp/tools/gemini_first/pdf_intake.py`. MCP tools: `gemini_render_pdf`, `gemini_get_pdf_info`, `gemini_render_all_pages`, `gemini_compare_rendering_quality`. Key difference: preserves grayscale/color for AI analysis.
 - **Gemini-First Phase 2 (COMPLETE):** Gemini Vision drawing analysis. Files: `src/aec_agent/mcp/tools/gemini_first/gemini_understanding.py`. MCP tools: `gemini_analyze_drawing`, `gemini_analyze_pdf`, `gemini_get_extraction_strategy`. Key outputs: `DrawingAnalysis` dataclass with elements, regions, calibration hints, and recommended extraction strategy. 38 unit tests.
 - **Gemini-First Phase 3 (COMPLETE):** Coordinate calibration. Files: `src/aec_agent/mcp/tools/gemini_first/coordinate_calibration.py`. MCP tools: `gemini_calibrate_coordinates`, `gemini_calibrate_manual`, `gemini_convert_coordinates`, `gemini_parse_scale`, `gemini_parse_measurement`, `gemini_analyze_pdf_calibrated`. Key outputs: `ScaleCalibration` dataclass with `to_dwg()`, `to_pixels()`, `scale_length()`, `convert_units_to()` methods. Calibration method priority: dimension (90%) > scale notation (85%) > sheet size (70%) > DPI default (30%). Supports imperial (20'-6", 24") and metric (100mm, 1.5m) measurements. Standard sheet sizes: ARCH A-E, ANSI A-E, ISO A0-A4. 71 unit tests.
 - **Gemini-First Phase 4 (COMPLETE):** Adaptive extraction. Files: `src/aec_agent/mcp/tools/gemini_first/adaptive_extraction.py`. MCP tools: `gemini_extract_entities`, `gemini_extract_pdf_entities`, `gemini_get_layer_mapping`, `gemini_get_block_mapping`, `gemini_get_required_layers`, `gemini_get_required_blocks`. Key outputs: `EntityToCreate`, `RasterCommand`, `ExtractionResult` dataclasses. Three extraction strategies: Direct (Gemini coordinates → entities), Guided rasterization (VTool commands for complex regions), Selective OpenCV (HoughLinesP/HoughCircles for patterns). NCS-compliant layer mapping: `ELEMENT_TYPE_TO_LAYER` (walls, ducts, outlets, etc.), `SYMBOL_TO_BLOCK` (50+ MEP symbols). Helper functions: `get_layer_for_element_type()`, `get_block_name()`, `get_entities_by_type()`, `get_required_layers()`. 58 unit tests.
+- **Gemini-First Phase 5 (COMPLETE):** AutoCAD entity creation. Files: `src/aec_agent/mcp/tools/gemini_first/autocad_creation.py`. MCP tools: `gemini_create_entities` (extract + create), `gemini_vectorize_pdf` (complete PDF-to-AutoCAD pipeline), `gemini_create_from_extraction` (create from saved JSON). Key outputs: `AutoCADCreationResult`, `EntityCreationResult`, `LayerCreationResult`, `CreationStatistics` dataclasses. Core function: `create_entities_in_autocad()` takes ExtractionResult from Phase 4 and creates entities via sidecar commands (draw_line, draw_arc, draw_circle, draw_mtext, insert_block). Entity creators: `create_line_entity()`, `create_arc_entity()`, `create_circle_entity()`, `create_text_entity()`, `create_block_entity()`, `create_polyline_entity()`. Automatic layer creation with NCS-compliant colors: `LAYER_PREFIX_COLORS` (A-=7/white, M-=4/cyan, E-=1/red, P-=5/blue, F-=1/red, T-=3/green). Helper functions: `get_color_for_layer()`, `get_entity_type_stats()`, `get_failed_by_type()`. 55 unit tests.
 - **Gemini-First architecture docs:** `docs/autocad-rasterization-architecture.md` (full architecture), `docs/GEMINI-FIRST-PHASES.md` (phase breakdown with code snippets).
-- **Next priority (Phase 5):** Implement AutoCAD entity creation — use existing MCP tools (draw_line, draw_arc, draw_circle, draw_text, insert_block) to create entities from ExtractionResult.
+- **Next priority (Phase 6):** Implement validation & self-correction — Gemini verifies the created entities against the original PDF and identifies/corrects errors.
 - **Future priority:** Phase 3 (Knowledge Base Query Tools) from FUTURE_ROADMAP.md — building `query_knowledge_base` MCP tool for codes, standards, and engineering formulas.
 
 ## 📂 Key Files to Read First

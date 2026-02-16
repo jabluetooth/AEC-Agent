@@ -87,6 +87,29 @@ from .adaptive_extraction import (
     VTOOL_MAPPING,
 )
 
+# Phase 5: AutoCAD Entity Creation
+from .autocad_creation import (
+    EntityCreationResult,
+    LayerCreationResult,
+    CreationStatistics,
+    AutoCADCreationResult,
+    create_entities_in_autocad,
+    create_entities_batch,
+    create_single_entity,
+    create_layer_if_needed,
+    create_line_entity,
+    create_arc_entity,
+    create_circle_entity,
+    create_text_entity,
+    create_block_entity,
+    create_polyline_entity,
+    get_entity_type_stats,
+    get_failed_by_type,
+    get_color_for_layer,
+    LAYER_PREFIX_COLORS,
+    ENTITY_CREATORS,
+)
+
 # Import MCP tools to register them with the server
 from . import mcp_tools
 
@@ -166,6 +189,30 @@ __all__ = [
     "SYMBOL_TYPE_TO_LAYER",
     "SYMBOL_TO_BLOCK",
     "VTOOL_MAPPING",
+    # Phase 5: Data classes
+    "EntityCreationResult",
+    "LayerCreationResult",
+    "CreationStatistics",
+    "AutoCADCreationResult",
+    # Phase 5: Core functions
+    "create_entities_in_autocad",
+    "create_entities_batch",
+    "create_single_entity",
+    "create_layer_if_needed",
+    # Phase 5: Entity creators
+    "create_line_entity",
+    "create_arc_entity",
+    "create_circle_entity",
+    "create_text_entity",
+    "create_block_entity",
+    "create_polyline_entity",
+    # Phase 5: Helpers
+    "get_entity_type_stats",
+    "get_failed_by_type",
+    "get_color_for_layer",
+    # Phase 5: Constants
+    "LAYER_PREFIX_COLORS",
+    "ENTITY_CREATORS",
     # MCP tools module
     "mcp_tools",
 ]

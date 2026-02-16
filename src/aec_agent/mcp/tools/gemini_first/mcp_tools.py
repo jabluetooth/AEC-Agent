@@ -5,6 +5,8 @@ This module exposes the Gemini-First pipeline tools as MCP tools:
 - Phase 1: PDF Intake & Rendering
 - Phase 2: Gemini Understanding (Drawing Analysis)
 - Phase 3: Coordinate Calibration (Map Pixels to DWG Units)
+- Phase 4: Adaptive Extraction (Direct / Guided / Selective)
+- Phase 5: AutoCAD Entity Creation (Draw in DWG)
 """
 
 from __future__ import annotations
@@ -49,6 +51,16 @@ from .adaptive_extraction import (
     get_entities_by_layer,
     get_required_layers,
     get_required_blocks,
+)
+from .autocad_creation import (
+    AutoCADCreationResult,
+    CreationStatistics,
+    EntityCreationResult,
+    LayerCreationResult,
+    create_entities_in_autocad,
+    create_entities_batch,
+    get_entity_type_stats,
+    get_failed_by_type,
 )
 
 logger = structlog.get_logger(__name__)
@@ -321,7 +333,7 @@ async def gemini_compare_rendering_quality(
 @mcp.tool()
 async def gemini_analyze_drawing(
     image_path: str,
-    model: str = "gemini-1.5-pro",
+    model: str = "gemini-pro-latest",
     context: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -336,7 +348,7 @@ async def gemini_analyze_drawing(
 
     Args:
         image_path: Path to the drawing image (PNG, JPG, etc.)
-        model: Gemini model to use ("gemini-1.5-pro" or "gemini-1.5-flash")
+        model: Gemini model to use ("gemini-pro-latest" or "gemini-flash-latest", legacy names auto-mapped)
         context: Optional context/hints about the drawing
 
     Returns:
@@ -403,7 +415,7 @@ async def gemini_analyze_pdf(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-1.5-pro",
+    model: str = "gemini-pro-latest",
     context: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -497,7 +509,7 @@ async def gemini_analyze_pdf(
 @mcp.tool()
 async def gemini_get_extraction_strategy(
     image_path: str,
-    model: str = "gemini-1.5-flash",
+    model: str = "gemini-flash-latest",
 ) -> dict[str, Any]:
     """
     Get recommended extraction strategy for a drawing without full analysis.
@@ -571,7 +583,7 @@ async def gemini_calibrate_coordinates(
     image_width: int,
     image_height: int,
     image_dpi: int = 300,
-    model: str = "gemini-1.5-flash",
+    model: str = "gemini-flash-latest",
     prefer_units: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -956,7 +968,7 @@ async def gemini_analyze_pdf_calibrated(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-1.5-pro",
+    model: str = "gemini-pro-latest",
     prefer_units: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -1080,7 +1092,7 @@ async def gemini_extract_entities(
     image_width: int,
     image_height: int,
     image_dpi: int = 300,
-    model: str = "gemini-1.5-pro",
+    model: str = "gemini-pro-latest",
     include_opencv: bool = True,
 ) -> dict[str, Any]:
     """
@@ -1183,7 +1195,7 @@ async def gemini_extract_pdf_entities(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-1.5-pro",
+    model: str = "gemini-pro-latest",
     include_opencv: bool = True,
 ) -> dict[str, Any]:
     """
@@ -1374,7 +1386,7 @@ async def gemini_get_required_layers(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-1.5-flash",
+    model: str = "gemini-flash-latest",
 ) -> dict[str, Any]:
     """
     Get list of layers required for a PDF drawing.
@@ -1450,7 +1462,7 @@ async def gemini_get_required_blocks(
     file_path: str,
     page: int = 1,
     dpi: int = 300,
-    model: str = "gemini-1.5-flash",
+    model: str = "gemini-flash-latest",
 ) -> dict[str, Any]:
     """
     Get list of block definitions required for a PDF drawing.
@@ -1519,3 +1531,424 @@ async def gemini_get_required_blocks(
     except Exception as e:
         logger.exception("gemini_get_required_blocks_failed", error=str(e))
         return error_result(ErrorCode.INTERNAL_ERROR, f"Failed to analyze: {e}")
+
+
+# ==============================================================================
+# PHASE 5: AutoCAD Entity Creation (Draw in DWG)
+# ==============================================================================
+
+
+@mcp.tool()
+async def gemini_create_entities(
+    file_path: str,
+    page: int = 1,
+    dpi: int = 300,
+    model: str = "gemini-pro-latest",
+    include_opencv: bool = True,
+    create_layers: bool = True,
+) -> dict[str, Any]:
+    """
+    Extract entities from a PDF and create them in AutoCAD.
+
+    This combines Phases 1-5 of the Gemini-First pipeline:
+    1. Phase 1: Render PDF to high-quality image
+    2. Phase 2: Analyze with Gemini Vision
+    3. Phase 3: Calibrate coordinates
+    4. Phase 4: Extract entities
+    5. Phase 5: Create entities in AutoCAD
+
+    Args:
+        file_path: Path to the PDF file
+        page: Page number to process (1-indexed)
+        dpi: Resolution for rendering (default 300)
+        model: Gemini model for analysis
+        include_opencv: Whether to use OpenCV for special regions
+        create_layers: Whether to create layers that don't exist (default True)
+
+    Returns:
+        Success result with extraction and creation results.
+
+    Example:
+        >>> result = await gemini_create_entities("floor_plan.pdf")
+        >>> if result["success"]:
+        ...     data = result["data"]
+        ...     print(f"Created: {data['creation']['statistics']['success_count']}")
+        ...     print(f"Failed: {data['creation']['statistics']['failure_count']}")
+    """
+    logger.info(
+        "gemini_create_entities_called",
+        file_path=file_path,
+        page=page,
+        dpi=dpi,
+    )
+
+    # Validate PDF path
+    pdf_path = Path(file_path)
+    if not pdf_path.exists():
+        return error_result(
+            ErrorCode.ELEMENT_NOT_FOUND,
+            f"PDF file not found: {file_path}",
+        )
+
+    if not pdf_path.suffix.lower() == ".pdf":
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"File is not a PDF: {file_path}",
+        )
+
+    try:
+        # Phase 1: Render PDF
+        render_result = await render_pdf_high_quality_async(
+            pdf_path=pdf_path,
+            page_number=page - 1,
+            dpi=dpi,
+            convert_grayscale=True,
+        )
+
+        logger.info(
+            "gemini_create_entities_rendered",
+            image_path=str(render_result.image_path),
+        )
+
+        # Phase 2: Analyze with Gemini
+        analyzer = DrawingAnalyzer(model=model)
+        analysis = await analyzer.analyze(render_result.image_path)
+
+        # Phase 3: Calibrate coordinates
+        calibration = calibrate_from_analysis(
+            analysis=analysis,
+            image_width=render_result.width_px,
+            image_height=render_result.height_px,
+            image_dpi=dpi,
+        )
+
+        # Phase 4: Extract entities
+        if include_opencv:
+            extraction = await extract_all(
+                analysis, calibration, render_result.image_path
+            )
+        else:
+            extraction = await extract_direct_only(analysis, calibration)
+
+        logger.info(
+            "gemini_create_entities_extracted",
+            total_entities=extraction.total_entities,
+        )
+
+        # Phase 5: Create entities in AutoCAD
+        creation = await create_entities_in_autocad(
+            extraction,
+            create_layers=create_layers,
+        )
+
+        # Get drawing bounds for reference
+        bounds = estimate_drawing_bounds(analysis, calibration)
+
+        logger.info(
+            "gemini_create_entities_success",
+            drawing_type=analysis.drawing_type,
+            extracted=extraction.total_entities,
+            created=creation.success_count,
+            failed=creation.failure_count,
+        )
+
+        return success_result(
+            data={
+                "render": render_result.to_dict(),
+                "analysis": {
+                    "drawing_type": analysis.drawing_type,
+                    "complexity": analysis.complexity,
+                    "total_elements": analysis.total_elements,
+                },
+                "calibration": calibration.to_dict(),
+                "extraction": {
+                    "total_entities": extraction.total_entities,
+                    "direct_count": extraction.direct_count,
+                    "opencv_count": extraction.opencv_count,
+                },
+                "creation": creation.to_dict(),
+                "drawing_bounds": {
+                    "min": {"x": bounds[0][0], "y": bounds[0][1]},
+                    "max": {"x": bounds[1][0], "y": bounds[1][1]},
+                    "units": calibration.units,
+                },
+            },
+            message=f"Created {creation.success_count} of {extraction.total_entities} entities "
+                    f"({creation.success_rate:.0%} success rate)",
+        )
+
+    except FileNotFoundError as e:
+        return error_result(ErrorCode.ELEMENT_NOT_FOUND, str(e))
+    except ValueError as e:
+        return error_result(ErrorCode.INVALID_PARAMS, str(e))
+    except Exception as e:
+        logger.exception("gemini_create_entities_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Failed to process PDF: {e}")
+
+
+@mcp.tool()
+async def gemini_vectorize_pdf(
+    file_path: str,
+    page: int = 1,
+    dpi: int = 300,
+    model: str = "gemini-pro-latest",
+    include_opencv: bool = True,
+    create_layers: bool = True,
+) -> dict[str, Any]:
+    """
+    Complete PDF-to-AutoCAD vectorization using Gemini-First pipeline.
+
+    This is the main entry point for converting a PDF drawing to AutoCAD
+    entities. It runs the complete Gemini-First pipeline (Phases 1-5).
+
+    This tool:
+    1. Renders the PDF at high quality (preserving grayscale)
+    2. Uses Gemini Vision to understand the drawing
+    3. Calibrates coordinates using scale/dimensions/sheet size
+    4. Extracts entities using optimal strategy per element
+    5. Creates all entities in the active AutoCAD drawing
+
+    Args:
+        file_path: Path to the PDF file
+        page: Page number to vectorize (1-indexed)
+        dpi: Resolution for rendering (72-1200, default 300)
+        model: Gemini model for analysis (gemini-pro-latest recommended)
+        include_opencv: Use OpenCV for special regions (default True)
+        create_layers: Create layers that don't exist (default True)
+
+    Returns:
+        Success result with complete pipeline results.
+
+    Example:
+        >>> result = await gemini_vectorize_pdf("mechanical_plan.pdf")
+        >>> if result["success"]:
+        ...     print(f"Drawing type: {result['data']['summary']['drawing_type']}")
+        ...     print(f"Entities created: {result['data']['summary']['created']}")
+        ...     print(f"Success rate: {result['data']['summary']['success_rate']}")
+    """
+    logger.info(
+        "gemini_vectorize_pdf_called",
+        file_path=file_path,
+        page=page,
+        dpi=dpi,
+        model=model,
+    )
+
+    # Validate inputs
+    pdf_path = Path(file_path)
+    if not pdf_path.exists():
+        return error_result(
+            ErrorCode.ELEMENT_NOT_FOUND,
+            f"PDF file not found: {file_path}",
+        )
+
+    if not pdf_path.suffix.lower() == ".pdf":
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"File is not a PDF: {file_path}",
+        )
+
+    if not 72 <= dpi <= 1200:
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"DPI must be between 72 and 1200, got {dpi}",
+        )
+
+    try:
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 1: PDF Intake (High-quality rendering, no bitonal)
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_vectorize_phase1_start", phase="PDF Intake")
+
+        render_result = await render_pdf_high_quality_async(
+            pdf_path=pdf_path,
+            page_number=page - 1,
+            dpi=dpi,
+            convert_grayscale=True,
+        )
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 2: Gemini Understanding (Analyze original image)
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_vectorize_phase2_start", phase="Gemini Understanding")
+
+        analyzer = DrawingAnalyzer(model=model)
+        analysis = await analyzer.analyze(render_result.image_path)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 3: Coordinate Calibration (Map pixels to DWG units)
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_vectorize_phase3_start", phase="Coordinate Calibration")
+
+        calibration = calibrate_from_analysis(
+            analysis=analysis,
+            image_width=render_result.width_px,
+            image_height=render_result.height_px,
+            image_dpi=dpi,
+        )
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 4: Adaptive Extraction (Direct / Guided / Selective)
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_vectorize_phase4_start", phase="Adaptive Extraction")
+
+        if include_opencv:
+            extraction = await extract_all(
+                analysis, calibration, render_result.image_path
+            )
+        else:
+            extraction = await extract_direct_only(analysis, calibration)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 5: AutoCAD Entity Creation (Draw in DWG)
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_vectorize_phase5_start", phase="AutoCAD Entity Creation")
+
+        creation = await create_entities_in_autocad(
+            extraction,
+            create_layers=create_layers,
+        )
+
+        # Get drawing bounds
+        bounds = estimate_drawing_bounds(analysis, calibration)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # BUILD RESULT
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info(
+            "gemini_vectorize_pdf_complete",
+            drawing_type=analysis.drawing_type,
+            total_elements=analysis.total_elements,
+            entities_extracted=extraction.total_entities,
+            entities_created=creation.success_count,
+            success_rate=f"{creation.success_rate:.1%}",
+        )
+
+        return success_result(
+            data={
+                "summary": {
+                    "drawing_type": analysis.drawing_type,
+                    "complexity": analysis.complexity,
+                    "scale": analysis.scale,
+                    "units": calibration.units,
+                    "calibration_method": calibration.method,
+                    "calibration_confidence": f"{calibration.confidence:.0%}",
+                    "extracted": extraction.total_entities,
+                    "created": creation.success_count,
+                    "failed": creation.failure_count,
+                    "success_rate": f"{creation.success_rate:.0%}",
+                },
+                "phases": {
+                    "phase1_render": {
+                        "image_path": str(render_result.image_path),
+                        "width_px": render_result.width_px,
+                        "height_px": render_result.height_px,
+                        "color_mode": render_result.color_mode,
+                    },
+                    "phase2_analysis": {
+                        "drawing_type": analysis.drawing_type,
+                        "complexity": analysis.complexity,
+                        "total_elements": analysis.total_elements,
+                        "strategy": analysis.extraction_strategy.primary_strategy,
+                    },
+                    "phase3_calibration": calibration.to_dict(),
+                    "phase4_extraction": {
+                        "total_entities": extraction.total_entities,
+                        "direct_count": extraction.direct_count,
+                        "guided_count": extraction.guided_count,
+                        "opencv_count": extraction.opencv_count,
+                    },
+                    "phase5_creation": creation.to_dict(),
+                },
+                "drawing_bounds": {
+                    "min": {"x": bounds[0][0], "y": bounds[0][1]},
+                    "max": {"x": bounds[1][0], "y": bounds[1][1]},
+                    "units": calibration.units,
+                },
+            },
+            message=f"Vectorized {analysis.drawing_type} drawing: "
+                    f"{creation.success_count}/{extraction.total_entities} entities created "
+                    f"({creation.success_rate:.0%})",
+        )
+
+    except FileNotFoundError as e:
+        return error_result(ErrorCode.ELEMENT_NOT_FOUND, str(e))
+    except ValueError as e:
+        return error_result(ErrorCode.INVALID_PARAMS, str(e))
+    except Exception as e:
+        logger.exception("gemini_vectorize_pdf_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Failed to vectorize PDF: {e}")
+
+
+@mcp.tool()
+async def gemini_create_from_extraction(
+    extraction_json: str,
+    create_layers: bool = True,
+) -> dict[str, Any]:
+    """
+    Create AutoCAD entities from a previously extracted JSON.
+
+    Use this to create entities from a saved ExtractionResult JSON,
+    allowing you to re-run Phase 5 without re-analyzing the drawing.
+
+    Args:
+        extraction_json: JSON string of ExtractionResult.to_dict()
+        create_layers: Whether to create layers that don't exist
+
+    Returns:
+        Success result with creation results.
+
+    Example:
+        >>> # First, extract entities
+        >>> extract_result = await gemini_extract_pdf_entities("plan.pdf")
+        >>> extraction_json = json.dumps(extract_result["data"]["extraction"])
+        >>>
+        >>> # Later, create entities from saved extraction
+        >>> result = await gemini_create_from_extraction(extraction_json)
+    """
+    import json
+
+    logger.info("gemini_create_from_extraction_called")
+
+    try:
+        # Parse the extraction JSON
+        extraction_data = json.loads(extraction_json)
+
+        # Reconstruct EntityToCreate objects
+        entities = []
+        for entity_dict in extraction_data.get("entities", []):
+            entities.append(EntityToCreate.from_dict(entity_dict))
+
+        # Create a minimal ExtractionResult
+        extraction = ExtractionResult(
+            entities=entities,
+            primary_strategy=extraction_data.get("metadata", {}).get("primary_strategy", "direct"),
+            drawing_type=extraction_data.get("metadata", {}).get("drawing_type", ""),
+        )
+
+        # Create entities in AutoCAD
+        creation = await create_entities_in_autocad(
+            extraction,
+            create_layers=create_layers,
+        )
+
+        logger.info(
+            "gemini_create_from_extraction_success",
+            created=creation.success_count,
+            failed=creation.failure_count,
+        )
+
+        return success_result(
+            data=creation.to_dict(),
+            message=f"Created {creation.success_count} of {len(entities)} entities "
+                    f"({creation.success_rate:.0%} success rate)",
+        )
+
+    except json.JSONDecodeError as e:
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"Invalid JSON: {e}",
+        )
+    except Exception as e:
+        logger.exception("gemini_create_from_extraction_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Failed to create entities: {e}")

@@ -1,0 +1,70 @@
+﻿API Key found: AIzaSyDYsT...
+
+Available Gemini models that support generateContent:
+
+  - models/gemini-2.5-flash
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-2.5-pro
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-2.0-flash
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-2.0-flash-001
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-2.0-flash-exp-image-generation
+    Methods: ['generateContent', 'countTokens', 'bidiGenerateContent']
+
+  - models/gemini-2.0-flash-lite-001
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-2.0-flash-lite
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-exp-1206
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-2.5-flash-preview-tts
+    Methods: ['countTokens', 'generateContent']
+
+  - models/gemini-2.5-pro-preview-tts
+    Methods: ['countTokens', 'generateContent', 'batchGenerateContent']
+
+  - models/gemini-flash-latest
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-flash-lite-latest
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-pro-latest
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-2.5-flash-lite
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-2.5-flash-image
+    Methods: ['generateContent', 'countTokens', 'batchGenerateContent']
+
+  - models/gemini-2.5-flash-preview-09-2025
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-2.5-flash-lite-preview-09-2025
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-3-pro-preview
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-3-flash-preview
+    Methods: ['generateContent', 'countTokens', 'createCachedContent', 'batchGenerateContent']
+
+  - models/gemini-3-pro-image-preview
+    Methods: ['generateContent', 'countTokens', 'batchGenerateContent']
+
+  - models/gemini-robotics-er-1.5-preview
+    Methods: ['generateContent', 'countTokens']
+
+  - models/gemini-2.5-computer-use-preview-10-2025
+    Methods: ['generateContent', 'countTokens']
+

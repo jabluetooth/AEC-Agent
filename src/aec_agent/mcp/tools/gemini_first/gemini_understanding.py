@@ -501,7 +501,7 @@ class DrawingAnalyzer:
     Supports Gemini Pro Vision with fallback to other providers.
 
     Args:
-        model: Gemini model to use (gemini-1.5-pro or gemini-1.5-flash).
+        model: Gemini model to use (gemini-pro-latest, gemini-flash-latest, or legacy gemini-1.5-pro/flash which auto-map to 2.x).
         temperature: LLM temperature (lower = more deterministic).
         max_output_tokens: Maximum tokens in response.
 
@@ -514,7 +514,7 @@ class DrawingAnalyzer:
 
     def __init__(
         self,
-        model: str = "gemini-1.5-pro",
+        model: str = "gemini-pro-latest",
         temperature: float = 0.1,
         max_output_tokens: int = 8192,
     ):
@@ -536,10 +536,33 @@ class DrawingAnalyzer:
                     )
 
                 genai.configure(api_key=self.settings.gemini_api_key)
-                self._gemini_model = genai.GenerativeModel(self.model_name)
+                
+                # Map legacy model names to current Gemini 2.x models
+                # Gemini 1.5 models have been deprecated and replaced with Gemini 2.x
+                model_name = self.model_name
+                model_mapping = {
+                    "gemini-1.5-pro": "gemini-pro-latest",  # Maps to gemini-2.5-pro
+                    "gemini-1.5-flash": "gemini-flash-latest",  # Maps to gemini-2.5-flash
+                    "gemini-1.5-pro-latest": "gemini-pro-latest",
+                    "gemini-1.5-flash-latest": "gemini-flash-latest",
+                }
+                
+                # Apply mapping if needed
+                if model_name in model_mapping:
+                    original_model = model_name
+                    model_name = model_mapping[model_name]
+                    logger.info(
+                        "gemini_model_mapped",
+                        original_model=original_model,
+                        mapped_model=model_name,
+                        reason="Gemini 1.5 models deprecated, using Gemini 2.x equivalent"
+                    )
+                
+                self._gemini_model = genai.GenerativeModel(model_name)
                 logger.debug(
                     "gemini_model_initialized",
-                    model=self.model_name,
+                    model=model_name,
+                    original_request=self.model_name,
                 )
             except ImportError:
                 logger.error(
@@ -806,7 +829,7 @@ class DrawingAnalyzer:
 
 async def analyze_drawing(
     image_path: Path | str,
-    model: str = "gemini-1.5-pro",
+    model: str = "gemini-pro-latest",
     context: Optional[str] = None,
 ) -> DrawingAnalysis:
     """
