@@ -110,6 +110,24 @@ from .autocad_creation import (
     ENTITY_CREATORS,
 )
 
+# Phase 6: Validation & Self-Correction
+from .validation import (
+    ValidationStatus,
+    IssueType,
+    IssueSeverity,
+    CorrectionAction,
+    ValidationIssue,
+    Correction,
+    CorrectionResult,
+    ValidationResult,
+    validate_extraction,
+    apply_corrections,
+    validate_with_gemini,
+    get_critical_issues,
+    get_issues_by_type,
+    summarize_validation,
+)
+
 # Import MCP tools to register them with the server
 from . import mcp_tools
 
@@ -213,6 +231,24 @@ __all__ = [
     # Phase 5: Constants
     "LAYER_PREFIX_COLORS",
     "ENTITY_CREATORS",
+    # Phase 6: Enums
+    "ValidationStatus",
+    "IssueType",
+    "IssueSeverity",
+    "CorrectionAction",
+    # Phase 6: Data classes
+    "ValidationIssue",
+    "Correction",
+    "CorrectionResult",
+    "ValidationResult",
+    # Phase 6: Core functions
+    "validate_extraction",
+    "apply_corrections",
+    "validate_with_gemini",
+    # Phase 6: Helpers
+    "get_critical_issues",
+    "get_issues_by_type",
+    "summarize_validation",
     # MCP tools module
     "mcp_tools",
 ]

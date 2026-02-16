@@ -2,8 +2,21 @@
 > **DO NOT DELETE**. This file maintains the continuity of work between AI coding sessions.
 
 ## 🟢 Current Focus
-**Objective:** Gemini-First PDF to AutoCAD Pipeline — Phases 1-5 COMPLETE
-**Last Action:** Gemini-First Phase 5 Implementation (2026-02-16):
+**Objective:** Gemini-First PDF to AutoCAD Pipeline — ALL 6 PHASES COMPLETE ✅
+**Last Action:** Gemini-First Phase 6 Implementation (2026-02-16):
+- Created `validation.py` — Validation & Self-Correction module (~850 lines)
+- Validates created entities against original PDF using Gemini Vision
+- Iterative correction loop with configurable max iterations
+- Dataclasses: `ValidationResult`, `ValidationIssue`, `Correction`, `CorrectionResult`
+- Enums: `ValidationStatus`, `IssueType`, `IssueSeverity`, `CorrectionAction`
+- Issue types: MISSING_ELEMENT, EXTRA_ELEMENT, POSITION_ERROR, TEXT_ERROR, SYMBOL_ERROR, CONNECTIVITY_ISSUE, LAYER_ERROR, SCALE_ERROR
+- Correction actions: ADD, REMOVE, MODIFY, REPLACE
+- Core functions: `validate_extraction()`, `apply_corrections()`, `validate_with_gemini()`
+- Helper functions: `get_critical_issues()`, `get_issues_by_type()`, `summarize_validation()`
+- MCP Tools: `gemini_validate_extraction`, `gemini_complete_pipeline` (complete PDF-to-validated-AutoCAD workflow)
+- 35 unit tests passing for Phase 6 components
+
+**Previous Action:** Gemini-First Phase 5 Implementation (2026-02-16):
 - Created `autocad_creation.py` — AutoCAD entity creation module (~900 lines)
 - Creates entities in AutoCAD from Phase 4 ExtractionResult
 - Dataclasses: `EntityCreationResult`, `LayerCreationResult`, `CreationStatistics`, `AutoCADCreationResult`
@@ -155,15 +168,15 @@
 - All 6 phases of the Semantic Intelligence Pipeline are now implemented
 - Full pipeline: Document Classification → Region Segmentation → Semantic OCR → Symbol Intelligence → Geometry Intelligence → Relationship Inference → Knowledge Grounding
 
-**Next Step:** Gemini-First Phase 6 (Validation & Self-Correction) — Gemini verifies output and corrects errors.
+**Next Step:** Phase 3 (Knowledge Base Query Tools) from FUTURE_ROADMAP.md — building `query_knowledge_base` MCP tool for codes, standards, and engineering formulas.
 
-**Gemini-First Architecture:** This is a new approach to PDF vectorization that addresses noise issues in the current bitonal pipeline. Instead of preprocessing first (which destroys information), Gemini-First:
+**Gemini-First Architecture: COMPLETE ✅** This approach to PDF vectorization addresses noise issues in the current bitonal pipeline. Instead of preprocessing first (which destroys information), Gemini-First:
 1. **Phase 1 (COMPLETE):** Render PDF to high-quality PNG (preserves grayscale/color, anti-aliasing)
 2. **Phase 2 (COMPLETE):** Gemini Vision analyzes the original image to understand drawing content
 3. **Phase 3 (COMPLETE):** Coordinate calibration (pixels → DWG units)
 4. **Phase 4 (COMPLETE):** Adaptive extraction (direct/guided/selective strategies)
 5. **Phase 5 (COMPLETE):** AutoCAD entity creation (draw lines, arcs, text, blocks)
-6. **Phase 6 (NEXT):** Validation & self-correction (Gemini verifies output)
+6. **Phase 6 (COMPLETE):** Validation & self-correction (Gemini verifies output, iterative corrections)
 
 ## 📊 Repository Status (as of 2026-02-02)
 
@@ -195,7 +208,7 @@
 | **End-to-end extraction test** (real CAD file → DB) | Needs running sidecar | Phase 1 (integration) |
 | **Knowledge base files** (codes, standards, formulas) | Content creation | Phase 3 |
 | **Raster Design integration** (PDF → DWG) | Full pipeline built w/ bitonal conversion, needs e2e test with real PDF | Phase 2 (complete, needs testing) |
-| **Gemini-First Pipeline** (quality-preserving PDF → DWG) | Phases 1-5 complete, Phase 6 pending | Phase 2.6 (in progress) |
+| **Gemini-First Pipeline** (quality-preserving PDF → DWG) | ALL 6 PHASES COMPLETE ✅ | Phase 2.6 (COMPLETE) |
 | **Element placement tools** (`place_revit_family`, `place_autocad_block`) | Tool development | Phase 4 |
 | **Engineering calculations** (`calculate_ventilation`, `calculate_duct_size`, etc.) | Tool development | Phase 4 |
 | **Routing/pathfinding** (`find_route`, `create_duct_run`) | Algorithm dev | Phase 4 |
@@ -406,9 +419,10 @@
 - **Gemini-First Phase 3 (COMPLETE):** Coordinate calibration. Files: `src/aec_agent/mcp/tools/gemini_first/coordinate_calibration.py`. MCP tools: `gemini_calibrate_coordinates`, `gemini_calibrate_manual`, `gemini_convert_coordinates`, `gemini_parse_scale`, `gemini_parse_measurement`, `gemini_analyze_pdf_calibrated`. Key outputs: `ScaleCalibration` dataclass with `to_dwg()`, `to_pixels()`, `scale_length()`, `convert_units_to()` methods. Calibration method priority: dimension (90%) > scale notation (85%) > sheet size (70%) > DPI default (30%). Supports imperial (20'-6", 24") and metric (100mm, 1.5m) measurements. Standard sheet sizes: ARCH A-E, ANSI A-E, ISO A0-A4. 71 unit tests.
 - **Gemini-First Phase 4 (COMPLETE):** Adaptive extraction. Files: `src/aec_agent/mcp/tools/gemini_first/adaptive_extraction.py`. MCP tools: `gemini_extract_entities`, `gemini_extract_pdf_entities`, `gemini_get_layer_mapping`, `gemini_get_block_mapping`, `gemini_get_required_layers`, `gemini_get_required_blocks`. Key outputs: `EntityToCreate`, `RasterCommand`, `ExtractionResult` dataclasses. Three extraction strategies: Direct (Gemini coordinates → entities), Guided rasterization (VTool commands for complex regions), Selective OpenCV (HoughLinesP/HoughCircles for patterns). NCS-compliant layer mapping: `ELEMENT_TYPE_TO_LAYER` (walls, ducts, outlets, etc.), `SYMBOL_TO_BLOCK` (50+ MEP symbols). Helper functions: `get_layer_for_element_type()`, `get_block_name()`, `get_entities_by_type()`, `get_required_layers()`. 58 unit tests.
 - **Gemini-First Phase 5 (COMPLETE):** AutoCAD entity creation. Files: `src/aec_agent/mcp/tools/gemini_first/autocad_creation.py`. MCP tools: `gemini_create_entities` (extract + create), `gemini_vectorize_pdf` (complete PDF-to-AutoCAD pipeline), `gemini_create_from_extraction` (create from saved JSON). Key outputs: `AutoCADCreationResult`, `EntityCreationResult`, `LayerCreationResult`, `CreationStatistics` dataclasses. Core function: `create_entities_in_autocad()` takes ExtractionResult from Phase 4 and creates entities via sidecar commands (draw_line, draw_arc, draw_circle, draw_mtext, insert_block). Entity creators: `create_line_entity()`, `create_arc_entity()`, `create_circle_entity()`, `create_text_entity()`, `create_block_entity()`, `create_polyline_entity()`. Automatic layer creation with NCS-compliant colors: `LAYER_PREFIX_COLORS` (A-=7/white, M-=4/cyan, E-=1/red, P-=5/blue, F-=1/red, T-=3/green). Helper functions: `get_color_for_layer()`, `get_entity_type_stats()`, `get_failed_by_type()`. 55 unit tests.
+- **Gemini-First Phase 6 (COMPLETE):** Validation & Self-Correction. Files: `src/aec_agent/mcp/tools/gemini_first/validation.py`. MCP tools: `gemini_validate_extraction`, `gemini_complete_pipeline` (complete PDF-to-validated-AutoCAD workflow). Key outputs: `ValidationResult`, `ValidationIssue`, `Correction`, `CorrectionResult` dataclasses. Enums: `ValidationStatus` (APPROVED, ISSUES_FOUND, MANUAL_REVIEW, MAX_ITERATIONS, ERROR), `IssueType` (8 types: MISSING_ELEMENT, EXTRA_ELEMENT, POSITION_ERROR, TEXT_ERROR, SYMBOL_ERROR, CONNECTIVITY_ISSUE, LAYER_ERROR, SCALE_ERROR), `IssueSeverity` (CRITICAL, HIGH, MEDIUM, LOW), `CorrectionAction` (ADD, REMOVE, MODIFY, REPLACE). Core function: `validate_extraction()` takes original image, creation result, and optional context to perform iterative validation with Gemini Vision. Applies corrections via sidecar commands. Helper functions: `get_critical_issues()`, `get_issues_by_type()`, `summarize_validation()`. 35 unit tests.
+- **Gemini-First Pipeline: COMPLETE ✅** All 6 phases implemented: (1) PDF Intake — high-quality rendering without bitonal conversion, (2) Gemini Understanding — AI analysis before extraction, (3) Coordinate Calibration — pixel-to-DWG unit conversion, (4) Adaptive Extraction — direct/guided/selective strategies, (5) AutoCAD Creation — entity drawing via sidecar, (6) Validation — Gemini-verified self-correction loop. Total: 277 unit tests across all phases.
 - **Gemini-First architecture docs:** `docs/autocad-rasterization-architecture.md` (full architecture), `docs/GEMINI-FIRST-PHASES.md` (phase breakdown with code snippets).
-- **Next priority (Phase 6):** Implement validation & self-correction — Gemini verifies the created entities against the original PDF and identifies/corrects errors.
-- **Future priority:** Phase 3 (Knowledge Base Query Tools) from FUTURE_ROADMAP.md — building `query_knowledge_base` MCP tool for codes, standards, and engineering formulas.
+- **Next priority:** Phase 3 (Knowledge Base Query Tools) from FUTURE_ROADMAP.md — building `query_knowledge_base` MCP tool for codes, standards, and engineering formulas.
 
 ## 📂 Key Files to Read First
 1. `docs/SESSION_CONTEXT.md` (This file)

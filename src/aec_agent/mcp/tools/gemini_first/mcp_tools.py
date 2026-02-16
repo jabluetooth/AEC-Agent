@@ -62,6 +62,22 @@ from .autocad_creation import (
     get_entity_type_stats,
     get_failed_by_type,
 )
+from .validation import (
+    ValidationStatus,
+    IssueType,
+    IssueSeverity,
+    CorrectionAction,
+    ValidationIssue,
+    Correction,
+    CorrectionResult,
+    ValidationResult,
+    validate_extraction,
+    apply_corrections,
+    validate_with_gemini,
+    get_critical_issues,
+    get_issues_by_type,
+    summarize_validation,
+)
 
 logger = structlog.get_logger(__name__)
 
@@ -1952,3 +1968,343 @@ async def gemini_create_from_extraction(
     except Exception as e:
         logger.exception("gemini_create_from_extraction_failed", error=str(e))
         return error_result(ErrorCode.INTERNAL_ERROR, f"Failed to create entities: {e}")
+
+
+# ==============================================================================
+# PHASE 6: Validation & Self-Correction
+# ==============================================================================
+
+
+@mcp.tool()
+async def gemini_validate_extraction(
+    image_path: str,
+    creation_handles: list[str],
+    created_count: int,
+    failed_count: int,
+    max_iterations: int = 3,
+    apply_corrections: bool = True,
+    model: str = "gemini-pro-latest",
+) -> dict[str, Any]:
+    """
+    Validate created AutoCAD entities against the original drawing.
+
+    Uses Gemini Vision to compare the original drawing image with the
+    created entities and identify any issues or missing elements.
+
+    Args:
+        image_path: Path to the original drawing image (PNG from Phase 1)
+        creation_handles: List of created entity handles from Phase 5
+        created_count: Number of successfully created entities
+        failed_count: Number of failed entity creations
+        max_iterations: Maximum validation/correction iterations (default 3)
+        apply_corrections: Whether to auto-apply corrections (default True)
+        model: Gemini model for validation
+
+    Returns:
+        Success result with validation status and any issues found.
+
+    Example:
+        >>> result = await gemini_validate_extraction(
+        ...     image_path="temp/plan_page0.png",
+        ...     creation_handles=["1A", "1B", "1C"],
+        ...     created_count=100,
+        ...     failed_count=5,
+        ... )
+        >>> if result["success"]:
+        ...     print(f"Status: {result['data']['status']}")
+        ...     print(f"Accuracy: {result['data']['accuracy_estimate']}%")
+    """
+    logger.info(
+        "gemini_validate_extraction_called",
+        image_path=image_path,
+        created_count=created_count,
+        max_iterations=max_iterations,
+    )
+
+    # Validate image path
+    img_path = Path(image_path)
+    if not img_path.exists():
+        return error_result(
+            ErrorCode.ELEMENT_NOT_FOUND,
+            f"Image file not found: {image_path}",
+        )
+
+    try:
+        # Build a minimal AutoCADCreationResult for validation
+        from .autocad_creation import CreationStatistics
+
+        creation_result = AutoCADCreationResult(
+            success=True,
+            statistics=CreationStatistics(
+                total_entities=created_count + failed_count,
+                success_count=created_count,
+                failure_count=failed_count,
+            ),
+            created_handles=creation_handles,
+        )
+
+        # Run validation
+        validation = await validate_extraction(
+            original_image_path=img_path,
+            creation_result=creation_result,
+            max_iterations=max_iterations,
+            apply_corrections_enabled=apply_corrections,
+            model=model,
+        )
+
+        logger.info(
+            "gemini_validate_extraction_success",
+            status=validation.status.value,
+            accuracy=validation.accuracy_estimate,
+            issues=len(validation.issues),
+        )
+
+        return success_result(
+            data=validation.to_dict(),
+            message=f"Validation {validation.status.value}: "
+                    f"{validation.accuracy_estimate:.0f}% accurate, "
+                    f"{len(validation.issues)} issues found",
+        )
+
+    except Exception as e:
+        logger.exception("gemini_validate_extraction_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Validation failed: {e}")
+
+
+@mcp.tool()
+async def gemini_complete_pipeline(
+    file_path: str,
+    page: int = 1,
+    dpi: int = 300,
+    model: str = "gemini-pro-latest",
+    include_opencv: bool = True,
+    create_layers: bool = True,
+    validate: bool = True,
+    max_validation_iterations: int = 3,
+    apply_corrections: bool = True,
+) -> dict[str, Any]:
+    """
+    Run the complete Gemini-First PDF-to-AutoCAD pipeline (Phases 1-6).
+
+    This is the full pipeline that:
+    1. Renders PDF at high quality (Phase 1)
+    2. Analyzes with Gemini Vision (Phase 2)
+    3. Calibrates coordinates (Phase 3)
+    4. Extracts entities (Phase 4)
+    5. Creates entities in AutoCAD (Phase 5)
+    6. Validates and self-corrects (Phase 6)
+
+    Args:
+        file_path: Path to the PDF file
+        page: Page number to process (1-indexed)
+        dpi: Resolution for rendering (72-1200, default 300)
+        model: Gemini model for analysis and validation
+        include_opencv: Use OpenCV for special regions (default True)
+        create_layers: Create layers that don't exist (default True)
+        validate: Whether to run validation phase (default True)
+        max_validation_iterations: Max validation iterations (default 3)
+        apply_corrections: Whether to auto-apply corrections (default True)
+
+    Returns:
+        Success result with complete pipeline results.
+
+    Example:
+        >>> result = await gemini_complete_pipeline("floor_plan.pdf")
+        >>> if result["success"]:
+        ...     data = result["data"]
+        ...     print(f"Drawing type: {data['summary']['drawing_type']}")
+        ...     print(f"Entities created: {data['summary']['created']}")
+        ...     print(f"Validation: {data['validation']['status']}")
+    """
+    logger.info(
+        "gemini_complete_pipeline_called",
+        file_path=file_path,
+        page=page,
+        dpi=dpi,
+        validate=validate,
+    )
+
+    # Validate inputs
+    pdf_path = Path(file_path)
+    if not pdf_path.exists():
+        return error_result(
+            ErrorCode.ELEMENT_NOT_FOUND,
+            f"PDF file not found: {file_path}",
+        )
+
+    if not pdf_path.suffix.lower() == ".pdf":
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"File is not a PDF: {file_path}",
+        )
+
+    if not 72 <= dpi <= 1200:
+        return error_result(
+            ErrorCode.INVALID_PARAMS,
+            f"DPI must be between 72 and 1200, got {dpi}",
+        )
+
+    try:
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 1: PDF Intake (High-quality rendering)
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_complete_phase1_start", phase="PDF Intake")
+
+        render_result = await render_pdf_high_quality_async(
+            pdf_path=pdf_path,
+            page_number=page - 1,
+            dpi=dpi,
+            convert_grayscale=True,
+        )
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 2: Gemini Understanding
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_complete_phase2_start", phase="Gemini Understanding")
+
+        analyzer = DrawingAnalyzer(model=model)
+        analysis = await analyzer.analyze(render_result.image_path)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 3: Coordinate Calibration
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_complete_phase3_start", phase="Coordinate Calibration")
+
+        calibration = calibrate_from_analysis(
+            analysis=analysis,
+            image_width=render_result.width_px,
+            image_height=render_result.height_px,
+            image_dpi=dpi,
+        )
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 4: Adaptive Extraction
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_complete_phase4_start", phase="Adaptive Extraction")
+
+        if include_opencv:
+            extraction = await extract_all(
+                analysis, calibration, render_result.image_path
+            )
+        else:
+            extraction = await extract_direct_only(analysis, calibration)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 5: AutoCAD Entity Creation
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info("gemini_complete_phase5_start", phase="AutoCAD Entity Creation")
+
+        creation = await create_entities_in_autocad(
+            extraction,
+            create_layers=create_layers,
+        )
+
+        # Get drawing bounds
+        bounds = estimate_drawing_bounds(analysis, calibration)
+
+        # ═══════════════════════════════════════════════════════════════════
+        # PHASE 6: Validation & Self-Correction (Optional)
+        # ═══════════════════════════════════════════════════════════════════
+        validation_data = None
+
+        if validate:
+            logger.info("gemini_complete_phase6_start", phase="Validation")
+
+            validation = await validate_extraction(
+                original_image_path=render_result.image_path,
+                creation_result=creation,
+                extraction_result=extraction,
+                analysis=analysis,
+                calibration=calibration,
+                max_iterations=max_validation_iterations,
+                apply_corrections_enabled=apply_corrections,
+                model=model,
+            )
+
+            validation_data = validation.to_dict()
+
+            logger.info(
+                "gemini_complete_phase6_done",
+                status=validation.status.value,
+                accuracy=validation.accuracy_estimate,
+            )
+
+        # ═══════════════════════════════════════════════════════════════════
+        # BUILD RESULT
+        # ═══════════════════════════════════════════════════════════════════
+        logger.info(
+            "gemini_complete_pipeline_done",
+            drawing_type=analysis.drawing_type,
+            entities_created=creation.success_count,
+            validation_status=validation.status.value if validate else "skipped",
+        )
+
+        result_data = {
+            "summary": {
+                "drawing_type": analysis.drawing_type,
+                "complexity": analysis.complexity,
+                "scale": analysis.scale,
+                "units": calibration.units,
+                "calibration_method": calibration.method,
+                "calibration_confidence": f"{calibration.confidence:.0%}",
+                "extracted": extraction.total_entities,
+                "created": creation.success_count,
+                "failed": creation.failure_count,
+                "success_rate": f"{creation.success_rate:.0%}",
+            },
+            "phases": {
+                "phase1_render": {
+                    "image_path": str(render_result.image_path),
+                    "width_px": render_result.width_px,
+                    "height_px": render_result.height_px,
+                    "color_mode": render_result.color_mode,
+                },
+                "phase2_analysis": {
+                    "drawing_type": analysis.drawing_type,
+                    "complexity": analysis.complexity,
+                    "total_elements": analysis.total_elements,
+                    "strategy": analysis.extraction_strategy.primary_strategy,
+                },
+                "phase3_calibration": calibration.to_dict(),
+                "phase4_extraction": {
+                    "total_entities": extraction.total_entities,
+                    "direct_count": extraction.direct_count,
+                    "guided_count": extraction.guided_count,
+                    "opencv_count": extraction.opencv_count,
+                },
+                "phase5_creation": creation.to_dict(),
+            },
+            "drawing_bounds": {
+                "min": {"x": bounds[0][0], "y": bounds[0][1]},
+                "max": {"x": bounds[1][0], "y": bounds[1][1]},
+                "units": calibration.units,
+            },
+        }
+
+        if validation_data:
+            result_data["phases"]["phase6_validation"] = validation_data
+            result_data["summary"]["validation_status"] = validation.status.value
+            result_data["summary"]["validation_accuracy"] = f"{validation.accuracy_estimate:.0f}%"
+            result_data["summary"]["validation_issues"] = len(validation.issues)
+
+        # Build message
+        if validate:
+            message = (
+                f"Complete pipeline finished: {creation.success_count} entities created, "
+                f"validation {validation.status.value} ({validation.accuracy_estimate:.0f}% accurate)"
+            )
+        else:
+            message = (
+                f"Pipeline finished (no validation): {creation.success_count} entities created "
+                f"({creation.success_rate:.0%} success rate)"
+            )
+
+        return success_result(data=result_data, message=message)
+
+    except FileNotFoundError as e:
+        return error_result(ErrorCode.ELEMENT_NOT_FOUND, str(e))
+    except ValueError as e:
+        return error_result(ErrorCode.INVALID_PARAMS, str(e))
+    except Exception as e:
+        logger.exception("gemini_complete_pipeline_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Pipeline failed: {e}")
