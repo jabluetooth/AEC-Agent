@@ -370,126 +370,24 @@ class DrawingAnalysis:
 
 
 # Gemini prompt for drawing analysis
-UNDERSTANDING_PROMPT = """
-Analyze this technical/engineering drawing image and provide a complete understanding.
+UNDERSTANDING_PROMPT = """Analyze this technical drawing. Return ONLY JSON (no markdown):
 
-## INSTRUCTIONS
-
-You are looking at an ORIGINAL, high-quality rendering of a technical drawing (architectural, electrical, mechanical, plumbing, or similar).
-
-Provide your analysis as JSON with the following structure:
-
-```json
 {
-  "drawing_analysis": {
-    "type": "<floor_plan|electrical|mechanical|plumbing|fire_alarm|reflected_ceiling|site_plan|detail|section|elevation|schedule|diagram|other>",
-    "scale": "<scale notation if visible, e.g., '1/4\" = 1'-0\"' or null>",
-    "sheet_size": "<detected sheet size, e.g., 'ARCH D (24x36)' or null>",
-    "units": "<imperial|metric>",
-    "complexity": "<simple|medium|complex>",
-    "description": "<brief description of what this drawing shows>"
-  },
-
-  "regions": {
-    "title_block": {"bounds": [x1, y1, x2, y2], "content": "<extracted title block info>"} or null,
-    "drawing_area": {"bounds": [x1, y1, x2, y2]},
-    "legend": {"bounds": [x1, y1, x2, y2]} or null,
-    "notes": {"bounds": [x1, y1, x2, y2]} or null
-  },
-
+  "drawing_analysis": {"type": "floor_plan|electrical|mechanical|plumbing|fire_alarm|reflected_ceiling|site_plan|detail|section|elevation|schedule|diagram|other", "scale": "1/4\"=1'-0\" or null", "sheet_size": "ARCH D or null", "units": "imperial|metric", "complexity": "simple|medium|complex", "description": "brief"},
+  "regions": {"title_block": {"bounds": [x1,y1,x2,y2], "content": "..."} or null, "drawing_area": {"bounds": [x1,y1,x2,y2]}, "legend": null, "notes": null},
   "elements": {
-    "lines": [
-      {
-        "start": [x, y],
-        "end": [x, y],
-        "type": "<wall|duct|pipe|wire|dimension|leader|other>",
-        "linetype": "<continuous|dashed|dotted|hidden|center>",
-        "layer_suggestion": "<NCS layer name>"
-      }
-    ],
-    "arcs": [
-      {"center": [x, y], "radius": <pixels>, "start_angle": <deg>, "end_angle": <deg>, "type": "<door_swing|curved_wall|other>"}
-    ],
-    "circles": [
-      {"center": [x, y], "radius": <pixels>, "type": "<column|equipment|symbol|other>"}
-    ],
-    "text": [
-      {
-        "content": "<text content - correct any obvious errors>",
-        "position": [x, y],
-        "height_px": <approximate height in pixels>,
-        "type": "<room_name|dimension|equipment_tag|note|title|label|other>",
-        "associated_with": "<what this text labels, if applicable>"
-      }
-    ],
-    "symbols": [
-      {
-        "type": "<diffuser|outlet|switch|valve|fixture|detector|device|equipment|other>",
-        "subtype": "<specific subtype, e.g., 'supply_square', 'duplex', 'gate_valve'>",
-        "position": [x, y],
-        "rotation": <degrees, 0 if upright>,
-        "size": "<size if visible, e.g., '24x24'>",
-        "tag": "<equipment tag if visible>",
-        "associated_text": ["<nearby text labels>"]
-      }
-    ],
-    "dimensions": [
-      {
-        "value": "<dimension value as shown>",
-        "numeric_value": <parsed number>,
-        "unit": "<inches|feet|mm|m>",
-        "start": [x, y],
-        "end": [x, y],
-        "text_position": [x, y]
-      }
-    ]
+    "lines": [{"start": [x,y], "end": [x,y], "type": "wall|duct|pipe|wire|dimension|leader|other", "linetype": "continuous|dashed|dotted|hidden|center", "layer_suggestion": "NCS name"}],
+    "arcs": [{"center": [x,y], "radius": px, "start_angle": deg, "end_angle": deg, "type": "door_swing|curved_wall|other"}],
+    "circles": [{"center": [x,y], "radius": px, "type": "column|equipment|symbol|other"}],
+    "text": [{"content": "text (correct errors)", "position": [x,y], "height_px": px, "type": "room_name|dimension|equipment_tag|note|title|label|other", "associated_with": "labeled element"}],
+    "symbols": [{"type": "diffuser|outlet|switch|valve|fixture|detector|device|equipment|other", "subtype": "specific", "position": [x,y], "rotation": deg, "size": "24x24", "tag": "tag", "associated_text": ["labels"]}],
+    "dimensions": [{"value": "shown", "numeric_value": num, "unit": "inches|feet|mm|m", "start": [x,y], "end": [x,y], "text_position": [x,y]}]
   },
-
-  "calibration_hints": [
-    {
-      "type": "<dimension|known_object|grid_spacing|sheet_border>",
-      "description": "<what this is>",
-      "pixel_measurement": <pixels>,
-      "real_measurement": "<value with units>",
-      "confidence": <0-1>
-    }
-  ],
-
-  "extraction_strategy": {
-    "primary_strategy": "<direct|guided_rasterization|hybrid>",
-    "rationale": "<why this strategy>",
-    "per_element_strategy": {
-      "walls": "<direct|guided|skip>",
-      "ductwork": "<direct|guided|skip>",
-      "piping": "<direct|guided|skip>",
-      "electrical": "<direct|guided|skip>",
-      "text": "direct",
-      "symbols": "direct",
-      "dimensions": "direct"
-    },
-    "special_regions": [
-      {
-        "bounds": [x1, y1, x2, y2],
-        "strategy": "<guided_rasterization|selective_opencv>",
-        "reason": "<why special handling>",
-        "expected_pattern": "<parallel_lines|hatching|grid|curves>"
-      }
-    ]
-  }
+  "calibration_hints": [{"type": "dimension|known_object|grid_spacing|sheet_border", "description": "what", "pixel_measurement": px, "real_measurement": "value+units", "confidence": 0-1}],
+  "extraction_strategy": {"primary_strategy": "direct|guided_rasterization|hybrid", "rationale": "why", "per_element_strategy": {"walls": "direct|guided|skip", "ductwork": "...", "piping": "...", "electrical": "...", "text": "direct", "symbols": "direct", "dimensions": "direct"}, "special_regions": [{"bounds": [x1,y1,x2,y2], "strategy": "guided_rasterization|selective_opencv", "reason": "why", "expected_pattern": "parallel_lines|hatching|grid|curves"}]}
 }
-```
 
-## IMPORTANT NOTES
-
-1. **Coordinates**: Use pixel coordinates from top-left origin (0,0).
-2. **Text content**: Read text semantically - correct obvious OCR-like errors based on context.
-3. **Symbols**: Identify symbol TYPE and SUBTYPE (e.g., diffuser → supply_square_diffuser).
-4. **Line types**: Distinguish solid, dashed, dotted, hidden, center lines.
-5. **Associations**: Note which text labels which elements.
-6. **Calibration**: Identify ANY measurable references for scale calibration.
-7. **Limit results**: For large drawings, include the most important/representative items (up to 50 per category).
-
-Return ONLY the JSON, no markdown formatting or explanation.
+Rules: Pixel coords from top-left (0,0). Correct OCR errors semantically. Identify symbol subtypes. Max 50 items per category.
 """
 
 

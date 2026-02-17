@@ -249,102 +249,33 @@ class ValidationResult:
 # Validation Prompt
 # =============================================================================
 
-VALIDATION_PROMPT = """
-You are validating an AutoCAD drawing extraction against the original image.
+VALIDATION_PROMPT = """Validate AutoCAD extraction against original image. Return ONLY JSON:
 
-## ORIGINAL DRAWING
-[Image attached - this is the source PDF rendered at high quality]
-
-## CREATED ENTITIES
-The following entities were extracted and created in AutoCAD:
+ENTITIES CREATED:
 ```json
 {entities_json}
 ```
 
-## CREATION STATISTICS
-{stats_summary}
+STATS: {stats_summary}
 
-## INSTRUCTIONS
+CHECK FOR:
+- missing_element: Elements in original not extracted
+- extra_element: Noise/duplicates that shouldn't exist
+- position_error: >5% deviation from expected location
+- text_error: Wrong content, OCR errors
+- symbol_error: Wrong type/attributes/rotation
+- connectivity: Gaps in continuous geometry
 
-Compare the extracted entities against the original drawing. Check for:
-
-1. **MISSING ELEMENTS**: Elements visible in original but not in entity list
-   - Look for lines, arcs, circles, text, or symbols not represented
-   - Check edges of drawing, title block boundaries, dimension lines
-
-2. **EXTRA ELEMENTS**: False positives that shouldn't exist
-   - Noise interpreted as geometry
-   - Duplicate entities at same location
-
-3. **POSITION ERRORS**: Elements in wrong location (>5% deviation from expected)
-   - Text placed incorrectly
-   - Symbols at wrong coordinates
-   - Line endpoints misplaced
-
-4. **TEXT ERRORS**: Wrong content, missing characters, OCR-like errors
-   - Room numbers misread
-   - Dimension values incorrect
-   - Equipment tags garbled
-
-5. **SYMBOL ERRORS**: Wrong type, wrong attributes, wrong orientation
-   - Diffuser typed as outlet
-   - Valve rotation incorrect
-   - Block name mismatch
-
-6. **CONNECTIVITY ISSUES**: Gaps or overlaps in continuous geometry
-   - Lines that should connect but don't
-   - Duct runs with breaks
-   - Pipe connections missing
-
-For each issue, provide a correction action:
-- **ADD**: Add missing element (provide full properties)
-- **REMOVE**: Remove false positive (provide entity_handle if known)
-- **MODIFY**: Change element properties (provide entity_handle and new_properties)
-- **REPLACE**: Replace with correct element (provide entity_handle and new entity)
-
-## RESPONSE FORMAT
-
-Return ONLY valid JSON (no markdown, no code blocks):
+RESPONSE FORMAT:
 {{
-  "validation_status": "approved" | "issues_found",
-  "accuracy_estimate": <0-100 as integer>,
-  "summary": "<brief summary of validation>",
-  "issues": [
-    {{
-      "type": "missing_element|extra_element|position_error|text_error|symbol_error|connectivity",
-      "description": "<specific description of what's wrong>",
-      "severity": "critical|major|minor",
-      "location": [x, y] or null,
-      "expected_value": "<what it should be>" or null,
-      "actual_value": "<what it is>" or null
-    }}
-  ],
-  "corrections": [
-    {{
-      "action": "ADD|REMOVE|MODIFY|REPLACE",
-      "entity_type": "line|arc|circle|mtext|block",
-      "layer": "<layer name>",
-      "properties": {{
-        // For ADD/REPLACE:
-        // line: {{"start": [x,y], "end": [x,y], "linetype": "Continuous"}}
-        // arc: {{"center": [x,y], "radius": r, "start_angle": a1, "end_angle": a2}}
-        // circle: {{"center": [x,y], "radius": r}}
-        // mtext: {{"content": "text", "position": [x,y], "height": h}}
-        // block: {{"block_name": "name", "position": [x,y], "rotation": r, "scale": s}}
-        // For MODIFY: only the properties to change
-      }},
-      "entity_handle": "<handle>" or null,
-      "reason": "<why this correction>"
-    }}
-  ]
+  "validation_status": "approved|issues_found",
+  "accuracy_estimate": 0-100,
+  "summary": "brief",
+  "issues": [{{"type": "missing_element|extra_element|position_error|text_error|symbol_error|connectivity", "description": "what's wrong", "severity": "critical|major|minor", "location": [x,y] or null, "expected_value": null, "actual_value": null}}],
+  "corrections": [{{"action": "ADD|REMOVE|MODIFY|REPLACE", "entity_type": "line|arc|circle|mtext|block", "layer": "name", "properties": {{"start": [x,y], "end": [x,y]}} or {{"center": [x,y], "radius": r}} or {{"content": "text", "position": [x,y], "height": h}} or {{"block_name": "name", "position": [x,y], "rotation": r}}, "entity_handle": null, "reason": "why"}}]
 }}
 
-IMPORTANT NOTES:
-- If the extraction looks good overall (>90% accurate), return "approved"
-- Focus on CRITICAL issues first (missing equipment, wrong text, connectivity breaks)
-- Minor issues (slight position drift, optional elements) can be ignored for approval
-- All coordinates are in DWG units (typically inches or feet)
-- Do NOT suggest corrections you are not confident about
+Rules: Return "approved" if >90% accurate. Focus on CRITICAL issues. Coords in DWG units. Only confident corrections.
 """
 
 

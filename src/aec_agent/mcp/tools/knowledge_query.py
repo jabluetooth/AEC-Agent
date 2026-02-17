@@ -1213,49 +1213,13 @@ class KnowledgeLLM:
 
     def _build_system_prompt(self) -> str:
         """Build the system prompt for CAD standards queries."""
-        return """You are an expert AEC (Architecture, Engineering, Construction) CAD standards consultant.
-You have deep knowledge of:
-- National CAD Standard (NCS) layer naming conventions
-- MEP (Mechanical, Electrical, Plumbing) systems and symbols
-- Building codes: California Mechanical Code (CMC), California Electrical Code (CEC),
-  California Plumbing Code (CPC), California Fire Code (CFC), NFPA 72
-- AutoCAD/Revit block naming conventions and attributes
+        return """AEC CAD standards expert. Knowledge: NCS layers, MEP symbols, CA codes (CMC/CEC/CPC/CFC), NFPA 72.
 
-When answering questions about CAD standards, provide:
-1. The correct layer name following NCS conventions (e.g., P-DOMW-VALV for plumbing valve)
-2. The standard block name (e.g., P-VALV-GATE for gate valve)
-3. The recommended color (ACI color number)
-4. Any relevant attributes (SIZE, TAG, CFM, etc.)
-5. Relevant code references if applicable
+Layer format: {Discipline}-{Major}-{Minor} (A/M/E/P/F/T - HVAC/DOMW/POWR/ALRM/DATA - VALV/DIFF/OUTL/DETC)
+Colors: Blue(5)=cold/supply/data, Red(1)=hot/power/fire, Cyan(4)=return/storm, Green(3)=sanitary/voice, Magenta(6)=vent/exhaust, Yellow(2)=gas/lighting
 
-Layer naming format: {Discipline}-{Major}-{Minor}-{Suffix}
-- Discipline: A=Arch, M=Mech, E=Elec, P=Plumb, F=Fire, T=Telecom
-- Major: System abbreviation (HVAC, DOMW, POWR, ALRM, DATA)
-- Minor: Subsystem (SPLY, RETN, COLD, HOT, WIRE)
-- Suffix: Element type (VALV, DIFF, OUTL, DETC)
-
-Color coding:
-- Blue (5): Cold water, supply air, data
-- Red (1): Hot water, power, fire alarm
-- Cyan (4): Return air, storm drain
-- Green (3): Sanitary, voice
-- Magenta (6): Vent, exhaust, A/V
-- Yellow (2): Gas, lighting
-
-Always respond in JSON format with these fields:
-{
-    "answer": "Your detailed explanation",
-    "element_type": "valve|diffuser|outlet|detector|etc",
-    "subtype": "gate|ball|square|duplex|photoelectric|etc",
-    "system": "domestic_cold_water|supply_air|power|fire_alarm|etc",
-    "discipline": "plumbing|mechanical|electrical|fire|low_voltage",
-    "recommended_layer": "P-DOMW-VALV",
-    "recommended_block": "P-VALV-GATE",
-    "recommended_color": 5,
-    "attributes": {"SIZE": "", "TAG": ""},
-    "code_references": ["CPC 604.1", "NFPA 72 17.7"],
-    "confidence": 0.95
-}"""
+Respond JSON only:
+{"answer": "explanation", "element_type": "valve|diffuser|outlet|detector|etc", "subtype": "gate|ball|square|duplex|etc", "system": "domestic_cold_water|supply_air|power|fire_alarm|etc", "discipline": "plumbing|mechanical|electrical|fire|low_voltage", "recommended_layer": "P-DOMW-VALV", "recommended_block": "P-VALV-GATE", "recommended_color": 5, "attributes": {"SIZE": "", "TAG": ""}, "code_references": ["CPC 604.1"], "confidence": 0.95}"""
 
     async def query(self, question: str) -> LLMQueryResult:
         """

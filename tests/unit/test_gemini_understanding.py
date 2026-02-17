@@ -357,7 +357,7 @@ class TestDrawingAnalyzer:
         """Test default initialization."""
         analyzer = DrawingAnalyzer()
 
-        assert analyzer.model_name == "gemini-1.5-pro"
+        assert analyzer.model_name == "gemini-2.0-flash"
         assert analyzer.temperature == 0.1
         assert analyzer.max_output_tokens == 8192
 
