@@ -856,14 +856,34 @@ class GeminiBackend(LLMBackend):
         if not tools:
             return []
 
+        def clean_schema(schema: dict) -> dict:
+            """Remove fields not supported by Gemini's function calling API."""
+            if not isinstance(schema, dict):
+                return schema
+
+            # Fields not supported by Gemini
+            unsupported = {"title", "default", "$schema", "additionalProperties"}
+            cleaned = {k: v for k, v in schema.items() if k not in unsupported}
+
+            # Recursively clean nested schemas
+            if "properties" in cleaned and isinstance(cleaned["properties"], dict):
+                cleaned["properties"] = {
+                    k: clean_schema(v) for k, v in cleaned["properties"].items()
+                }
+            if "items" in cleaned:
+                cleaned["items"] = clean_schema(cleaned["items"])
+
+            return cleaned
+
         function_declarations = []
         for tool in tools:
             if tool.get("type") == "function":
                 func = tool.get("function", {})
+                params = func.get("parameters", {})
                 function_declarations.append({
                     "name": func.get("name", ""),
                     "description": func.get("description", ""),
-                    "parameters": func.get("parameters", {})
+                    "parameters": clean_schema(params)
                 })
         return function_declarations
 

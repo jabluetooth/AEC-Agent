@@ -81,6 +81,63 @@ from .validation import (
 
 logger = structlog.get_logger(__name__)
 
+# Maximum elements to include in tool results (reduces token usage)
+MAX_ELEMENTS_IN_RESULT = 10
+
+
+def _summarize_analysis(analysis: DrawingAnalysis) -> dict:
+    """Summarize analysis for compact tool results."""
+    elements = analysis.elements
+    return {
+        "drawing_type": analysis.drawing_type,
+        "complexity": analysis.complexity,
+        "scale": analysis.scale,
+        "units": analysis.units,
+        "total_elements": analysis.total_elements,
+        "element_counts": {
+            "lines": len(elements.lines),
+            "arcs": len(elements.arcs),
+            "circles": len(elements.circles),
+            "text": len(elements.text),
+            "symbols": len(elements.symbols),
+            "dimensions": len(elements.dimensions),
+        },
+        "calibration_hints": len(analysis.calibration_hints),
+        "extraction_strategy": analysis.extraction_strategy.primary_strategy if analysis.extraction_strategy else None,
+    }
+
+
+def _summarize_extraction(extraction: ExtractionResult) -> dict:
+    """Summarize extraction for compact tool results."""
+    by_type = {}
+    for entity in extraction.entities:
+        t = entity.entity_type.value
+        by_type[t] = by_type.get(t, 0) + 1
+
+    return {
+        "total_entities": extraction.total_entities,
+        "direct_count": extraction.direct_count,
+        "guided_count": extraction.guided_count,
+        "opencv_count": extraction.opencv_count,
+        "by_type": by_type,
+        "layers_used": list(set(e.layer for e in extraction.entities))[:10],
+    }
+
+
+def _summarize_creation(creation: AutoCADCreationResult) -> dict:
+    """Summarize creation result for compact tool results."""
+    return {
+        "total_entities": creation.statistics.total_entities,
+        "success_count": creation.statistics.success_count,
+        "failure_count": creation.statistics.failure_count,
+        "success_rate": f"{creation.success_rate:.0%}",
+        "layers_created": len(creation.layers_created),
+        "by_type": {
+            k.value if hasattr(k, 'value') else k: v
+            for k, v in creation.statistics.by_type.items()
+        },
+    }
+
 
 @mcp.tool()
 async def gemini_render_pdf(
@@ -411,8 +468,9 @@ async def gemini_analyze_drawing(
             total_elements=analysis.total_elements,
         )
 
+        # Return summarized result to reduce token usage
         return success_result(
-            data=analysis.to_dict(),
+            data=_summarize_analysis(analysis),
             message=f"Analyzed {analysis.drawing_type} drawing "
                     f"({analysis.complexity} complexity, {analysis.total_elements} elements)",
         )
@@ -504,10 +562,15 @@ async def gemini_analyze_pdf(
             total_elements=analysis.total_elements,
         )
 
+        # Return summarized result to reduce token usage
         return success_result(
             data={
-                "render": render_result.to_dict(),
-                "analysis": analysis.to_dict(),
+                "render": {
+                    "image_path": str(render_result.image_path),
+                    "width_px": render_result.width_px,
+                    "height_px": render_result.height_px,
+                },
+                "analysis": _summarize_analysis(analysis),
             },
             message=f"Rendered page {page} and analyzed as {analysis.drawing_type} "
                     f"({analysis.total_elements} elements)",
@@ -1191,8 +1254,9 @@ async def gemini_extract_entities(
             opencv_count=result.opencv_count,
         )
 
+        # Return summarized result to reduce token usage
         return success_result(
-            data=result.to_dict(),
+            data=_summarize_extraction(result),
             message=f"Extracted {result.total_entities} entities "
                     f"({result.direct_count} direct, {result.opencv_count} OpenCV)",
         )
@@ -1300,12 +1364,18 @@ async def gemini_extract_pdf_entities(
             total_entities=extraction.total_entities,
         )
 
+        # Return summarized result to reduce token usage
         return success_result(
             data={
-                "render": render_result.to_dict(),
-                "analysis": analysis.to_dict(),
-                "calibration": calibration.to_dict(),
-                "extraction": extraction.to_dict(),
+                "render": {"image_path": str(render_result.image_path)},
+                "analysis": _summarize_analysis(analysis),
+                "calibration": {
+                    "scale_factor": calibration.scale_factor,
+                    "units": calibration.units,
+                    "method": calibration.method,
+                    "confidence": f"{calibration.confidence:.0%}",
+                },
+                "extraction": _summarize_extraction(extraction),
                 "drawing_bounds": {
                     "min": {"x": bounds[0][0], "y": bounds[0][1]},
                     "max": {"x": bounds[1][0], "y": bounds[1][1]},
@@ -1668,21 +1738,18 @@ async def gemini_create_entities(
             failed=creation.failure_count,
         )
 
+        # Return summarized result to reduce token usage
         return success_result(
             data={
-                "render": render_result.to_dict(),
-                "analysis": {
-                    "drawing_type": analysis.drawing_type,
-                    "complexity": analysis.complexity,
-                    "total_elements": analysis.total_elements,
+                "render": {"image_path": str(render_result.image_path)},
+                "analysis": _summarize_analysis(analysis),
+                "calibration": {
+                    "scale_factor": calibration.scale_factor,
+                    "units": calibration.units,
+                    "method": calibration.method,
                 },
-                "calibration": calibration.to_dict(),
-                "extraction": {
-                    "total_entities": extraction.total_entities,
-                    "direct_count": extraction.direct_count,
-                    "opencv_count": extraction.opencv_count,
-                },
-                "creation": creation.to_dict(),
+                "extraction": _summarize_extraction(extraction),
+                "creation": _summarize_creation(creation),
                 "drawing_bounds": {
                     "min": {"x": bounds[0][0], "y": bounds[0][1]},
                     "max": {"x": bounds[1][0], "y": bounds[1][1]},
@@ -1840,6 +1907,7 @@ async def gemini_vectorize_pdf(
             success_rate=f"{creation.success_rate:.1%}",
         )
 
+        # Return compact summary to reduce token usage
         return success_result(
             data={
                 "summary": {
@@ -1855,31 +1923,15 @@ async def gemini_vectorize_pdf(
                     "success_rate": f"{creation.success_rate:.0%}",
                 },
                 "phases": {
-                    "phase1_render": {
-                        "image_path": str(render_result.image_path),
-                        "width_px": render_result.width_px,
-                        "height_px": render_result.height_px,
-                        "color_mode": render_result.color_mode,
+                    "phase1_render": {"image_path": str(render_result.image_path)},
+                    "phase2_analysis": _summarize_analysis(analysis),
+                    "phase3_calibration": {
+                        "scale_factor": calibration.scale_factor,
+                        "units": calibration.units,
+                        "method": calibration.method,
                     },
-                    "phase2_analysis": {
-                        "drawing_type": analysis.drawing_type,
-                        "complexity": analysis.complexity,
-                        "total_elements": analysis.total_elements,
-                        "strategy": analysis.extraction_strategy.primary_strategy,
-                    },
-                    "phase3_calibration": calibration.to_dict(),
-                    "phase4_extraction": {
-                        "total_entities": extraction.total_entities,
-                        "direct_count": extraction.direct_count,
-                        "guided_count": extraction.guided_count,
-                        "opencv_count": extraction.opencv_count,
-                    },
-                    "phase5_creation": creation.to_dict(),
-                },
-                "drawing_bounds": {
-                    "min": {"x": bounds[0][0], "y": bounds[0][1]},
-                    "max": {"x": bounds[1][0], "y": bounds[1][1]},
-                    "units": calibration.units,
+                    "phase4_extraction": _summarize_extraction(extraction),
+                    "phase5_creation": _summarize_creation(creation),
                 },
             },
             message=f"Vectorized {analysis.drawing_type} drawing: "
@@ -1954,8 +2006,9 @@ async def gemini_create_from_extraction(
             failed=creation.failure_count,
         )
 
+        # Return summarized result to reduce token usage
         return success_result(
-            data=creation.to_dict(),
+            data=_summarize_creation(creation),
             message=f"Created {creation.success_count} of {len(entities)} entities "
                     f"({creation.success_rate:.0%} success rate)",
         )
@@ -2239,6 +2292,7 @@ async def gemini_complete_pipeline(
             validation_status=validation.status.value if validate else "skipped",
         )
 
+        # Build compact result to reduce token usage
         result_data = {
             "summary": {
                 "drawing_type": analysis.drawing_type,
@@ -2253,31 +2307,15 @@ async def gemini_complete_pipeline(
                 "success_rate": f"{creation.success_rate:.0%}",
             },
             "phases": {
-                "phase1_render": {
-                    "image_path": str(render_result.image_path),
-                    "width_px": render_result.width_px,
-                    "height_px": render_result.height_px,
-                    "color_mode": render_result.color_mode,
+                "phase1_render": {"image_path": str(render_result.image_path)},
+                "phase2_analysis": _summarize_analysis(analysis),
+                "phase3_calibration": {
+                    "scale_factor": calibration.scale_factor,
+                    "units": calibration.units,
+                    "method": calibration.method,
                 },
-                "phase2_analysis": {
-                    "drawing_type": analysis.drawing_type,
-                    "complexity": analysis.complexity,
-                    "total_elements": analysis.total_elements,
-                    "strategy": analysis.extraction_strategy.primary_strategy,
-                },
-                "phase3_calibration": calibration.to_dict(),
-                "phase4_extraction": {
-                    "total_entities": extraction.total_entities,
-                    "direct_count": extraction.direct_count,
-                    "guided_count": extraction.guided_count,
-                    "opencv_count": extraction.opencv_count,
-                },
-                "phase5_creation": creation.to_dict(),
-            },
-            "drawing_bounds": {
-                "min": {"x": bounds[0][0], "y": bounds[0][1]},
-                "max": {"x": bounds[1][0], "y": bounds[1][1]},
-                "units": calibration.units,
+                "phase4_extraction": _summarize_extraction(extraction),
+                "phase5_creation": _summarize_creation(creation),
             },
         }
 

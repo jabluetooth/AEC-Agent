@@ -10,6 +10,67 @@ This package implements the 6-phase Gemini-First architecture:
 - Phase 6: Validation & Self-Correction (Gemini verifies)
 """
 
+import asyncio
+import structlog
+
+logger = structlog.get_logger(__name__)
+
+
+async def gemini_call_with_retry(
+    model,
+    content: list,
+    generation_config: dict,
+    max_retries: int = 3,
+    base_delay: float = 2.0,
+) -> str:
+    """
+    Call Gemini API with exponential backoff retry for 429 rate limits.
+
+    Args:
+        model: Gemini model instance
+        content: Content to send (prompt + image)
+        generation_config: Generation configuration dict
+        max_retries: Maximum retry attempts (default 3)
+        base_delay: Base delay in seconds (doubles each retry)
+
+    Returns:
+        Response text from Gemini
+
+    Raises:
+        Exception: If all retries exhausted
+    """
+    last_error = None
+
+    for attempt in range(max_retries + 1):
+        try:
+            response = await model.generate_content_async(
+                content,
+                generation_config=generation_config,
+            )
+            return response.text
+        except Exception as e:
+            error_str = str(e)
+            last_error = e
+
+            # Check if it's a rate limit error (429)
+            if "429" in error_str or "Resource exhausted" in error_str:
+                if attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "gemini_rate_limited",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        delay_seconds=delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+            # Non-retryable error or max retries exceeded
+            raise
+
+    raise last_error
+
+
 # Phase 1: PDF Intake & Rendering
 from .pdf_intake import (
     PDFInfo,

@@ -492,10 +492,14 @@ class DrawingAnalyzer:
         # Try to extract JSON from markdown code blocks
         json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', response_text)
         if json_match:
+            json_str = json_match.group(1)
             try:
-                return json.loads(json_match.group(1))
+                return json.loads(json_str)
             except json.JSONDecodeError:
-                pass
+                # Try to repair truncated JSON by closing brackets
+                repaired = self._repair_truncated_json(json_str)
+                if repaired:
+                    return repaired
 
         # Try to find raw JSON object
         json_match = re.search(r'\{[\s\S]*\}', response_text)
@@ -503,9 +507,33 @@ class DrawingAnalyzer:
             try:
                 return json.loads(json_match.group())
             except json.JSONDecodeError:
-                pass
+                repaired = self._repair_truncated_json(json_match.group())
+                if repaired:
+                    return repaired
 
         raise ValueError(f"Failed to parse response as JSON: {response_text[:500]}...")
+
+    def _repair_truncated_json(self, json_str: str) -> Optional[dict]:
+        """Attempt to repair truncated JSON by closing open brackets."""
+        # Count open brackets
+        open_braces = json_str.count('{') - json_str.count('}')
+        open_brackets = json_str.count('[') - json_str.count(']')
+
+        if open_braces <= 0 and open_brackets <= 0:
+            return None
+
+        # Try to close the JSON properly
+        repaired = json_str.rstrip()
+        # Remove trailing comma if present
+        if repaired.endswith(','):
+            repaired = repaired[:-1]
+        # Close arrays then objects
+        repaired += ']' * open_brackets + '}' * open_braces
+
+        try:
+            return json.loads(repaired)
+        except json.JSONDecodeError:
+            return None
 
     def _parse_analysis(self, data: dict) -> DrawingAnalysis:
         """Convert raw JSON to DrawingAnalysis dataclass."""
@@ -535,19 +563,29 @@ class DrawingAnalyzer:
         # Parse lines
         for line_data in elements_data.get("lines", []):
             if isinstance(line_data, dict) and "start" in line_data and "end" in line_data:
+                # Ensure exactly 2 coordinates (Gemini sometimes returns more)
+                start = line_data["start"][:2] if len(line_data["start"]) >= 2 else [0, 0]
+                end = line_data["end"][:2] if len(line_data["end"]) >= 2 else [0, 0]
                 elements.lines.append(DetectedLine(
-                    start=tuple(line_data["start"]),
-                    end=tuple(line_data["end"]),
+                    start=tuple(start),
+                    end=tuple(end),
                     line_type=line_data.get("type", "other"),
                     linetype=line_data.get("linetype", "continuous"),
                     layer_suggestion=line_data.get("layer_suggestion"),
                 ))
 
+        # Helper to safely extract 2D coordinates
+        def _safe_coord(data, key, default=(0, 0)):
+            val = data.get(key, default)
+            if isinstance(val, (list, tuple)) and len(val) >= 2:
+                return tuple(val[:2])
+            return default
+
         # Parse arcs
         for arc_data in elements_data.get("arcs", []):
             if isinstance(arc_data, dict) and "center" in arc_data:
                 elements.arcs.append(DetectedArc(
-                    center=tuple(arc_data["center"]),
+                    center=_safe_coord(arc_data, "center"),
                     radius=arc_data.get("radius", 0),
                     start_angle=arc_data.get("start_angle", 0),
                     end_angle=arc_data.get("end_angle", 360),
@@ -558,7 +596,7 @@ class DrawingAnalyzer:
         for circle_data in elements_data.get("circles", []):
             if isinstance(circle_data, dict) and "center" in circle_data:
                 elements.circles.append(DetectedCircle(
-                    center=tuple(circle_data["center"]),
+                    center=_safe_coord(circle_data, "center"),
                     radius=circle_data.get("radius", 0),
                     circle_type=circle_data.get("type", "other"),
                 ))
@@ -568,7 +606,7 @@ class DrawingAnalyzer:
             if isinstance(text_data, dict) and "content" in text_data:
                 elements.text.append(DetectedText(
                     content=text_data["content"],
-                    position=tuple(text_data.get("position", [0, 0])),
+                    position=_safe_coord(text_data, "position"),
                     height_px=text_data.get("height_px", 12),
                     text_type=text_data.get("type", "note"),
                     associated_with=text_data.get("associated_with"),
@@ -580,7 +618,7 @@ class DrawingAnalyzer:
                 elements.symbols.append(DetectedSymbol(
                     symbol_type=symbol_data["type"],
                     subtype=symbol_data.get("subtype"),
-                    position=tuple(symbol_data.get("position", [0, 0])),
+                    position=_safe_coord(symbol_data, "position"),
                     rotation=symbol_data.get("rotation", 0),
                     size=symbol_data.get("size"),
                     tag=symbol_data.get("tag"),
@@ -594,9 +632,9 @@ class DrawingAnalyzer:
                     value=dim_data["value"],
                     numeric_value=dim_data.get("numeric_value"),
                     unit=dim_data.get("unit", "inches"),
-                    start=tuple(dim_data.get("start", [0, 0])),
-                    end=tuple(dim_data.get("end", [0, 0])),
-                    text_position=tuple(dim_data.get("text_position", [0, 0])),
+                    start=_safe_coord(dim_data, "start"),
+                    end=_safe_coord(dim_data, "end"),
+                    text_position=_safe_coord(dim_data, "text_position"),
                 ))
 
         # Parse calibration hints
@@ -691,17 +729,17 @@ class DrawingAnalyzer:
             # Get Gemini model
             model = await self._get_gemini_model()
 
-            # Call Gemini Vision
-            response = await model.generate_content_async(
+            # Call Gemini Vision with retry for rate limits
+            from . import gemini_call_with_retry
+
+            response_text = await gemini_call_with_retry(
+                model,
                 [prompt, image],
                 generation_config={
                     "temperature": self.temperature,
                     "max_output_tokens": self.max_output_tokens,
-                }
+                },
             )
-
-            # Parse response
-            response_text = response.text
             logger.debug(
                 "gemini_response_received",
                 response_length=len(response_text),

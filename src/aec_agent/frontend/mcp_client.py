@@ -455,8 +455,17 @@ class MCPClient:
     async def close(self) -> None:
         """Close the connection to the MCP server."""
         if self._exit_stack:
-            await self._exit_stack.aclose()
-            self._exit_stack = None
+            try:
+                await self._exit_stack.aclose()
+            except RuntimeError as e:
+                # AsyncExitStack may fail if closed from different task than entered
+                # This is expected with anyio/trio cancel scopes
+                if "cancel scope" in str(e).lower() or "different task" in str(e).lower():
+                    logger.debug("MCP client cleanup skipped (different task context)")
+                else:
+                    raise
+            finally:
+                self._exit_stack = None
         self._session = None
 
     async def _discover_tools(self) -> None:

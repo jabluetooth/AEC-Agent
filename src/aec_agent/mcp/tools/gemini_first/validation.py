@@ -466,16 +466,17 @@ async def validate_with_gemini(
         image_size=(image.width, image.height),
     )
 
-    # Send to Gemini
-    response = await gemini_model.generate_content_async(
+    # Send to Gemini with retry for rate limits
+    from . import gemini_call_with_retry
+
+    response_text = await gemini_call_with_retry(
+        gemini_model,
         [prompt, image],
         generation_config={
             "temperature": 0.1,  # Low for consistent validation
             "max_output_tokens": 8192,
-        }
+        },
     )
-
-    response_text = response.text
     logger.debug("validation_gemini_response", response_length=len(response_text))
 
     return _parse_validation_response(response_text)

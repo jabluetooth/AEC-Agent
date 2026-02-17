@@ -265,9 +265,11 @@ async def on_chat_end():
     if mcp_client:
         try:
             await mcp_client.close()
-            logger.info("MCP client closed")
+            logger.debug("MCP client closed")
         except Exception as e:
-            logger.error("Error closing MCP client", error=str(e))
+            # Cancel scope errors are expected when closing from different task
+            if "cancel scope" not in str(e).lower():
+                logger.warning("Error closing MCP client", error=str(e))
 
 
 @cl.on_stop
