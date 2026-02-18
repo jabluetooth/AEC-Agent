@@ -547,15 +547,18 @@ class TestAnalyzeDrawingMocked:
         img_path = tmp_path / "test.png"
         img.save(img_path)
 
-        # Mock the Gemini model
-        mock_model = MagicMock()
+        # Mock the Gemini client (new SDK)
+        mock_client = MagicMock()
         mock_response = MagicMock()
         mock_response.text = json.dumps(sample_response)
-        mock_model.generate_content_async = AsyncMock(return_value=mock_response)
+        # Mock the async generate_content method for new SDK
+        mock_client.aio.models.generate_content = AsyncMock(return_value=mock_response)
 
         analyzer = DrawingAnalyzer()
 
-        with patch.object(analyzer, "_get_gemini_model", return_value=mock_model):
+        # Mock both the client getter and gemini_call_with_retry
+        with patch.object(analyzer, "_get_gemini_client", return_value=mock_client), \
+             patch("aec_agent.mcp.tools.gemini_first.gemini_call_with_retry", new=AsyncMock(return_value=json.dumps(sample_response))):
             analysis = await analyzer.analyze(img_path)
 
         assert analysis.drawing_type == "floor_plan"

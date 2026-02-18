@@ -517,7 +517,7 @@ async def create_text_entity(
 
     try:
         params = {
-            "content": str(content),
+            "text": str(content),  # C# sidecar expects "text", not "content"
             "position": [float(pos_x), float(pos_y), 0.0],
             "height": max(float(height), 0.0625),  # Minimum 1/16"
             "layer": entity.layer,

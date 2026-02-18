@@ -234,7 +234,7 @@ class TestGroqProvider:
         """Test default Groq model setting."""
         with patch.dict(os.environ, {}, clear=True):
             settings = Settings(_env_file=None)
-            assert settings.groq_model == "moonshotai/kimi-k2-instruct"
+            assert settings.groq_model == "llama-3.3-70b-versatile"
 
     def test_groq_model_from_env(self):
         """Test Groq model from environment."""

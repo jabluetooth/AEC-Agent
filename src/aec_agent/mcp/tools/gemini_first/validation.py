@@ -421,10 +421,9 @@ async def validate_with_gemini(
         Parsed validation response dict
     """
     try:
-        import google.generativeai as genai
         from PIL import Image
     except ImportError:
-        raise ImportError("google-generativeai and Pillow required for validation")
+        raise ImportError("Pillow required for validation")
 
     settings = get_settings()
     api_key = settings.gemini_api_key
@@ -432,8 +431,9 @@ async def validate_with_gemini(
     if not api_key:
         raise ValueError("GEMINI_API_KEY not configured")
 
-    # Configure Gemini
-    genai.configure(api_key=api_key)
+    # Get Gemini client (new SDK)
+    from . import get_gemini_client, gemini_call_with_retry
+    client = get_gemini_client(api_key)
 
     # Map all model names to gemini-2.0-flash (has free tier)
     # Pro models don't have free tier - always use Flash
@@ -445,8 +445,6 @@ async def validate_with_gemini(
         "gemini-3-pro": "gemini-2.0-flash",  # Pro has no free tier
     }
     actual_model = model_mapping.get(model, model)
-
-    gemini_model = genai.GenerativeModel(actual_model)
 
     # Load image
     image = Image.open(original_image_path)
@@ -466,16 +464,15 @@ async def validate_with_gemini(
         image_size=(image.width, image.height),
     )
 
-    # Send to Gemini with retry for rate limits
-    from . import gemini_call_with_retry
-
+    # Send to Gemini with retry for rate limits (new SDK)
     response_text = await gemini_call_with_retry(
-        gemini_model,
+        client,
         [prompt, image],
         generation_config={
             "temperature": 0.1,  # Low for consistent validation
             "max_output_tokens": 8192,
         },
+        model_name=actual_model,
     )
     logger.debug("validation_gemini_response", response_length=len(response_text))
 

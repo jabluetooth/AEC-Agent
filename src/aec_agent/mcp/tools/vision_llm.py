@@ -118,19 +118,17 @@ class VisionLLMClassifier:
 
         return None
 
-    async def _get_gemini_model(self):
-        """Lazy-load Gemini model."""
+    def _get_gemini_client(self):
+        """Lazy-load Gemini client (new SDK)."""
         if self._gemini_model is None:
             try:
-                import google.generativeai as genai
-
-                genai.configure(api_key=self.settings.gemini_api_key)
-                self._gemini_model = genai.GenerativeModel("gemini-2.0-flash")  # Flash has free tier
-                logger.debug("Gemini model initialized")
+                from google import genai
+                self._gemini_model = genai.Client(api_key=self.settings.gemini_api_key)
+                logger.debug("Gemini client initialized")
             except ImportError:
                 logger.warning(
-                    "google-generativeai not installed. "
-                    "Install with: pip install google-generativeai"
+                    "google-genai not installed. "
+                    "Install with: pip install google-genai"
                 )
                 raise
         return self._gemini_model
@@ -311,16 +309,36 @@ class VisionLLMClassifier:
         yolo_class: str,
         yolo_category: str,
     ) -> VisionClassificationResult:
-        """Classify using Google Gemini."""
-        model = await self._get_gemini_model()
+        """Classify using Google Gemini (new SDK)."""
+        from google.genai import types
+        import io
+
+        client = self._get_gemini_client()
         pil_image = self._image_to_pil(image)
 
-        response = await model.generate_content_async(
-            [prompt, pil_image],
-            generation_config={
-                "temperature": self.temperature,
-                "max_output_tokens": self.max_tokens,
-            },
+        # Convert PIL image to bytes for new SDK
+        buf = io.BytesIO()
+        pil_image.save(buf, format='PNG')
+        image_bytes = buf.getvalue()
+
+        # Build content with new SDK types
+        contents = [types.Content(
+            role="user",
+            parts=[
+                types.Part.from_text(text=prompt),
+                types.Part.from_bytes(data=image_bytes, mime_type='image/png')
+            ]
+        )]
+
+        config = types.GenerateContentConfig(
+            temperature=self.temperature,
+            max_output_tokens=self.max_tokens,
+        )
+
+        response = await client.aio.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=contents,
+            config=config,
         )
 
         # Parse response

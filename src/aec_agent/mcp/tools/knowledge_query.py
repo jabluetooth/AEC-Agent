@@ -1149,29 +1149,22 @@ class KnowledgeLLM:
                 return provider
         return None
 
-    async def _init_gemini(self):
-        """Initialize Gemini client."""
+    def _init_gemini(self):
+        """Initialize Gemini client (new SDK)."""
         if self._gemini_model is None:
             try:
-                import google.generativeai as genai
+                from google import genai
 
                 api_key = self._get_api_key("gemini")
                 if not api_key:
                     raise ValueError("GEMINI_API_KEY not configured")
 
-                genai.configure(api_key=api_key)
-                self._gemini_model = genai.GenerativeModel(
-                    "gemini-2.0-flash",  # Flash has free tier, Pro does not
-                    generation_config=genai.GenerationConfig(
-                        temperature=self.temperature,
-                        max_output_tokens=self.max_tokens,
-                    ),
-                )
-                logger.debug("Gemini model initialized for knowledge query")
+                self._gemini_model = genai.Client(api_key=api_key)
+                logger.debug("Gemini client initialized for knowledge query")
             except ImportError:
                 raise ImportError(
-                    "google-generativeai not installed. "
-                    "Install with: pip install google-generativeai"
+                    "google-genai not installed. "
+                    "Install with: pip install google-genai"
                 )
         return self._gemini_model
 
@@ -1264,12 +1257,23 @@ Respond JSON only:
             )
 
     async def _query_gemini(self, question: str) -> LLMQueryResult:
-        """Query Gemini for CAD standards."""
-        model = await self._init_gemini()
+        """Query Gemini for CAD standards (new SDK)."""
+        from google.genai import types
+
+        client = self._init_gemini()
 
         prompt = f"{self._build_system_prompt()}\n\nUser question: {question}"
 
-        response = await model.generate_content_async(prompt)
+        config = types.GenerateContentConfig(
+            temperature=self.temperature,
+            max_output_tokens=self.max_tokens,
+        )
+
+        response = await client.aio.models.generate_content(
+            model="gemini-2.0-flash",
+            contents=prompt,
+            config=config,
+        )
         raw_text = response.text
 
         return self._parse_llm_response(raw_text, "gemini")

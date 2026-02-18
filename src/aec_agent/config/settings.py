@@ -157,8 +157,8 @@ class Settings(BaseSettings):
     )
 
     groq_model: str = Field(
-        default="moonshotai/kimi-k2-instruct",
-        description="Groq model to use"
+        default="llama-3.3-70b-versatile",
+        description="Groq model to use (llama-3.3-70b-versatile has 128K context, 30K TPM)"
     )
 
     gemini_api_key: str | None = Field(

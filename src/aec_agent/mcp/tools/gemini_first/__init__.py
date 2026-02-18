@@ -11,27 +11,55 @@ This package implements the 6-phase Gemini-First architecture:
 """
 
 import asyncio
+from typing import Any, Union
+
 import structlog
 
 logger = structlog.get_logger(__name__)
 
+# Singleton client for the package
+_gemini_client = None
+
+
+def get_gemini_client(api_key: str = None):
+    """Get or create the Gemini client singleton."""
+    global _gemini_client
+    if _gemini_client is None:
+        from google import genai
+        if api_key:
+            _gemini_client = genai.Client(api_key=api_key)
+        else:
+            # Will use GEMINI_API_KEY or GOOGLE_API_KEY env var
+            from aec_agent.config.settings import get_settings
+            settings = get_settings()
+            if not settings.gemini_api_key:
+                raise ValueError(
+                    "GEMINI_API_KEY not set. Set it in environment or .env file."
+                )
+            _gemini_client = genai.Client(api_key=settings.gemini_api_key)
+    return _gemini_client
+
 
 async def gemini_call_with_retry(
-    model,
+    client_or_model: Any,
     content: list,
     generation_config: dict,
-    max_retries: int = 3,
-    base_delay: float = 2.0,
+    max_retries: int = 5,
+    base_delay: float = 5.0,
+    model_name: str = "gemini-2.0-flash",
 ) -> str:
     """
     Call Gemini API with exponential backoff retry for 429 rate limits.
 
+    Uses the new google.genai SDK.
+
     Args:
-        model: Gemini model instance
-        content: Content to send (prompt + image)
-        generation_config: Generation configuration dict
+        client_or_model: Gemini Client instance (new SDK) or model name string
+        content: Content to send (prompt + image as list)
+        generation_config: Generation configuration dict with temperature, max_output_tokens, etc.
         max_retries: Maximum retry attempts (default 3)
         base_delay: Base delay in seconds (doubles each retry)
+        model_name: Model name to use (default gemini-2.0-flash)
 
     Returns:
         Response text from Gemini
@@ -39,13 +67,54 @@ async def gemini_call_with_retry(
     Raises:
         Exception: If all retries exhausted
     """
+    from google import genai
+    from google.genai import types
+
+    # Get or create client
+    if isinstance(client_or_model, genai.Client):
+        client = client_or_model
+    elif isinstance(client_or_model, str):
+        # If a string is passed, treat it as model name and get default client
+        model_name = client_or_model
+        client = get_gemini_client()
+    else:
+        # Legacy: if old model object passed, get new client
+        client = get_gemini_client()
+
+    # Build contents in the new format
+    parts = []
+    for item in content:
+        if isinstance(item, str):
+            parts.append(types.Part.from_text(text=item))
+        elif hasattr(item, 'mode'):  # PIL Image
+            # Convert PIL Image to bytes
+            import io
+            buf = io.BytesIO()
+            item.save(buf, format='PNG')
+            parts.append(types.Part.from_bytes(
+                data=buf.getvalue(),
+                mime_type='image/png'
+            ))
+        else:
+            # Assume it's already a Part or can be converted
+            parts.append(item)
+
+    contents = [types.Content(role="user", parts=parts)]
+
+    # Build config
+    config = types.GenerateContentConfig(
+        temperature=generation_config.get("temperature", 0.1),
+        max_output_tokens=generation_config.get("max_output_tokens", 8192),
+    )
+
     last_error = None
 
     for attempt in range(max_retries + 1):
         try:
-            response = await model.generate_content_async(
-                content,
-                generation_config=generation_config,
+            response = await client.aio.models.generate_content(
+                model=model_name,
+                contents=contents,
+                config=config,
             )
             return response.text
         except Exception as e:

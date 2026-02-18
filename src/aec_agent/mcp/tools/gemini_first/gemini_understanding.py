@@ -422,52 +422,46 @@ class DrawingAnalyzer:
         self.max_output_tokens = max_output_tokens
         self._gemini_model = None
 
-    async def _get_gemini_model(self):
-        """Lazy-load Gemini model."""
+    def _get_model_name(self) -> str:
+        """Get the mapped model name for the new SDK."""
+        # Map legacy model names to Gemini 2.0 Flash (has free tier)
+        # Pro models don't have free tier - always use Flash for cost savings
+        model_mapping = {
+            "gemini-1.5-pro": "gemini-2.0-flash",
+            "gemini-1.5-flash": "gemini-2.0-flash",
+            "gemini-1.5-pro-latest": "gemini-2.0-flash",
+            "gemini-1.5-flash-latest": "gemini-2.0-flash",
+            "gemini-pro-latest": "gemini-2.0-flash",  # Pro has no free tier
+            "gemini-flash-latest": "gemini-2.0-flash",
+        }
+
+        model_name = self.model_name
+        if model_name in model_mapping:
+            original_model = model_name
+            model_name = model_mapping[model_name]
+            logger.info(
+                "gemini_model_mapped",
+                original_model=original_model,
+                mapped_model=model_name,
+                reason="Using Gemini 2.x equivalent"
+            )
+
+        return model_name
+
+    def _get_gemini_client(self):
+        """Get the Gemini client (new SDK)."""
         if self._gemini_model is None:
             try:
-                import google.generativeai as genai
-
-                if not self.settings.gemini_api_key:
-                    raise ValueError(
-                        "GEMINI_API_KEY not set. Set it in environment or .env file."
-                    )
-
-                genai.configure(api_key=self.settings.gemini_api_key)
-                
-                # Map legacy model names to Gemini 2.0 Flash (has free tier)
-                # Pro models don't have free tier - always use Flash for cost savings
-                model_name = self.model_name
-                model_mapping = {
-                    "gemini-1.5-pro": "gemini-2.0-flash",
-                    "gemini-1.5-flash": "gemini-2.0-flash",
-                    "gemini-1.5-pro-latest": "gemini-2.0-flash",
-                    "gemini-1.5-flash-latest": "gemini-2.0-flash",
-                    "gemini-pro-latest": "gemini-2.0-flash",  # Pro has no free tier
-                    "gemini-flash-latest": "gemini-2.0-flash",
-                }
-                
-                # Apply mapping if needed
-                if model_name in model_mapping:
-                    original_model = model_name
-                    model_name = model_mapping[model_name]
-                    logger.info(
-                        "gemini_model_mapped",
-                        original_model=original_model,
-                        mapped_model=model_name,
-                        reason="Gemini 1.5 models deprecated, using Gemini 2.x equivalent"
-                    )
-                
-                self._gemini_model = genai.GenerativeModel(model_name)
+                from . import get_gemini_client
+                self._gemini_model = get_gemini_client(self.settings.gemini_api_key)
                 logger.debug(
-                    "gemini_model_initialized",
-                    model=model_name,
-                    original_request=self.model_name,
+                    "gemini_client_initialized",
+                    model=self._get_model_name(),
                 )
             except ImportError:
                 logger.error(
-                    "google-generativeai not installed. "
-                    "Install with: pip install google-generativeai"
+                    "google-genai not installed. "
+                    "Install with: pip install google-genai"
                 )
                 raise
 
@@ -726,19 +720,20 @@ class DrawingAnalyzer:
             prompt = f"## CONTEXT\n{context}\n\n{prompt}"
 
         try:
-            # Get Gemini model
-            model = await self._get_gemini_model()
+            # Get Gemini client (new SDK)
+            client = self._get_gemini_client()
 
             # Call Gemini Vision with retry for rate limits
             from . import gemini_call_with_retry
 
             response_text = await gemini_call_with_retry(
-                model,
+                client,
                 [prompt, image],
                 generation_config={
                     "temperature": self.temperature,
                     "max_output_tokens": self.max_output_tokens,
                 },
+                model_name=self._get_model_name(),
             )
             logger.debug(
                 "gemini_response_received",

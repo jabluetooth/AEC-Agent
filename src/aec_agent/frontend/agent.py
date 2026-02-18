@@ -799,40 +799,41 @@ class GroqBackend(LLMBackend):
 
 
 class GeminiBackend(LLMBackend):
-    """Google Gemini backend."""
+    """Google Gemini backend using the new google.genai SDK."""
 
     def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
         self.api_key = api_key
         self.model = model
         self._client = None
 
-    async def _get_client(self):
+    def _get_client(self):
         """Lazy-load the Gemini client."""
         if self._client is None:
-            import google.generativeai as genai
-            genai.configure(api_key=self.api_key)
-            self._client = genai.GenerativeModel(self.model)
+            from google import genai
+            self._client = genai.Client(api_key=self.api_key)
         return self._client
 
     def _convert_messages_to_gemini(
         self, messages: list[Message]
     ) -> tuple[str, list[dict]]:
-        """Convert messages to Gemini format."""
+        """Convert messages to Gemini format for the new SDK."""
+        from google.genai import types
+
         system_instruction = ""
-        gemini_history = []
+        contents = []
 
         for msg in messages:
             if msg.role == "system":
                 system_instruction = msg.content or ""
             elif msg.role == "user":
-                gemini_history.append({
-                    "role": "user",
-                    "parts": [msg.content or ""]
-                })
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part.from_text(text=msg.content or "")]
+                ))
             elif msg.role == "assistant":
                 parts = []
                 if msg.content:
-                    parts.append(msg.content)
+                    parts.append(types.Part.from_text(text=msg.content))
                 if msg.tool_calls:
                     for tc in msg.tool_calls:
                         # Handle arguments that may be string or dict
@@ -842,32 +843,27 @@ class GeminiBackend(LLMBackend):
                                 args = json.loads(args)
                             except json.JSONDecodeError:
                                 args = {}
-                        parts.append({
-                            "function_call": {
-                                "name": tc.get("function", {}).get("name", tc.get("name", "")),
-                                "args": args
-                            }
-                        })
+                        parts.append(types.Part.from_function_call(
+                            name=tc.get("function", {}).get("name", tc.get("name", "")),
+                            args=args
+                        ))
                 if parts:
-                    gemini_history.append({
-                        "role": "model",
-                        "parts": parts if len(parts) > 1 else [parts[0]] if parts else [""]
-                    })
+                    contents.append(types.Content(role="model", parts=parts))
             elif msg.role == "tool":
-                gemini_history.append({
-                    "role": "user",
-                    "parts": [{
-                        "function_response": {
-                            "name": msg.name or "tool",
-                            "response": {"result": msg.content or ""}
-                        }
-                    }]
-                })
+                contents.append(types.Content(
+                    role="user",
+                    parts=[types.Part.from_function_response(
+                        name=msg.name or "tool",
+                        response={"result": msg.content or ""}
+                    )]
+                ))
 
-        return system_instruction, gemini_history
+        return system_instruction, contents
 
-    def _convert_tools_to_gemini(self, tools: list[dict]) -> list[dict]:
+    def _convert_tools_to_gemini(self, tools: list[dict]) -> list:
         """Convert OpenAI-style tools to Gemini function declarations."""
+        from google.genai import types
+
         if not tools:
             return []
 
@@ -895,129 +891,153 @@ class GeminiBackend(LLMBackend):
             if tool.get("type") == "function":
                 func = tool.get("function", {})
                 params = func.get("parameters", {})
-                function_declarations.append({
-                    "name": func.get("name", ""),
-                    "description": func.get("description", ""),
-                    "parameters": clean_schema(params)
-                })
-        return function_declarations
+                function_declarations.append(types.FunctionDeclaration(
+                    name=func.get("name", ""),
+                    description=func.get("description", ""),
+                    parameters=clean_schema(params)
+                ))
+
+        return [types.Tool(function_declarations=function_declarations)]
 
     async def generate(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]],
     ) -> AgentResponse:
-        """Generate using Gemini."""
+        """Generate using Gemini with retry for rate limits."""
         import asyncio
+        from google.genai import types
 
-        client = await self._get_client()
-        system_instruction, gemini_history = self._convert_messages_to_gemini(messages)
-        function_declarations = self._convert_tools_to_gemini(tools)
+        client = self._get_client()
+        system_instruction, contents = self._convert_messages_to_gemini(messages)
+        gemini_tools = self._convert_tools_to_gemini(tools)
 
-        try:
-            # Create generation config
-            generation_config = {"max_output_tokens": 4096}
+        max_retries = 3
+        base_delay = 2.0
 
-            # Build tool config if we have functions
-            tool_config = None
-            if function_declarations:
-                tool_config = [{"function_declarations": function_declarations}]
-
-            # Create a new model with system instruction if provided
-            if system_instruction:
-                model = await asyncio.to_thread(
-                    lambda: __import__('google.generativeai', fromlist=['GenerativeModel']).GenerativeModel(
-                        self.model,
-                        system_instruction=system_instruction
-                    )
+        for attempt in range(max_retries + 1):
+            try:
+                # Build config with system instruction and tools
+                config = types.GenerateContentConfig(
+                    max_output_tokens=4096,
+                    system_instruction=system_instruction if system_instruction else None,
+                    tools=gemini_tools if gemini_tools else None,
+                    # Disable automatic function calling - we handle it ourselves
+                    automatic_function_calling=types.AutomaticFunctionCallingConfig(
+                        disable=True
+                    ) if gemini_tools else None,
                 )
-            else:
-                model = client
 
-            # Start chat with history (excluding the last user message)
-            history = gemini_history[:-1] if len(gemini_history) > 1 else []
-            last_message = gemini_history[-1]["parts"] if gemini_history else [""]
+                # Use async API
+                response = await client.aio.models.generate_content(
+                    model=self.model,
+                    contents=contents,
+                    config=config,
+                )
 
-            chat = model.start_chat(history=history)
+                # Extract content and tool calls
+                content = ""
+                tool_calls = []
 
-            # Send the last message
-            response = await asyncio.to_thread(
-                chat.send_message,
-                last_message,
-                generation_config=generation_config,
-                tools=tool_config
-            )
+                if response.candidates and response.candidates[0].content:
+                    for part in response.candidates[0].content.parts:
+                        if part.text:
+                            content += part.text
+                        elif part.function_call:
+                            fc = part.function_call
+                            tool_calls.append(ToolCall(
+                                id=f"call_{len(tool_calls)}",
+                                name=fc.name,
+                                arguments=dict(fc.args) if fc.args else {},
+                            ))
 
-            # Extract content and tool calls
-            content = ""
-            tool_calls = []
+                return AgentResponse(
+                    content=content,
+                    tool_calls=tool_calls,
+                    finished=len(tool_calls) == 0,
+                )
 
-            if response.parts:
-                for part in response.parts:
-                    if hasattr(part, 'text') and part.text:
-                        content += part.text
-                    elif hasattr(part, 'function_call'):
-                        fc = part.function_call
-                        tool_calls.append(ToolCall(
-                            id=f"call_{len(tool_calls)}",
-                            name=fc.name,
-                            arguments=dict(fc.args) if fc.args else {},
-                        ))
+            except Exception as e:
+                error_str = str(e)
+                # Check if it's a rate limit error (429)
+                if ("429" in error_str or "Resource exhausted" in error_str) and attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "Gemini rate limited, retrying",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        delay_seconds=delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
 
-            return AgentResponse(
-                content=content,
-                tool_calls=tool_calls,
-                finished=len(tool_calls) == 0,
-            )
+                logger.error("Gemini API error", error=error_str)
+                return AgentResponse(
+                    content=f"Error calling Gemini API: {error_str}",
+                    finished=True
+                )
 
-        except Exception as e:
-            logger.error("Gemini API error", error=str(e))
-            return AgentResponse(
-                content=f"Error calling Gemini API: {str(e)}",
-                finished=True
-            )
+        # Should not reach here, but just in case
+        return AgentResponse(
+            content="Gemini API error: Max retries exceeded",
+            finished=True
+        )
 
     async def stream(
         self,
         messages: list[Message],
         tools: list[dict[str, Any]],
     ) -> AsyncGenerator[str, None]:
-        """Stream using Gemini."""
+        """Stream using Gemini with retry for rate limits."""
         import asyncio
+        from google.genai import types
 
-        client = await self._get_client()
-        system_instruction, gemini_history = self._convert_messages_to_gemini(messages)
+        client = self._get_client()
+        system_instruction, contents = self._convert_messages_to_gemini(messages)
 
-        try:
-            # Create a model with system instruction if provided
-            if system_instruction:
-                model = await asyncio.to_thread(
-                    lambda: __import__('google.generativeai', fromlist=['GenerativeModel']).GenerativeModel(
-                        self.model,
-                        system_instruction=system_instruction
-                    )
+        max_retries = 3
+        base_delay = 2.0
+
+        for attempt in range(max_retries + 1):
+            try:
+                # Build config with system instruction
+                config = types.GenerateContentConfig(
+                    max_output_tokens=4096,
+                    system_instruction=system_instruction if system_instruction else None,
                 )
-            else:
-                model = client
 
-            # Start chat
-            history = gemini_history[:-1] if len(gemini_history) > 1 else []
-            last_message = gemini_history[-1]["parts"] if gemini_history else [""]
+                # Use async streaming API
+                async for chunk in client.aio.models.generate_content_stream(
+                    model=self.model,
+                    contents=contents,
+                    config=config,
+                ):
+                    if chunk.text:
+                        yield chunk.text
 
-            chat = model.start_chat(history=history)
+                # Success - exit the retry loop
+                return
 
-            # Stream response
-            response = await asyncio.to_thread(
-                lambda: chat.send_message(last_message, stream=True)
-            )
+            except Exception as e:
+                error_str = str(e)
+                # Check if it's a rate limit error (429)
+                if ("429" in error_str or "Resource exhausted" in error_str) and attempt < max_retries:
+                    delay = base_delay * (2 ** attempt)
+                    logger.warning(
+                        "Gemini stream rate limited, retrying",
+                        attempt=attempt + 1,
+                        max_retries=max_retries,
+                        delay_seconds=delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
 
-            for chunk in response:
-                if hasattr(chunk, 'text') and chunk.text:
-                    yield chunk.text
+                logger.error("Gemini streaming error", error=error_str)
+                yield f"Error streaming from Gemini: {error_str}"
+                return
 
-        except Exception as e:
-            logger.error("Gemini streaming error", error=str(e))
-            yield f"Error streaming from Gemini: {str(e)}"
+        # Max retries exceeded
+        yield "Gemini streaming error: Max retries exceeded"
 
 
 class ProviderChain(LLMBackend):
