@@ -126,16 +126,14 @@ def _summarize_extraction(extraction: ExtractionResult) -> dict:
 
 def _summarize_creation(creation: AutoCADCreationResult) -> dict:
     """Summarize creation result for compact tool results."""
+    stats_dict = creation.statistics.to_dict()
     return {
         "total_entities": creation.statistics.total_entities,
         "success_count": creation.statistics.success_count,
         "failure_count": creation.statistics.failure_count,
         "success_rate": f"{creation.success_rate:.0%}",
-        "layers_created": len(creation.layers_created),
-        "by_type": {
-            k.value if hasattr(k, 'value') else k: v
-            for k, v in creation.statistics.by_type.items()
-        },
+        "layers_created": len(creation.layer_results),
+        "by_type": stats_dict.get("by_type", {}),
     }
 
 

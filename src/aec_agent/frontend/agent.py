@@ -253,11 +253,15 @@ class AnthropicBackend(LLMBackend):
                 if msg.content:
                     content.append({"type": "text", "text": msg.content})
                 for tc in msg.tool_calls:
+                    # Handle arguments that may be string or dict
+                    args = tc["function"]["arguments"]
+                    if isinstance(args, str):
+                        args = json.loads(args)
                     content.append({
                         "type": "tool_use",
                         "id": tc["id"],
                         "name": tc["function"]["name"],
-                        "input": json.loads(tc["function"]["arguments"]),
+                        "input": args,
                     })
                 anthropic_messages.append({
                     "role": "assistant",
@@ -364,11 +368,15 @@ class AnthropicBackend(LLMBackend):
                 if msg.content:
                     content.append({"type": "text", "text": msg.content})
                 for tc in msg.tool_calls:
+                    # Handle arguments that may be string or dict
+                    args = tc["function"]["arguments"]
+                    if isinstance(args, str):
+                        args = json.loads(args)
                     content.append({
                         "type": "tool_use",
                         "id": tc["id"],
                         "name": tc["function"]["name"],
-                        "input": json.loads(tc["function"]["arguments"]),
+                        "input": args,
                     })
                 anthropic_messages.append({
                     "role": "assistant",
@@ -827,10 +835,17 @@ class GeminiBackend(LLMBackend):
                     parts.append(msg.content)
                 if msg.tool_calls:
                     for tc in msg.tool_calls:
+                        # Handle arguments that may be string or dict
+                        args = tc.get("function", {}).get("arguments", tc.get("arguments", {}))
+                        if isinstance(args, str):
+                            try:
+                                args = json.loads(args)
+                            except json.JSONDecodeError:
+                                args = {}
                         parts.append({
                             "function_call": {
                                 "name": tc.get("function", {}).get("name", tc.get("name", "")),
-                                "args": tc.get("function", {}).get("arguments", tc.get("arguments", {}))
+                                "args": args
                             }
                         })
                 if parts:
