@@ -51,6 +51,10 @@ from .adaptive_extraction import (
     get_entities_by_layer,
     get_required_layers,
     get_required_blocks,
+    # Hybrid extraction (Gemini + OpenCV + YOLO fusion)
+    HybridExtractionConfig,
+    HybridExtractionResult,
+    hybrid_extract_all,
 )
 from .autocad_creation import (
     AutoCADCreationResult,
@@ -2344,3 +2348,210 @@ async def gemini_complete_pipeline(
     except Exception as e:
         logger.exception("gemini_complete_pipeline_failed", error=str(e))
         return error_result(ErrorCode.INTERNAL_ERROR, f"Pipeline failed: {e}")
+
+
+# =============================================================================
+# HYBRID EXTRACTION TOOL (Gemini + OpenCV + YOLO Fusion)
+# =============================================================================
+
+def _summarize_hybrid_extraction(result: HybridExtractionResult) -> dict:
+    """Summarize hybrid extraction result for compact tool output."""
+    return {
+        "total_entities": result.total_entities,
+        "by_source": {
+            "gemini": result.gemini_entities,
+            "opencv": result.opencv_entities,
+            "yolo": result.yolo_entities,
+        },
+        "fusion": {
+            "duplicates_merged": result.duplicates_merged,
+            "conflicts_resolved": result.conflicts_resolved,
+        },
+        "by_type": {
+            etype: len(elist)
+            for etype, elist in get_entities_by_type(result).items()
+        },
+        "required_layers": get_required_layers(result)[:10],
+        "required_blocks": get_required_blocks(result)[:10],
+    }
+
+
+@mcp.tool()
+async def gemini_hybrid_extract(
+    pdf_path: str,
+    page: int = 1,
+    dpi: int = 300,
+    use_opencv_lines: bool = True,
+    use_opencv_circles: bool = True,
+    use_yolo_symbols: bool = True,
+    opencv_line_min_length: int = 30,
+    yolo_confidence: float = 0.5,
+    enable_refinement: bool = True,
+    refine_snap_to_grid: bool = True,
+    refine_connect_endpoints: bool = True,
+    refine_align_parallel: bool = True,
+    use_ocr_text_anchoring: bool = True,
+    ocr_min_confidence: float = 60.0,
+    create_in_autocad: bool = True,
+) -> dict:
+    """
+    HYBRID EXTRACTION: Gemini + OpenCV + YOLO + OCR fusion for optimal PDF to vector.
+
+    This tool combines the strengths of multiple extraction methods:
+    - **Gemini**: Semantic understanding (what & where), text/OCR, layer assignment
+    - **OpenCV**: Pixel-perfect geometry (lines, circles, contours)
+    - **YOLO**: Trained symbol detection (MEP devices, equipment)
+    - **OCR (Tesseract)**: Pixel-accurate text positions anchoring
+    - **Refinement**: Gemini reviews and adjusts coordinates for accuracy
+
+    The hybrid approach produces superior results compared to any single method:
+    - Gemini understands context but has coordinate drift (~10-100px)
+    - OpenCV is geometrically precise but has no semantic understanding
+    - YOLO detects symbols accurately but needs context for attributes
+    - OCR anchors Gemini's text content to pixel-accurate positions
+    - Refinement pass connects endpoints, aligns lines, snaps to grid
+
+    Args:
+        pdf_path: Path to the PDF file to process
+        page: Page number to extract (1-indexed, default: 1)
+        dpi: Resolution for rendering (default: 300)
+        use_opencv_lines: Use OpenCV for line extraction (default: True)
+        use_opencv_circles: Use OpenCV for circle extraction (default: True)
+        use_yolo_symbols: Use YOLO for symbol detection (default: True)
+        opencv_line_min_length: Minimum line length in pixels (default: 30)
+        yolo_confidence: YOLO confidence threshold 0-1 (default: 0.5)
+        enable_refinement: Enable Gemini refinement pass (default: True)
+        refine_snap_to_grid: Snap coordinates to grid (default: True)
+        refine_connect_endpoints: Connect nearby endpoints (default: True)
+        refine_align_parallel: Align nearly-parallel lines (default: True)
+        use_ocr_text_anchoring: Anchor text to OCR-detected positions (default: True)
+        ocr_min_confidence: Minimum OCR confidence 0-100 (default: 60.0)
+        create_in_autocad: If True, create entities in AutoCAD (default: True)
+
+    Returns:
+        Extraction result with entities from all sources, refined and deduplicated.
+        Text positions are OCR-anchored for alignment with vectors.
+
+    Example:
+        >>> result = await gemini_hybrid_extract(
+        ...     pdf_path="drawing.pdf",
+        ...     enable_refinement=True,
+        ...     use_ocr_text_anchoring=True,
+        ... )
+        >>> print(f"Refined: {result['summary']['refinement_adjustments']} adjustments")
+        >>> print(f"OCR anchored: {result['summary']['ocr_text_anchored']} texts")
+    """
+    try:
+        pdf_file = Path(pdf_path)
+        if not pdf_file.exists():
+            return error_result(ErrorCode.ELEMENT_NOT_FOUND, f"PDF not found: {pdf_path}")
+
+        logger.info(
+            "gemini_hybrid_extract_starting",
+            pdf_path=pdf_path,
+            page=page,
+            use_opencv_lines=use_opencv_lines,
+            use_opencv_circles=use_opencv_circles,
+            use_yolo_symbols=use_yolo_symbols,
+        )
+
+        # Phase 1: Render PDF (convert 1-indexed to 0-indexed)
+        page_0_indexed = page - 1
+        if page_0_indexed < 0:
+            return error_result(ErrorCode.INVALID_PARAMS, "Page number must be >= 1")
+
+        render_result = await render_pdf_high_quality_async(
+            pdf_path=pdf_file,
+            page_number=page_0_indexed,
+            dpi=dpi,
+        )
+        # render_pdf_high_quality_async raises exceptions on failure, no need to check success
+
+        # Phase 2: Gemini Understanding
+        analysis = await analyze_drawing(render_result.image_path)
+
+        # Phase 3: Calibration
+        calibration = calibrate_from_analysis(
+            analysis=analysis,
+            image_width=render_result.width_px,
+            image_height=render_result.height_px,
+            image_dpi=dpi,
+        )
+
+        # Phase 4: HYBRID Extraction with Refinement + OCR Text Anchoring
+        config = HybridExtractionConfig(
+            use_opencv_for_lines=use_opencv_lines,
+            use_opencv_for_circles=use_opencv_circles,
+            use_yolo_for_symbols=use_yolo_symbols,
+            use_gemini_for_text=True,
+            opencv_line_min_length=opencv_line_min_length,
+            yolo_confidence_threshold=yolo_confidence,
+            prefer_opencv_geometry=True,
+            # OCR Text Anchoring settings
+            use_ocr_for_text_positions=use_ocr_text_anchoring,
+            ocr_min_confidence=ocr_min_confidence,
+            # Refinement settings
+            enable_refinement=enable_refinement,
+            refine_snap_to_grid=refine_snap_to_grid,
+            refine_connect_endpoints=refine_connect_endpoints,
+            refine_align_parallel=refine_align_parallel,
+        )
+
+        extraction = await hybrid_extract_all(
+            analysis=analysis,
+            calibration=calibration,
+            image_path=render_result.image_path,
+            config=config,
+        )
+
+        result_data = {
+            "success": True,
+            "summary": {
+                "drawing_type": analysis.drawing_type,
+                "total_entities": extraction.total_entities,
+                "gemini_entities": extraction.gemini_entities,
+                "opencv_entities": extraction.opencv_entities,
+                "yolo_entities": extraction.yolo_entities,
+                "duplicates_merged": extraction.duplicates_merged,
+                "refinement_applied": extraction.refinement_applied,
+                "refinement_adjustments": extraction.refinement_adjustments,
+                "endpoints_connected": extraction.endpoints_connected,
+                "lines_snapped": extraction.lines_snapped,
+            },
+            "extraction": _summarize_hybrid_extraction(extraction),
+            "calibration": {
+                "method": calibration.method,
+                "scale_factor": calibration.scale_factor,
+                "units": calibration.units,
+                "confidence": f"{calibration.confidence:.0%}",
+            },
+            "image_path": str(render_result.image_path),
+        }
+
+        # Optional: Create in AutoCAD
+        if create_in_autocad and extraction.entities:
+            creation = await create_entities_in_autocad(extraction)
+            result_data["creation"] = _summarize_creation(creation)
+            result_data["summary"]["created"] = creation.success_count
+            result_data["summary"]["failed"] = creation.failure_count
+
+        # Build message
+        refinement_msg = ""
+        if extraction.refinement_applied:
+            refinement_msg = f", refined {extraction.refinement_adjustments} coords"
+
+        message = (
+            f"Hybrid extraction complete: {extraction.total_entities} entities "
+            f"(Gemini: {extraction.gemini_entities}, OpenCV: {extraction.opencv_entities}, "
+            f"YOLO: {extraction.yolo_entities}{refinement_msg})"
+        )
+
+        return success_result(data=result_data, message=message)
+
+    except FileNotFoundError as e:
+        return error_result(ErrorCode.ELEMENT_NOT_FOUND, str(e))
+    except ValueError as e:
+        return error_result(ErrorCode.INVALID_PARAMS, str(e))
+    except Exception as e:
+        logger.exception("gemini_hybrid_extract_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Hybrid extraction failed: {e}")

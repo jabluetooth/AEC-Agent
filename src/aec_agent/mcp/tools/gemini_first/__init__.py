@@ -215,6 +215,52 @@ from .adaptive_extraction import (
     SYMBOL_TYPE_TO_LAYER,
     SYMBOL_TO_BLOCK,
     VTOOL_MAPPING,
+    # Hybrid extraction (Gemini + OpenCV + YOLO fusion)
+    HybridExtractionConfig,
+    HybridExtractionResult,
+    hybrid_extract_all,
+    hybrid_opencv_extraction,
+    hybrid_yolo_extraction,
+)
+
+# Phase 4b: OpenCV Extraction Utilities
+from .opencv_extraction import (
+    OpenCVExtractor,
+    OpenCVExtractionResult,
+    ExtractedLine,
+    ExtractedCircle,
+    ExtractedArc,
+    ExtractedPolyline,
+    ExtractedContour,
+    LineType,
+    extract_from_image,
+    extract_lines_from_region,
+    extract_circles_from_region,
+    OPENCV_AVAILABLE,
+)
+
+# Phase 4c: Gemini Refinement (coordinate adjustment)
+from .gemini_refinement import (
+    RefinementConfig,
+    RefinementResult,
+    RefinementAdjustment,
+    refine_entities_with_gemini,
+    snap_to_grid,
+    connect_nearby_endpoints,
+    align_nearly_parallel_lines,
+    remove_duplicate_lines,
+)
+
+# Phase 4d: OCR Text Position Anchoring
+from .ocr_text_anchoring import (
+    OCRTextBox,
+    TextAnchorResult,
+    TextAnchoringResult,
+    extract_text_with_ocr,
+    anchor_text_to_ocr,
+    anchor_text_positions,
+    is_ocr_available,
+    TESSERACT_AVAILABLE,
 )
 
 # Phase 5: AutoCAD Entity Creation
@@ -337,6 +383,43 @@ __all__ = [
     "SYMBOL_TYPE_TO_LAYER",
     "SYMBOL_TO_BLOCK",
     "VTOOL_MAPPING",
+    # Phase 4: Hybrid extraction (Gemini + OpenCV + YOLO fusion)
+    "HybridExtractionConfig",
+    "HybridExtractionResult",
+    "hybrid_extract_all",
+    "hybrid_opencv_extraction",
+    "hybrid_yolo_extraction",
+    # Phase 4b: OpenCV extraction utilities
+    "OpenCVExtractor",
+    "OpenCVExtractionResult",
+    "ExtractedLine",
+    "ExtractedCircle",
+    "ExtractedArc",
+    "ExtractedPolyline",
+    "ExtractedContour",
+    "LineType",
+    "extract_from_image",
+    "extract_lines_from_region",
+    "extract_circles_from_region",
+    "OPENCV_AVAILABLE",
+    # Phase 4c: Gemini Refinement
+    "RefinementConfig",
+    "RefinementResult",
+    "RefinementAdjustment",
+    "refine_entities_with_gemini",
+    "snap_to_grid",
+    "connect_nearby_endpoints",
+    "align_nearly_parallel_lines",
+    "remove_duplicate_lines",
+    # Phase 4d: OCR Text Anchoring
+    "OCRTextBox",
+    "TextAnchorResult",
+    "TextAnchoringResult",
+    "extract_text_with_ocr",
+    "anchor_text_to_ocr",
+    "anchor_text_positions",
+    "is_ocr_available",
+    "TESSERACT_AVAILABLE",
     # Phase 5: Data classes
     "EntityCreationResult",
     "LayerCreationResult",

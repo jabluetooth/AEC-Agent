@@ -26,8 +26,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple, TYPE_CHECKING
 
+import numpy as np
 import structlog
 
 from .gemini_understanding import (
@@ -40,8 +41,14 @@ from .gemini_understanding import (
     DetectedSymbol,
     DetectedDimension,
     SpecialRegion,
+    ExtractionStrategy,
 )
 from .coordinate_calibration import ScaleCalibration
+
+# Lazy imports for optional dependencies
+if TYPE_CHECKING:
+    from .opencv_extraction import OpenCVExtractor, OpenCVExtractionResult
+    from ..yolo_detection import YOLOSymbolDetector, DetectedBlock
 
 logger = structlog.get_logger(__name__)
 
@@ -1161,3 +1168,798 @@ def get_required_blocks(result: ExtractionResult) -> List[str]:
                 blocks.add(block_name)
 
     return sorted(blocks)
+
+
+# =============================================================================
+# HYBRID EXTRACTION: Gemini + OpenCV + YOLO Fusion
+# =============================================================================
+
+@dataclass
+class HybridExtractionConfig:
+    """Configuration for hybrid extraction pipeline."""
+    # Strategy selection
+    use_opencv_for_lines: bool = True
+    use_opencv_for_circles: bool = True
+    use_yolo_for_symbols: bool = True
+    use_gemini_for_text: bool = True  # Gemini is best for text/OCR
+    use_gemini_for_semantic: bool = True  # Layer assignment, classification
+
+    # OpenCV parameters
+    opencv_line_min_length: int = 30
+    opencv_circle_min_radius: int = 5
+    opencv_circle_max_radius: int = 200
+
+    # YOLO parameters
+    yolo_confidence_threshold: float = 0.5
+    yolo_iou_threshold: float = 0.45
+    yolo_model_path: Optional[str] = None
+
+    # Fusion parameters
+    coordinate_tolerance: float = 5.0  # Pixels - for merging duplicates
+    prefer_opencv_geometry: bool = True  # When conflict, prefer OpenCV coords
+
+    # OCR Text Anchoring (NEW)
+    use_ocr_for_text_positions: bool = True  # Anchor text to OCR-detected positions
+    ocr_min_confidence: float = 60.0  # Min OCR confidence threshold
+    ocr_min_similarity: float = 0.5  # Min text similarity for matching
+
+    # Gemini Refinement (NEW)
+    enable_refinement: bool = True  # Enable Gemini refinement pass
+    refine_snap_to_grid: bool = True
+    refine_connect_endpoints: bool = True
+    refine_align_parallel: bool = True
+    refine_remove_duplicates: bool = True
+
+    # Validation
+    enable_gemini_validation: bool = True
+    max_validation_iterations: int = 2
+
+
+@dataclass
+class HybridExtractionResult(ExtractionResult):
+    """Extended result with hybrid extraction statistics."""
+    # Source breakdown
+    gemini_entities: int = 0
+    opencv_entities: int = 0
+    yolo_entities: int = 0
+
+    # Fusion statistics
+    duplicates_merged: int = 0
+    conflicts_resolved: int = 0
+
+    # OCR Text Anchoring statistics (NEW)
+    ocr_text_anchored: int = 0
+    ocr_text_fallback: int = 0
+    ocr_avg_offset: float = 0.0  # Average pixel offset corrected
+
+    # Refinement statistics (NEW)
+    refinement_applied: bool = False
+    refinement_adjustments: int = 0
+    endpoints_connected: int = 0
+    lines_snapped: int = 0
+    lines_aligned: int = 0
+
+    # Validation results
+    validation_passed: bool = False
+    validation_accuracy: float = 0.0
+    corrections_applied: int = 0
+
+    def to_dict(self) -> dict:
+        base = super().to_dict()
+        base["hybrid_statistics"] = {
+            "gemini_entities": self.gemini_entities,
+            "opencv_entities": self.opencv_entities,
+            "yolo_entities": self.yolo_entities,
+            "duplicates_merged": self.duplicates_merged,
+            "conflicts_resolved": self.conflicts_resolved,
+            "ocr_text_anchored": self.ocr_text_anchored,
+            "ocr_text_fallback": self.ocr_text_fallback,
+            "ocr_avg_offset": self.ocr_avg_offset,
+            "refinement_applied": self.refinement_applied,
+            "refinement_adjustments": self.refinement_adjustments,
+            "endpoints_connected": self.endpoints_connected,
+            "lines_snapped": self.lines_snapped,
+            "lines_aligned": self.lines_aligned,
+            "validation_passed": self.validation_passed,
+            "validation_accuracy": self.validation_accuracy,
+            "corrections_applied": self.corrections_applied,
+        }
+        return base
+
+
+def _load_image(image_path: Path) -> Optional[np.ndarray]:
+    """Load image using OpenCV."""
+    try:
+        import cv2
+        image = cv2.imread(str(image_path))
+        return image
+    except Exception as e:
+        logger.warning("failed_to_load_image", path=str(image_path), error=str(e))
+        return None
+
+
+# AutoCAD linetype mapping
+LINETYPE_MAP = {
+    "continuous": "Continuous",
+    "dashed": "DASHED",
+    "dotted": "DOT",
+    "center": "CENTER",
+    "hidden": "HIDDEN",
+    "phantom": "PHANTOM",
+    "dashdot": "DASHDOT",
+    "border": "BORDER",
+    "divide": "DIVIDE",
+    "unknown": "Continuous",
+}
+
+
+def _map_line_type_to_autocad(line_type: str) -> str:
+    """
+    Map detected line type to AutoCAD linetype name.
+
+    Args:
+        line_type: Detected line type (continuous, dashed, dotted, center, etc.)
+
+    Returns:
+        AutoCAD linetype name
+    """
+    return LINETYPE_MAP.get(line_type.lower(), "Continuous")
+
+
+async def hybrid_opencv_extraction(
+    image: np.ndarray,
+    analysis: DrawingAnalysis,
+    calibration: ScaleCalibration,
+    config: HybridExtractionConfig,
+) -> List[EntityToCreate]:
+    """
+    Extract entities using OpenCV with Gemini guidance.
+
+    Gemini tells us WHAT regions to process and WHAT type of elements
+    to look for. OpenCV extracts with pixel-perfect accuracy.
+
+    Args:
+        image: Source image (BGR numpy array)
+        analysis: Gemini's drawing analysis
+        calibration: Coordinate calibration
+        config: Hybrid extraction configuration
+
+    Returns:
+        List of EntityToCreate from OpenCV
+    """
+    entities: List[EntityToCreate] = []
+
+    try:
+        from .opencv_extraction import OpenCVExtractor, ExtractedLine, ExtractedCircle
+    except ImportError:
+        logger.warning("opencv_extraction_module_not_available")
+        return entities
+
+    height, width = image.shape[:2]
+    extractor = OpenCVExtractor(image, dpi=calibration.dpi if hasattr(calibration, 'dpi') else 300)
+
+    # Process regions marked for OpenCV
+    opencv_regions = [
+        r for r in analysis.extraction_strategy.special_regions
+        if r.strategy in ("selective_opencv", "hybrid")
+    ]
+
+    # If no specific regions, process entire image for lines/circles
+    if not opencv_regions and (config.use_opencv_for_lines or config.use_opencv_for_circles):
+        opencv_regions = [SpecialRegion(
+            bounds=[0, 0, width, height],
+            reason="full_image",
+            strategy="selective_opencv",
+            expected_pattern="lines",
+        )]
+
+    for region in opencv_regions:
+        bounds = region.bounds
+        if len(bounds) != 4:
+            continue
+
+        x1, y1, x2, y2 = bounds
+        roi = (int(x1), int(y1), int(x2), int(y2))
+
+        # Extract based on expected pattern
+        pattern = region.expected_pattern or "lines"
+
+        if pattern in ("lines", "parallel_lines", "walls") and config.use_opencv_for_lines:
+            lines = extractor.extract_lines_lsd(
+                roi=roi,
+                min_length=config.opencv_line_min_length,
+            )
+
+            # Detect line types for each line
+            for line in lines:
+                line.line_type = extractor.detect_line_type(line)
+
+            for line in lines:
+                # Convert to DWG coordinates
+                start_dwg = calibration.to_dwg(*line.start)
+                end_dwg = calibration.to_dwg(*line.end)
+
+                # Determine layer based on Gemini's analysis
+                layer = _infer_layer_for_region(region, "line", analysis)
+
+                # Map OpenCV line type to AutoCAD linetype
+                linetype = _map_line_type_to_autocad(line.line_type.value)
+
+                entities.append(EntityToCreate(
+                    entity_type=EntityType.LINE,
+                    layer=layer,
+                    properties={
+                        "start": start_dwg,
+                        "end": end_dwg,
+                        "linetype": linetype,
+                    },
+                    source=ExtractionSource.SELECTIVE_OPENCV,
+                    confidence=line.confidence,
+                    source_element=f"opencv_line_{pattern}_{linetype.lower()}",
+                ))
+
+        if pattern in ("circles", "columns", "equipment") and config.use_opencv_for_circles:
+            circles = extractor.extract_circles(
+                roi=roi,
+                min_radius=config.opencv_circle_min_radius,
+                max_radius=config.opencv_circle_max_radius,
+            )
+
+            for circle in circles:
+                center_dwg = calibration.to_dwg(*circle.center)
+                radius_dwg = calibration.scale_length(circle.radius)
+
+                layer = _infer_layer_for_region(region, "circle", analysis)
+
+                entities.append(EntityToCreate(
+                    entity_type=EntityType.CIRCLE,
+                    layer=layer,
+                    properties={
+                        "center": center_dwg,
+                        "radius": radius_dwg,
+                    },
+                    source=ExtractionSource.SELECTIVE_OPENCV,
+                    confidence=circle.confidence,
+                    source_element="opencv_circle",
+                ))
+
+    # Count line types for logging
+    linetype_counts = {}
+    for e in entities:
+        if e.entity_type in (EntityType.LINE, "line"):
+            lt = e.properties.get("linetype", "Continuous")
+            linetype_counts[lt] = linetype_counts.get(lt, 0) + 1
+
+    logger.info(
+        "hybrid_opencv_extraction_complete",
+        regions_processed=len(opencv_regions),
+        entities_extracted=len(entities),
+        linetypes=linetype_counts,
+    )
+
+    return entities
+
+
+async def hybrid_yolo_extraction(
+    image: np.ndarray,
+    analysis: DrawingAnalysis,
+    calibration: ScaleCalibration,
+    config: HybridExtractionConfig,
+) -> List[EntityToCreate]:
+    """
+    Extract symbols using YOLO with Gemini semantic enhancement.
+
+    YOLO detects symbol bounding boxes with trained accuracy.
+    Gemini provides context for layer assignment and attribute inference.
+
+    Args:
+        image: Source image
+        analysis: Gemini's drawing analysis
+        calibration: Coordinate calibration
+        config: Hybrid extraction configuration
+
+    Returns:
+        List of EntityToCreate (block references)
+    """
+    entities: List[EntityToCreate] = []
+
+    if not config.use_yolo_for_symbols:
+        return entities
+
+    try:
+        from ..yolo_detection import detect_symbols_yolo, DetectedBlock
+    except ImportError:
+        logger.warning("yolo_detection_not_available")
+        return entities
+
+    height, width = image.shape[:2]
+
+    # Convert to grayscale for YOLO if needed
+    if len(image.shape) == 3:
+        import cv2
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image
+
+    # Calculate scale factor
+    scale = 1.0 / (calibration.dpi if hasattr(calibration, 'dpi') else 300)
+
+    # Run YOLO detection
+    _, detected_blocks = detect_symbols_yolo(
+        image=gray,
+        scale=scale,
+        confidence=config.yolo_confidence_threshold,
+        iou_threshold=config.yolo_iou_threshold,
+        model_path=config.yolo_model_path,
+        mask_detections=False,
+    )
+
+    # Convert YOLO detections to entities
+    for block in detected_blocks:
+        # Get block name - YOLO provides this
+        block_name = block.block_name
+
+        # Get layer based on category
+        layer = get_layer_for_symbol(block.category)
+
+        # Cross-reference with Gemini's symbol detection for attributes
+        attributes = _enrich_symbol_attributes(block, analysis)
+
+        entities.append(EntityToCreate(
+            entity_type=EntityType.BLOCK,
+            layer=layer,
+            properties={
+                "block_name": block_name,
+                "position": block.position,  # Already in DWG coords from YOLO
+                "rotation": block.rotation,
+                "scale": block.scale,
+                "attributes": attributes,
+            },
+            source=ExtractionSource.HYBRID,
+            confidence=block.confidence,
+            source_element=f"yolo_{block.category}_{block.block_name}",
+        ))
+
+    logger.info(
+        "hybrid_yolo_extraction_complete",
+        symbols_detected=len(detected_blocks),
+        entities_created=len(entities),
+    )
+
+    return entities
+
+
+def _infer_layer_for_region(
+    region: SpecialRegion,
+    entity_type: str,
+    analysis: DrawingAnalysis,
+) -> str:
+    """Infer the appropriate layer for entities in a region based on Gemini analysis."""
+    # Use Gemini's layer suggestion if available
+    if hasattr(region, 'layer_suggestion') and region.layer_suggestion:
+        return region.layer_suggestion
+
+    # Infer from region context
+    reason = (region.reason or "").lower()
+    pattern = (region.expected_pattern or "").lower()
+
+    # Map common patterns to layers
+    if "wall" in reason or "wall" in pattern:
+        return "A-WALL"
+    elif "duct" in reason or "duct" in pattern:
+        return "M-DUCT"
+    elif "pipe" in reason or "pipe" in pattern:
+        return "P-PIPE"
+    elif "wire" in reason or "electrical" in pattern:
+        return "E-POWR"
+    elif "column" in reason:
+        return "A-COLS"
+
+    # Fall back to drawing type inference
+    drawing_type = analysis.drawing_type.lower() if analysis.drawing_type else ""
+
+    if drawing_type == "mechanical":
+        return "M-DUCT" if entity_type == "line" else "M-EQPM"
+    elif drawing_type == "electrical":
+        return "E-POWR" if entity_type == "line" else "E-POWR-OUTL"
+    elif drawing_type == "plumbing":
+        return "P-PIPE" if entity_type == "line" else "P-FIXT"
+    elif drawing_type == "fire_alarm":
+        return "F-ALRM" if entity_type == "line" else "F-ALRM-DETC"
+
+    return "0"
+
+
+def _enrich_symbol_attributes(
+    block: "DetectedBlock",
+    analysis: DrawingAnalysis,
+) -> Dict[str, str]:
+    """
+    Enrich YOLO-detected symbol with attributes from Gemini analysis.
+
+    Cross-references YOLO detection position with Gemini's symbol list
+    to get semantic attributes like tags, sizes, etc.
+    """
+    attributes: Dict[str, str] = {}
+
+    # Try to find matching symbol in Gemini's analysis
+    pos_x, pos_y = block.position
+    tolerance = 50  # Pixels
+
+    for symbol in analysis.elements.symbols:
+        sym_x, sym_y = symbol.position
+        distance = np.sqrt((sym_x - pos_x) ** 2 + (sym_y - pos_y) ** 2)
+
+        if distance < tolerance:
+            # Found a match - use Gemini's attributes
+            if symbol.tag:
+                attributes["TAG"] = symbol.tag
+            if symbol.size:
+                attributes["SIZE"] = symbol.size
+            for i, text in enumerate(symbol.associated_text):
+                attributes[f"TEXT{i + 1}"] = text
+            break
+
+    return attributes
+
+
+def _merge_duplicate_entities(
+    entities: List[EntityToCreate],
+    tolerance: float = 5.0,
+    prefer_opencv: bool = True,
+) -> Tuple[List[EntityToCreate], int]:
+    """
+    Merge duplicate entities from different sources.
+
+    When Gemini and OpenCV both detect the same line, keep the more
+    accurate one (typically OpenCV).
+
+    Args:
+        entities: List of entities from all sources
+        tolerance: Distance tolerance for considering duplicates (pixels)
+        prefer_opencv: When duplicates found, prefer OpenCV coordinates
+
+    Returns:
+        Tuple of (merged entities, number of duplicates removed)
+    """
+    if not entities:
+        return entities, 0
+
+    merged: List[EntityToCreate] = []
+    removed = 0
+
+    # Group by entity type
+    by_type: Dict[str, List[EntityToCreate]] = {}
+    for e in entities:
+        etype = e.entity_type.value if isinstance(e.entity_type, EntityType) else e.entity_type
+        if etype not in by_type:
+            by_type[etype] = []
+        by_type[etype].append(e)
+
+    for etype, group in by_type.items():
+        if etype == "line":
+            merged_group, count = _merge_lines(group, tolerance, prefer_opencv)
+            merged.extend(merged_group)
+            removed += count
+        elif etype == "circle":
+            merged_group, count = _merge_circles(group, tolerance, prefer_opencv)
+            merged.extend(merged_group)
+            removed += count
+        else:
+            # For other types, keep all
+            merged.extend(group)
+
+    return merged, removed
+
+
+def _merge_lines(
+    lines: List[EntityToCreate],
+    tolerance: float,
+    prefer_opencv: bool,
+) -> Tuple[List[EntityToCreate], int]:
+    """Merge duplicate lines."""
+    if len(lines) <= 1:
+        return lines, 0
+
+    kept: List[EntityToCreate] = []
+    removed = 0
+
+    for line in lines:
+        is_duplicate = False
+        start = np.array(line.properties.get("start", (0, 0)))
+        end = np.array(line.properties.get("end", (0, 0)))
+
+        for existing in kept:
+            ex_start = np.array(existing.properties.get("start", (0, 0)))
+            ex_end = np.array(existing.properties.get("end", (0, 0)))
+
+            # Check if endpoints match (either direction)
+            if (np.linalg.norm(start - ex_start) < tolerance and
+                np.linalg.norm(end - ex_end) < tolerance):
+                is_duplicate = True
+                # Prefer OpenCV if configured
+                if prefer_opencv and line.source == ExtractionSource.SELECTIVE_OPENCV:
+                    kept.remove(existing)
+                    kept.append(line)
+                break
+            elif (np.linalg.norm(start - ex_end) < tolerance and
+                  np.linalg.norm(end - ex_start) < tolerance):
+                is_duplicate = True
+                if prefer_opencv and line.source == ExtractionSource.SELECTIVE_OPENCV:
+                    kept.remove(existing)
+                    kept.append(line)
+                break
+
+        if not is_duplicate:
+            kept.append(line)
+        else:
+            removed += 1
+
+    return kept, removed
+
+
+def _merge_circles(
+    circles: List[EntityToCreate],
+    tolerance: float,
+    prefer_opencv: bool,
+) -> Tuple[List[EntityToCreate], int]:
+    """Merge duplicate circles."""
+    if len(circles) <= 1:
+        return circles, 0
+
+    kept: List[EntityToCreate] = []
+    removed = 0
+
+    for circle in circles:
+        is_duplicate = False
+        center = np.array(circle.properties.get("center", (0, 0)))
+        radius = circle.properties.get("radius", 0)
+
+        for existing in kept:
+            ex_center = np.array(existing.properties.get("center", (0, 0)))
+            ex_radius = existing.properties.get("radius", 0)
+
+            center_dist = np.linalg.norm(center - ex_center)
+            radius_diff = abs(radius - ex_radius)
+
+            if center_dist < tolerance and radius_diff < tolerance:
+                is_duplicate = True
+                if prefer_opencv and circle.source == ExtractionSource.SELECTIVE_OPENCV:
+                    kept.remove(existing)
+                    kept.append(circle)
+                break
+
+        if not is_duplicate:
+            kept.append(circle)
+        else:
+            removed += 1
+
+    return kept, removed
+
+
+async def hybrid_extract_all(
+    analysis: DrawingAnalysis,
+    calibration: ScaleCalibration,
+    image_path: Optional[Path] = None,
+    config: Optional[HybridExtractionConfig] = None,
+) -> HybridExtractionResult:
+    """
+    Hybrid extraction combining Gemini, OpenCV, and YOLO.
+
+    This is the optimal extraction approach:
+    1. Gemini provides semantic understanding (what & where)
+    2. OpenCV extracts geometry with pixel-perfect accuracy
+    3. YOLO detects symbols with trained precision
+    4. Results are merged and deduplicated
+    5. Optional Gemini validation pass
+
+    Args:
+        analysis: DrawingAnalysis from Gemini (Phase 2)
+        calibration: ScaleCalibration (Phase 3)
+        image_path: Path to source image
+        config: Optional HybridExtractionConfig
+
+    Returns:
+        HybridExtractionResult with all extracted entities
+
+    Example:
+        >>> result = await hybrid_extract_all(analysis, calibration, image_path)
+        >>> print(f"Gemini: {result.gemini_entities}, OpenCV: {result.opencv_entities}")
+        >>> print(f"YOLO: {result.yolo_entities}, Total: {result.total_entities}")
+    """
+    config = config or HybridExtractionConfig()
+
+    result = HybridExtractionResult(
+        primary_strategy="hybrid",
+        drawing_type=analysis.drawing_type,
+        calibration_method=calibration.method,
+        calibration_confidence=calibration.confidence,
+    )
+
+    logger.info(
+        "hybrid_extraction_starting",
+        drawing_type=analysis.drawing_type,
+        total_gemini_elements=analysis.total_elements,
+        use_opencv=config.use_opencv_for_lines or config.use_opencv_for_circles,
+        use_yolo=config.use_yolo_for_symbols,
+        use_ocr_text_anchoring=config.use_ocr_for_text_positions,
+    )
+
+    all_entities: List[EntityToCreate] = []
+
+    # 1. Text extraction with OCR anchoring (NEW)
+    if config.use_ocr_for_text_positions and image_path:
+        try:
+            from .ocr_text_anchoring import anchor_text_positions, is_ocr_available
+
+            if is_ocr_available():
+                text_entities = await anchor_text_positions(
+                    analysis=analysis,
+                    image_path=image_path,
+                    calibration=calibration,
+                    min_similarity=config.ocr_min_similarity,
+                    min_ocr_confidence=config.ocr_min_confidence,
+                )
+
+                # Count anchored vs fallback
+                ocr_anchored = sum(
+                    1 for e in text_entities
+                    if e.source == ExtractionSource.HYBRID
+                )
+                ocr_fallback = len(text_entities) - ocr_anchored
+
+                all_entities.extend(text_entities)
+                result.gemini_entities = len(text_entities)
+                result.ocr_text_anchored = ocr_anchored
+                result.ocr_text_fallback = ocr_fallback
+
+                logger.info(
+                    "ocr_text_anchoring_applied",
+                    total_text=len(text_entities),
+                    ocr_anchored=ocr_anchored,
+                    fallback=ocr_fallback,
+                )
+            else:
+                # OCR not available, use Gemini positions
+                gemini_entities = await direct_extraction(analysis, calibration)
+                gemini_text = [
+                    e for e in gemini_entities
+                    if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
+                ]
+                all_entities.extend(gemini_text)
+                result.gemini_entities = len(gemini_text)
+                result.ocr_text_fallback = len(gemini_text)
+                logger.warning("ocr_not_available", message="Using Gemini text positions")
+
+        except Exception as e:
+            logger.warning("ocr_text_anchoring_failed", error=str(e))
+            # Fall back to Gemini positions
+            gemini_entities = await direct_extraction(analysis, calibration)
+            gemini_text = [
+                e for e in gemini_entities
+                if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
+            ]
+            all_entities.extend(gemini_text)
+            result.gemini_entities = len(gemini_text)
+            result.ocr_text_fallback = len(gemini_text)
+    else:
+        # Original behavior: use Gemini's direct text extraction
+        gemini_entities = await direct_extraction(analysis, calibration)
+        gemini_text = [
+            e for e in gemini_entities
+            if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
+        ]
+        all_entities.extend(gemini_text)
+        result.gemini_entities = len(gemini_text)
+        result.ocr_text_fallback = len(gemini_text)
+
+    # 1b. Dimensions (always from Gemini)
+    gemini_entities_full = await direct_extraction(analysis, calibration) if 'gemini_entities' not in dir() else gemini_entities
+    gemini_dims = [
+        e for e in gemini_entities_full
+        if e.entity_type in (EntityType.DIMENSION, "dimension")
+    ]
+    all_entities.extend(gemini_dims)
+    result.gemini_entities += len(gemini_dims)
+
+    # Also include Gemini's symbols if not using YOLO
+    if not config.use_yolo_for_symbols:
+        gemini_symbols = [
+            e for e in gemini_entities
+            if e.entity_type in (EntityType.BLOCK, "block")
+        ]
+        all_entities.extend(gemini_symbols)
+        result.gemini_entities += len(gemini_symbols)
+
+    # Also include Gemini geometry if not using OpenCV
+    if not config.use_opencv_for_lines and not config.use_opencv_for_circles:
+        gemini_geometry = [
+            e for e in gemini_entities
+            if e.entity_type in (EntityType.LINE, EntityType.ARC, EntityType.CIRCLE,
+                                "line", "arc", "circle")
+        ]
+        all_entities.extend(gemini_geometry)
+        result.gemini_entities += len(gemini_geometry)
+
+    # 2. OpenCV extraction (lines, circles - pixel perfect)
+    if image_path and (config.use_opencv_for_lines or config.use_opencv_for_circles):
+        image = _load_image(image_path)
+        if image is not None:
+            opencv_entities = await hybrid_opencv_extraction(
+                image, analysis, calibration, config
+            )
+            all_entities.extend(opencv_entities)
+            result.opencv_entities = len(opencv_entities)
+            result.opencv_count = len(opencv_entities)
+
+    # 3. YOLO extraction (symbols - trained detection)
+    if image_path and config.use_yolo_for_symbols:
+        image = image if 'image' in dir() and image is not None else _load_image(image_path)
+        if image is not None:
+            yolo_entities = await hybrid_yolo_extraction(
+                image, analysis, calibration, config
+            )
+            all_entities.extend(yolo_entities)
+            result.yolo_entities = len(yolo_entities)
+
+    # 4. Merge duplicates
+    merged_entities, duplicates = _merge_duplicate_entities(
+        all_entities,
+        tolerance=config.coordinate_tolerance,
+        prefer_opencv=config.prefer_opencv_geometry,
+    )
+    result.entities = merged_entities
+    result.duplicates_merged = duplicates
+    result.direct_count = result.gemini_entities
+
+    # 5. Gemini Refinement Pass (NEW)
+    if config.enable_refinement and result.entities:
+        try:
+            from .gemini_refinement import refine_entities_with_gemini, RefinementConfig
+
+            refinement_config = RefinementConfig(
+                snap_to_grid=config.refine_snap_to_grid,
+                connect_endpoints=config.refine_connect_endpoints,
+                align_parallel_lines=config.refine_align_parallel,
+                remove_duplicates=config.refine_remove_duplicates,
+            )
+
+            refinement_result = await refine_entities_with_gemini(
+                entities=result.entities,
+                image_path=image_path,
+                calibration=calibration,
+                config=refinement_config,
+            )
+
+            result.entities = refinement_result.refined_entities
+            result.refinement_applied = True
+            result.refinement_adjustments = refinement_result.adjustments_made
+            result.endpoints_connected = refinement_result.endpoints_connected
+            result.lines_snapped = refinement_result.lines_snapped
+
+            logger.info(
+                "refinement_pass_complete",
+                adjustments=result.refinement_adjustments,
+                endpoints_connected=result.endpoints_connected,
+                lines_snapped=result.lines_snapped,
+            )
+
+        except Exception as e:
+            logger.warning("refinement_pass_failed", error=str(e))
+            result.refinement_applied = False
+
+    logger.info(
+        "hybrid_extraction_complete",
+        gemini_entities=result.gemini_entities,
+        opencv_entities=result.opencv_entities,
+        yolo_entities=result.yolo_entities,
+        duplicates_merged=result.duplicates_merged,
+        refinement_adjustments=result.refinement_adjustments,
+        total_entities=len(result.entities),
+    )
+
+    return result
+
+
+# Alias for backward compatibility
+extract_hybrid = hybrid_extract_all

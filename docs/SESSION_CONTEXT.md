@@ -14,6 +14,9 @@
 | Area | Key File/Directory |
 |------|-------------------|
 | Gemini-First pipeline | `src/aec_agent/mcp/tools/gemini_first/` |
+| **Hybrid extraction** | `adaptive_extraction.py` → `hybrid_extract_all()` |
+| **OpenCV utilities** | `opencv_extraction.py` → `OpenCVExtractor` |
+| YOLO detection | `src/aec_agent/mcp/tools/yolo_detection.py` |
 | CAD standards YAML | `knowledge_base/cad_standards/*.yaml` |
 | Main MCP tools | `gemini_complete_pipeline`, `gemini_vectorize_pdf` |
 | Architecture docs | `docs/autocad-rasterization-architecture.md` |
@@ -40,6 +43,9 @@
 - [x] Phase 2.5: YOLOv8 + Vision LLM symbol detection
 - [x] Semantic Intelligence Pipeline (Phases A-F complete)
 - [x] Gemini-First Pipeline (Phases 1-6 complete, 277 unit tests)
+- [x] **Hybrid Extraction Pipeline** (Gemini + OpenCV + YOLO fusion, 28 tests)
+- [x] **Gemini Refinement Pass** (snap to grid, connect endpoints, align parallel)
+- [x] **Line Type Detection** (continuous, dashed, dotted, center line detection)
 
 ## Key Patterns
 - **Tool results:** Return `{"success": False, "error": {...}}` — never raise exceptions
