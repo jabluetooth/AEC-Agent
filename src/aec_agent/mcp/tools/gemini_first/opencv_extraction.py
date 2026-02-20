@@ -450,7 +450,7 @@ class OpenCVExtractor:
             dp=1,
             minDist=min_dist,
             param1=50,
-            param2=30,
+            param2=50,  # Lowered from 80 to catch more circles (original was 30)
             minRadius=min_radius,
             maxRadius=max_radius,
         )

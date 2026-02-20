@@ -23,6 +23,7 @@ Usage:
 
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
@@ -827,25 +828,35 @@ async def selective_opencv(
 
 def _process_opencv_region(
     region: SpecialRegion,
-    image,  # np.ndarray
+    image: np.ndarray,
     calibration: ScaleCalibration,
 ) -> List[EntityToCreate]:
-    """Process a single region with OpenCV."""
-    import cv2
-    import numpy as np
+    """
+    Process a single region with OpenCV for line/circle detection.
 
-    entities = []
+    Args:
+        region: SpecialRegion defining the area to process
+        image: Source image as numpy array (BGR or grayscale)
+        calibration: ScaleCalibration for coordinate conversion
+
+    Returns:
+        List of EntityToCreate extracted from the region
+    """
+    import cv2
+
+    entities: List[EntityToCreate] = []
     bounds = region.bounds
 
     # Validate bounds
     if len(bounds) != 4:
         return entities
 
-    x1, y1, x2, y2 = bounds
+    # Cast bounds to int for array slicing
+    x1, y1, x2, y2 = int(bounds[0]), int(bounds[1]), int(bounds[2]), int(bounds[3])
     if x2 <= x1 or y2 <= y1:
         return entities
 
-    # Crop region from image
+    # Crop region from image (clamp to image dimensions)
     h, w = image.shape[:2]
     x1 = max(0, min(x1, w))
     x2 = max(0, min(x2, w))
@@ -923,12 +934,19 @@ def _process_opencv_region(
     return entities
 
 
-def _detect_lines_opencv(processed_image) -> List[dict]:
-    """Detect lines using OpenCV HoughLinesP."""
-    import cv2
-    import numpy as np
+def _detect_lines_opencv(processed_image: np.ndarray) -> List[Dict[str, Any]]:
+    """
+    Detect lines using OpenCV HoughLinesP.
 
-    detected = []
+    Args:
+        processed_image: Binary/thresholded image for line detection
+
+    Returns:
+        List of dicts with 'type', 'start', and 'end' keys
+    """
+    import cv2
+
+    detected: List[Dict[str, Any]] = []
 
     # Detect lines using probabilistic Hough transform
     lines = cv2.HoughLinesP(
@@ -945,19 +963,26 @@ def _detect_lines_opencv(processed_image) -> List[dict]:
             x1, y1, x2, y2 = line[0]
             detected.append({
                 "type": "line",
-                "start": (x1, y1),
-                "end": (x2, y2),
+                "start": (int(x1), int(y1)),
+                "end": (int(x2), int(y2)),
             })
 
     return detected
 
 
-def _detect_circles_opencv(gray_image) -> List[dict]:
-    """Detect circles using OpenCV HoughCircles."""
-    import cv2
-    import numpy as np
+def _detect_circles_opencv(gray_image: np.ndarray) -> List[Dict[str, Any]]:
+    """
+    Detect circles using OpenCV HoughCircles.
 
-    detected = []
+    Args:
+        gray_image: Grayscale image for circle detection
+
+    Returns:
+        List of dicts with 'type', 'center', and 'radius' keys
+    """
+    import cv2
+
+    detected: List[Dict[str, Any]] = []
 
     # Detect circles using Hough transform
     circles = cv2.HoughCircles(
@@ -1214,6 +1239,32 @@ class HybridExtractionConfig:
     enable_gemini_validation: bool = True
     max_validation_iterations: int = 2
 
+    # Masking parameters for OpenCV (to exclude text/symbols from line detection)
+    text_mask_half_width: int = 40  # Half-width of text masking rectangle
+    text_mask_half_height: int = 10  # Half-height of text masking rectangle
+    symbol_mask_half_size: int = 25  # Half-size of symbol masking square
+
+    # Default DPI when calibration doesn't provide one
+    default_dpi: int = 300
+
+
+def _get_dpi(calibration: ScaleCalibration, config: Optional["HybridExtractionConfig"] = None) -> int:
+    """
+    Get DPI from calibration or fall back to config/default.
+
+    Args:
+        calibration: ScaleCalibration object
+        config: Optional HybridExtractionConfig for default DPI
+
+    Returns:
+        DPI value as integer
+    """
+    if hasattr(calibration, 'dpi') and calibration.dpi:
+        return int(calibration.dpi)
+    if config is not None:
+        return config.default_dpi
+    return 300
+
 
 @dataclass
 class HybridExtractionResult(ExtractionResult):
@@ -1278,6 +1329,37 @@ def _load_image(image_path: Path) -> Optional[np.ndarray]:
         return None
 
 
+def _parse_patterns(pattern_string: Optional[str]) -> set:
+    """
+    Parse a pattern string into a set of individual patterns.
+
+    Supports both comma-separated ("lines,circles") and single patterns ("lines").
+
+    Args:
+        pattern_string: Pattern string like "lines", "circles", or "lines,circles"
+
+    Returns:
+        Set of lowercase pattern strings
+    """
+    if not pattern_string:
+        return {"lines"}  # Default pattern
+    return {p.strip().lower() for p in pattern_string.split(",")}
+
+
+def _pattern_matches(patterns: set, *keywords: str) -> bool:
+    """
+    Check if any pattern matches any of the given keywords.
+
+    Args:
+        patterns: Set of patterns from _parse_patterns()
+        *keywords: Keywords to check for (e.g., "lines", "walls")
+
+    Returns:
+        True if any pattern matches any keyword
+    """
+    return bool(patterns & set(keywords))
+
+
 # AutoCAD linetype mapping
 LINETYPE_MAP = {
     "continuous": "Continuous",
@@ -1335,8 +1417,50 @@ async def hybrid_opencv_extraction(
         logger.warning("opencv_extraction_module_not_available")
         return entities
 
-    height, width = image.shape[:2]
-    extractor = OpenCVExtractor(image, dpi=calibration.dpi if hasattr(calibration, 'dpi') else 300)
+    # =================================================================
+    # NEW STEP: Mask out text and symbols to prevent noise
+    # =================================================================
+    # Work on a copy of the image to avoid modifying the original
+    import cv2
+    processed_image = image.copy()
+    
+    # Mask text regions (white rectangle over text)
+    if hasattr(analysis, 'elements') and hasattr(analysis.elements, 'text'):
+        for text in analysis.elements.text:
+            # Try to get bounding box 
+            if hasattr(text, 'bounding_box') and text.bounding_box:
+                x1, y1, x2, y2 = text.bounding_box
+                # Draw white filled rectangle
+                cv2.rectangle(processed_image, (int(x1), int(y1)), (int(x2), int(y2)), (255, 255, 255), -1)
+            elif hasattr(text, 'position'):
+                # Fallback to configurable size around position
+                cx, cy = text.position
+                half_w = config.text_mask_half_width
+                half_h = config.text_mask_half_height
+                x1, y1 = int(cx - half_w), int(cy - half_h)
+                x2, y2 = int(cx + half_w), int(cy + half_h)
+                cv2.rectangle(processed_image, (x1, y1), (x2, y2), (255, 255, 255), -1)
+
+    # Mask symbol regions (white rectangle over symbols)
+    if hasattr(analysis, 'elements') and hasattr(analysis.elements, 'symbols'):
+        for symbol in analysis.elements.symbols:
+            if hasattr(symbol, 'bounding_box') and symbol.bounding_box:
+                x1, y1, x2, y2 = symbol.bounding_box
+                cv2.rectangle(processed_image, (int(x1), int(y1)), (int(x2), int(y2)), (255, 255, 255), -1)
+            elif hasattr(symbol, 'position'):
+                # Use configurable size if bounds not available
+                cx, cy = symbol.position
+                half_size = config.symbol_mask_half_size
+
+                x1 = int(cx - half_size)
+                y1 = int(cy - half_size)
+                x2 = int(cx + half_size)
+                y2 = int(cy + half_size)
+
+                cv2.rectangle(processed_image, (x1, y1), (x2, y2), (255, 255, 255), -1)
+
+    height, width = processed_image.shape[:2]
+    extractor = OpenCVExtractor(processed_image, dpi=_get_dpi(calibration, config))
 
     # Process regions marked for OpenCV
     opencv_regions = [
@@ -1344,13 +1468,14 @@ async def hybrid_opencv_extraction(
         if r.strategy in ("selective_opencv", "hybrid")
     ]
 
-    # If no specific regions, process entire image for lines/circles
+    # If no specific regions, process entire image for lines AND circles
+    # CHANGED: Added "circles" to expected_pattern to enable circle detection by default
     if not opencv_regions and (config.use_opencv_for_lines or config.use_opencv_for_circles):
         opencv_regions = [SpecialRegion(
             bounds=[0, 0, width, height],
             reason="full_image",
             strategy="selective_opencv",
-            expected_pattern="lines",
+            expected_pattern="lines,circles",  # CHANGED: Enable circles
         )]
 
     for region in opencv_regions:
@@ -1361,10 +1486,16 @@ async def hybrid_opencv_extraction(
         x1, y1, x2, y2 = bounds
         roi = (int(x1), int(y1), int(x2), int(y2))
 
-        # Extract based on expected pattern
-        pattern = region.expected_pattern or "lines"
+        # Parse expected patterns (supports comma-separated: "lines,circles")
+        patterns = _parse_patterns(region.expected_pattern)
+        is_full_image = (region.reason or "").lower() == "full_image"
 
-        if pattern in ("lines", "parallel_lines", "walls") and config.use_opencv_for_lines:
+        # Check for lines - extract if pattern includes lines/walls or it's a full image scan
+        should_extract_lines = (
+            _pattern_matches(patterns, "lines", "walls") or is_full_image
+        ) and config.use_opencv_for_lines
+
+        if should_extract_lines:
             lines = extractor.extract_lines_lsd(
                 roi=roi,
                 min_length=config.opencv_line_min_length,
@@ -1395,10 +1526,15 @@ async def hybrid_opencv_extraction(
                     },
                     source=ExtractionSource.SELECTIVE_OPENCV,
                     confidence=line.confidence,
-                    source_element=f"opencv_line_{pattern}_{linetype.lower()}",
+                    source_element=f"opencv_line_{region.expected_pattern or 'default'}_{linetype.lower()}",
                 ))
 
-        if pattern in ("circles", "columns", "equipment") and config.use_opencv_for_circles:
+        # Check for circles - extract if pattern includes circles/columns/equipment
+        should_extract_circles = (
+            _pattern_matches(patterns, "circles", "columns", "equipment")
+        ) and config.use_opencv_for_circles
+
+        if should_extract_circles:
             circles = extractor.extract_circles(
                 roi=roi,
                 min_radius=config.opencv_circle_min_radius,
@@ -1472,8 +1608,6 @@ async def hybrid_yolo_extraction(
         logger.warning("yolo_detection_not_available")
         return entities
 
-    height, width = image.shape[:2]
-
     # Convert to grayscale for YOLO if needed
     if len(image.shape) == 3:
         import cv2
@@ -1481,8 +1615,8 @@ async def hybrid_yolo_extraction(
     else:
         gray = image
 
-    # Calculate scale factor
-    scale = 1.0 / (calibration.dpi if hasattr(calibration, 'dpi') else 300)
+    # Calculate scale factor using DPI helper
+    scale = 1.0 / _get_dpi(calibration, config)
 
     # Run YOLO detection
     _, detected_blocks = detect_symbols_yolo(
@@ -1657,37 +1791,64 @@ def _merge_lines(
     tolerance: float,
     prefer_opencv: bool,
 ) -> Tuple[List[EntityToCreate], int]:
-    """Merge duplicate lines."""
+    """Merge duplicate lines with metadata transfer."""
     if len(lines) <= 1:
         return lines, 0
 
     kept: List[EntityToCreate] = []
     removed = 0
 
-    for line in lines:
+    # Sort lines to process Gemini (direct) lines first, then OpenCV lines
+    # This ensures we have metadata in 'kept' before processing geometric matches
+    # 'direct' comes before 'selective_opencv' alphabetically, but let's be explicit
+    # We want: [Gemini lines, OpenCV lines]
+    # So when we process OpenCV line, we find its Gemini match in 'kept'
+    sorted_lines = sorted(
+        lines, 
+        key=lambda x: 0 if x.source == ExtractionSource.DIRECT else 1
+    )
+
+    for line in sorted_lines:
         is_duplicate = False
         start = np.array(line.properties.get("start", (0, 0)))
         end = np.array(line.properties.get("end", (0, 0)))
 
-        for existing in kept:
+        for i, existing in enumerate(kept):
             ex_start = np.array(existing.properties.get("start", (0, 0)))
             ex_end = np.array(existing.properties.get("end", (0, 0)))
 
             # Check if endpoints match (either direction)
-            if (np.linalg.norm(start - ex_start) < tolerance and
-                np.linalg.norm(end - ex_end) < tolerance):
+            dist1 = np.linalg.norm(start - ex_start)
+            dist2 = np.linalg.norm(end - ex_end)
+            dist3 = np.linalg.norm(start - ex_end)
+            dist4 = np.linalg.norm(end - ex_start)
+
+            if (dist1 < tolerance and dist2 < tolerance) or (dist3 < tolerance and dist4 < tolerance):
                 is_duplicate = True
-                # Prefer OpenCV if configured
+
+                # If we prefer OpenCV and the current line IS OpenCV (and existing is likely Gemini)
                 if prefer_opencv and line.source == ExtractionSource.SELECTIVE_OPENCV:
-                    kept.remove(existing)
-                    kept.append(line)
-                break
-            elif (np.linalg.norm(start - ex_end) < tolerance and
-                  np.linalg.norm(end - ex_start) < tolerance):
-                is_duplicate = True
-                if prefer_opencv and line.source == ExtractionSource.SELECTIVE_OPENCV:
-                    kept.remove(existing)
-                    kept.append(line)
+                    # Create a copy to avoid mutating the original input entity
+                    merged_line = deepcopy(line)
+
+                    # Capture metadata from the existing Gemini line
+                    semantic_layer = existing.layer
+                    # Only transfer if semantic layer is better than "0"
+                    if semantic_layer and semantic_layer != "0":
+                        merged_line.layer = semantic_layer
+
+                    # Capture linetype if Gemini has a specific one and OpenCV is just Continuous (or default)
+                    semantic_linetype = existing.properties.get("linetype")
+                    geometric_linetype = merged_line.properties.get("linetype")
+
+                    if semantic_linetype and semantic_linetype != "Continuous" and (not geometric_linetype or geometric_linetype == "Continuous"):
+                        merged_line.properties["linetype"] = semantic_linetype
+
+                    # Replace existing with this new, improved OpenCV line
+                    kept[i] = merged_line
+
+                # If we don't prefer OpenCV, or if current line is Gemini and we already have one
+                # We just drop the current line (do nothing), effectively keeping 'existing'
                 break
 
         if not is_duplicate:
@@ -1703,19 +1864,25 @@ def _merge_circles(
     tolerance: float,
     prefer_opencv: bool,
 ) -> Tuple[List[EntityToCreate], int]:
-    """Merge duplicate circles."""
+    """Merge duplicate circles with metadata transfer."""
     if len(circles) <= 1:
         return circles, 0
 
     kept: List[EntityToCreate] = []
     removed = 0
+    
+    # Sort: Gemini first, then OpenCV
+    sorted_circles = sorted(
+        circles, 
+        key=lambda x: 0 if x.source == ExtractionSource.DIRECT else 1
+    )
 
-    for circle in circles:
+    for circle in sorted_circles:
         is_duplicate = False
         center = np.array(circle.properties.get("center", (0, 0)))
         radius = circle.properties.get("radius", 0)
 
-        for existing in kept:
+        for i, existing in enumerate(kept):
             ex_center = np.array(existing.properties.get("center", (0, 0)))
             ex_radius = existing.properties.get("radius", 0)
 
@@ -1724,9 +1891,19 @@ def _merge_circles(
 
             if center_dist < tolerance and radius_diff < tolerance:
                 is_duplicate = True
+
                 if prefer_opencv and circle.source == ExtractionSource.SELECTIVE_OPENCV:
-                    kept.remove(existing)
-                    kept.append(circle)
+                    # Create a copy to avoid mutating the original input entity
+                    merged_circle = deepcopy(circle)
+
+                    # Transfer Layer from Gemini's semantic analysis
+                    semantic_layer = existing.layer
+                    if semantic_layer and semantic_layer != "0":
+                        merged_circle.layer = semantic_layer
+
+                    # Replace existing with merged circle
+                    kept[i] = merged_circle
+
                 break
 
         if not is_duplicate:
@@ -1786,6 +1963,7 @@ async def hybrid_extract_all(
     )
 
     all_entities: List[EntityToCreate] = []
+    image: Optional[np.ndarray] = None  # Loaded lazily when needed
 
     # Get all Gemini entities once (used for text, dimensions, symbols, geometry fallback)
     gemini_entities = await direct_extraction(analysis, calibration)
@@ -1893,7 +2071,8 @@ async def hybrid_extract_all(
 
     # 3. YOLO extraction (symbols - trained detection)
     if image_path and config.use_yolo_for_symbols:
-        image = image if 'image' in dir() and image is not None else _load_image(image_path)
+        if image is None:
+            image = _load_image(image_path)
         if image is not None:
             yolo_entities = await hybrid_yolo_extraction(
                 image, analysis, calibration, config
