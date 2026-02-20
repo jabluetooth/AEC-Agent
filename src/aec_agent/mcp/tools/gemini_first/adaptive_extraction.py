@@ -1791,7 +1791,22 @@ def _merge_lines(
     tolerance: float,
     prefer_opencv: bool,
 ) -> Tuple[List[EntityToCreate], int]:
-    """Merge duplicate lines with metadata transfer."""
+    """
+    Merge duplicate lines from different extraction sources.
+
+    When both Gemini and OpenCV detect the same line, this function keeps
+    one copy with the best attributes from both:
+    - OpenCV provides pixel-accurate geometry
+    - Gemini provides semantic layer assignment and linetype
+
+    Args:
+        lines: List of line entities from various sources
+        tolerance: Maximum distance (in DWG units) to consider lines as duplicates
+        prefer_opencv: If True, use OpenCV coordinates when duplicates found
+
+    Returns:
+        Tuple of (merged line list, count of duplicates removed)
+    """
     if len(lines) <= 1:
         return lines, 0
 
@@ -1864,7 +1879,22 @@ def _merge_circles(
     tolerance: float,
     prefer_opencv: bool,
 ) -> Tuple[List[EntityToCreate], int]:
-    """Merge duplicate circles with metadata transfer."""
+    """
+    Merge duplicate circles from different extraction sources.
+
+    When both Gemini and OpenCV detect the same circle, this function keeps
+    one copy with the best attributes from both:
+    - OpenCV provides pixel-accurate center and radius
+    - Gemini provides semantic layer assignment
+
+    Args:
+        circles: List of circle entities from various sources
+        tolerance: Maximum distance (in DWG units) for center/radius to consider duplicates
+        prefer_opencv: If True, use OpenCV coordinates when duplicates found
+
+    Returns:
+        Tuple of (merged circle list, count of duplicates removed)
+    """
     if len(circles) <= 1:
         return circles, 0
 
@@ -1912,6 +1942,88 @@ def _merge_circles(
             removed += 1
 
     return kept, removed
+
+
+@dataclass
+class _TextExtractionResult:
+    """Result of text extraction with OCR anchoring."""
+    entities: List[EntityToCreate]
+    ocr_anchored: int = 0
+    ocr_fallback: int = 0
+
+
+async def _extract_text_entities(
+    analysis: DrawingAnalysis,
+    calibration: ScaleCalibration,
+    gemini_entities: List[EntityToCreate],
+    image_path: Optional[Path],
+    config: HybridExtractionConfig,
+) -> _TextExtractionResult:
+    """
+    Extract text entities with optional OCR position anchoring.
+
+    Uses OCR (Tesseract) to get pixel-accurate text positions when available,
+    falling back to Gemini's estimated positions otherwise.
+
+    Args:
+        analysis: Drawing analysis from Gemini
+        calibration: Coordinate calibration
+        gemini_entities: Pre-extracted Gemini entities (for fallback)
+        image_path: Path to source image (required for OCR)
+        config: Hybrid extraction configuration
+
+    Returns:
+        _TextExtractionResult with text entities and statistics
+    """
+    result = _TextExtractionResult(entities=[])
+
+    # Filter text entities from Gemini for fallback
+    def get_gemini_text() -> List[EntityToCreate]:
+        return [
+            e for e in gemini_entities
+            if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
+        ]
+
+    # Try OCR anchoring if enabled and image available
+    if config.use_ocr_for_text_positions and image_path:
+        try:
+            from .ocr_text_anchoring import anchor_text_positions, is_ocr_available
+
+            if is_ocr_available():
+                text_entities = await anchor_text_positions(
+                    analysis=analysis,
+                    image_path=image_path,
+                    calibration=calibration,
+                    min_similarity=config.ocr_min_similarity,
+                    min_ocr_confidence=config.ocr_min_confidence,
+                )
+
+                # Count anchored vs fallback
+                result.entities = text_entities
+                result.ocr_anchored = sum(
+                    1 for e in text_entities
+                    if e.source == ExtractionSource.HYBRID
+                )
+                result.ocr_fallback = len(text_entities) - result.ocr_anchored
+
+                logger.info(
+                    "ocr_text_anchoring_applied",
+                    total_text=len(text_entities),
+                    ocr_anchored=result.ocr_anchored,
+                    fallback=result.ocr_fallback,
+                )
+                return result
+            else:
+                logger.warning("ocr_not_available", message="Using Gemini text positions")
+
+        except Exception as e:
+            logger.warning("ocr_text_anchoring_failed", error=str(e))
+
+    # Fallback: use Gemini's direct text extraction
+    gemini_text = get_gemini_text()
+    result.entities = gemini_text
+    result.ocr_fallback = len(gemini_text)
+    return result
 
 
 async def hybrid_extract_all(
@@ -1968,68 +2080,18 @@ async def hybrid_extract_all(
     # Get all Gemini entities once (used for text, dimensions, symbols, geometry fallback)
     gemini_entities = await direct_extraction(analysis, calibration)
 
-    # 1. Text extraction with OCR anchoring (NEW)
-    if config.use_ocr_for_text_positions and image_path:
-        try:
-            from .ocr_text_anchoring import anchor_text_positions, is_ocr_available
-
-            if is_ocr_available():
-                text_entities = await anchor_text_positions(
-                    analysis=analysis,
-                    image_path=image_path,
-                    calibration=calibration,
-                    min_similarity=config.ocr_min_similarity,
-                    min_ocr_confidence=config.ocr_min_confidence,
-                )
-
-                # Count anchored vs fallback
-                ocr_anchored = sum(
-                    1 for e in text_entities
-                    if e.source == ExtractionSource.HYBRID
-                )
-                ocr_fallback = len(text_entities) - ocr_anchored
-
-                all_entities.extend(text_entities)
-                result.gemini_entities = len(text_entities)
-                result.ocr_text_anchored = ocr_anchored
-                result.ocr_text_fallback = ocr_fallback
-
-                logger.info(
-                    "ocr_text_anchoring_applied",
-                    total_text=len(text_entities),
-                    ocr_anchored=ocr_anchored,
-                    fallback=ocr_fallback,
-                )
-            else:
-                # OCR not available, use Gemini positions
-                gemini_text = [
-                    e for e in gemini_entities
-                    if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
-                ]
-                all_entities.extend(gemini_text)
-                result.gemini_entities = len(gemini_text)
-                result.ocr_text_fallback = len(gemini_text)
-                logger.warning("ocr_not_available", message="Using Gemini text positions")
-
-        except Exception as e:
-            logger.warning("ocr_text_anchoring_failed", error=str(e))
-            # Fall back to Gemini positions
-            gemini_text = [
-                e for e in gemini_entities
-                if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
-            ]
-            all_entities.extend(gemini_text)
-            result.gemini_entities = len(gemini_text)
-            result.ocr_text_fallback = len(gemini_text)
-    else:
-        # Original behavior: use Gemini's direct text extraction
-        gemini_text = [
-            e for e in gemini_entities
-            if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
-        ]
-        all_entities.extend(gemini_text)
-        result.gemini_entities = len(gemini_text)
-        result.ocr_text_fallback = len(gemini_text)
+    # 1. Text extraction with OCR anchoring
+    text_result = await _extract_text_entities(
+        analysis=analysis,
+        calibration=calibration,
+        gemini_entities=gemini_entities,
+        image_path=image_path,
+        config=config,
+    )
+    all_entities.extend(text_result.entities)
+    result.gemini_entities = len(text_result.entities)
+    result.ocr_text_anchored = text_result.ocr_anchored
+    result.ocr_text_fallback = text_result.ocr_fallback
 
     # 1b. Dimensions (always from Gemini)
     gemini_dims = [
