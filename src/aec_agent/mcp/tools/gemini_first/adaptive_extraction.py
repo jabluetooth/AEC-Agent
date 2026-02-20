@@ -1787,6 +1787,9 @@ async def hybrid_extract_all(
 
     all_entities: List[EntityToCreate] = []
 
+    # Get all Gemini entities once (used for text, dimensions, symbols, geometry fallback)
+    gemini_entities = await direct_extraction(analysis, calibration)
+
     # 1. Text extraction with OCR anchoring (NEW)
     if config.use_ocr_for_text_positions and image_path:
         try:
@@ -1821,7 +1824,6 @@ async def hybrid_extract_all(
                 )
             else:
                 # OCR not available, use Gemini positions
-                gemini_entities = await direct_extraction(analysis, calibration)
                 gemini_text = [
                     e for e in gemini_entities
                     if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
@@ -1834,7 +1836,6 @@ async def hybrid_extract_all(
         except Exception as e:
             logger.warning("ocr_text_anchoring_failed", error=str(e))
             # Fall back to Gemini positions
-            gemini_entities = await direct_extraction(analysis, calibration)
             gemini_text = [
                 e for e in gemini_entities
                 if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
@@ -1844,7 +1845,6 @@ async def hybrid_extract_all(
             result.ocr_text_fallback = len(gemini_text)
     else:
         # Original behavior: use Gemini's direct text extraction
-        gemini_entities = await direct_extraction(analysis, calibration)
         gemini_text = [
             e for e in gemini_entities
             if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
@@ -1854,9 +1854,8 @@ async def hybrid_extract_all(
         result.ocr_text_fallback = len(gemini_text)
 
     # 1b. Dimensions (always from Gemini)
-    gemini_entities_full = await direct_extraction(analysis, calibration) if 'gemini_entities' not in dir() else gemini_entities
     gemini_dims = [
-        e for e in gemini_entities_full
+        e for e in gemini_entities
         if e.entity_type in (EntityType.DIMENSION, "dimension")
     ]
     all_entities.extend(gemini_dims)

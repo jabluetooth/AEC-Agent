@@ -46,6 +46,7 @@
 - [x] **Hybrid Extraction Pipeline** (Gemini + OpenCV + YOLO fusion, 28 tests)
 - [x] **Gemini Refinement Pass** (snap to grid, connect endpoints, align parallel)
 - [x] **Line Type Detection** (continuous, dashed, dotted, center line detection)
+- [x] **OCR Text Anchoring** (Tesseract OCR for pixel-accurate text positions)
 
 ## Key Patterns
 - **Tool results:** Return `{"success": False, "error": {...}}` — never raise exceptions
