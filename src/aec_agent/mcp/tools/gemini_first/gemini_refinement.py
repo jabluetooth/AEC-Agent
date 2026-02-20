@@ -55,7 +55,7 @@ class RefinementConfig:
     # Thresholds
     snap_tolerance_px: float = 5.0  # Pixels - snap if within this distance
     connection_tolerance_px: float = 10.0  # Pixels - connect endpoints within
-    parallel_tolerance_deg: float = 2.0  # Degrees - consider parallel if within
+    parallel_tolerance_deg: float = 5.0  # Degrees - consider parallel if within (increased for aggressive straightening)
 
     # Limits
     max_entities_per_batch: int = 50  # Process in batches for large drawings

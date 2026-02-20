@@ -47,6 +47,11 @@
 - [x] **Gemini Refinement Pass** (snap to grid, connect endpoints, align parallel)
 - [x] **Line Type Detection** (continuous, dashed, dotted, center line detection)
 - [x] **OCR Text Anchoring** (Tesseract OCR for pixel-accurate text positions)
+- [x] **Arc/Fillet Detection** (OpenCV extract_arcs for partial circles, fillets)
+- [x] **PostgreSQL Storage** (Hybrid extraction stores semantic data for queries)
+- [x] **Line Straightening** (5° tolerance for aggressive alignment to H/V/45°)
+- [x] **Line Weight Support** (thickness from OpenCV passed through to AutoCAD)
+- [x] **Circle Detection Tuning** (param2=70 to reduce false positives)
 
 ## Key Patterns
 - **Tool results:** Return `{"success": False, "error": {...}}` — never raise exceptions

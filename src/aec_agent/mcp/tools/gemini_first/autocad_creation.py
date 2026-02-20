@@ -330,6 +330,11 @@ async def create_line_entity(
         if linetype and linetype != "Continuous":
             params["linetype"] = linetype
 
+        # Add lineweight/thickness if specified
+        thickness = props.get("thickness")
+        if thickness and thickness > 0:
+            params["lineweight"] = float(thickness)
+
         result = await call_command("draw_line", params)
 
         if result.get("success", False):

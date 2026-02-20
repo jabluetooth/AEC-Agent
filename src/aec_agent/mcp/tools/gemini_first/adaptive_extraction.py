@@ -1516,6 +1516,9 @@ async def hybrid_opencv_extraction(
                 # Map OpenCV line type to AutoCAD linetype
                 linetype = _map_line_type_to_autocad(line.line_type.value)
 
+                # Scale thickness from pixels to DWG units
+                thickness_dwg = calibration.scale_length(line.thickness) if line.thickness > 1.0 else 0.0
+
                 entities.append(EntityToCreate(
                     entity_type=EntityType.LINE,
                     layer=layer,
@@ -1523,6 +1526,7 @@ async def hybrid_opencv_extraction(
                         "start": start_dwg,
                         "end": end_dwg,
                         "linetype": linetype,
+                        "thickness": thickness_dwg,  # Lineweight from OpenCV
                     },
                     source=ExtractionSource.SELECTIVE_OPENCV,
                     confidence=line.confidence,
@@ -1557,6 +1561,38 @@ async def hybrid_opencv_extraction(
                     source=ExtractionSource.SELECTIVE_OPENCV,
                     confidence=circle.confidence,
                     source_element="opencv_circle",
+                ))
+
+        # Check for arcs (fillets, half-circles) - extract alongside circles
+        should_extract_arcs = (
+            _pattern_matches(patterns, "circles", "arcs", "fillets", "curves")
+        ) and config.use_opencv_for_circles  # Reuse circle flag for arcs
+
+        if should_extract_arcs:
+            arcs = extractor.extract_arcs(
+                roi=roi,
+                min_radius=config.opencv_circle_min_radius,
+                max_radius=config.opencv_circle_max_radius,
+            )
+
+            for arc in arcs:
+                center_dwg = calibration.to_dwg(*arc.center)
+                radius_dwg = calibration.scale_length(arc.radius)
+
+                layer = _infer_layer_for_region(region, "arc", analysis)
+
+                entities.append(EntityToCreate(
+                    entity_type=EntityType.ARC,
+                    layer=layer,
+                    properties={
+                        "center": center_dwg,
+                        "radius": radius_dwg,
+                        "start_angle": arc.start_angle,
+                        "end_angle": arc.end_angle,
+                    },
+                    source=ExtractionSource.SELECTIVE_OPENCV,
+                    confidence=arc.confidence,
+                    source_element="opencv_arc",
                 ))
 
     # Count line types for logging

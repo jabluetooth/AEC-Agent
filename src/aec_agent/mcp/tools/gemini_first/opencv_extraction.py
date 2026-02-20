@@ -444,13 +444,15 @@ class OpenCVExtractor:
         blurred = cv2.GaussianBlur(cropped, (5, 5), 0)
 
         # Detect circles
+        # param2 controls accumulator threshold - higher = fewer false positives
+        # Increased to 70 to reduce excessive circle detection
         circles = cv2.HoughCircles(
             blurred,
             cv2.HOUGH_GRADIENT,
             dp=1,
             minDist=min_dist,
             param1=50,
-            param2=50,  # Lowered from 80 to catch more circles (original was 30)
+            param2=70,  # Higher threshold to reduce false positives (was 50)
             minRadius=min_radius,
             maxRadius=max_radius,
         )
@@ -759,6 +761,145 @@ class OpenCVExtractor:
 
         return LineType.CONTINUOUS
 
+    def extract_arcs(
+        self,
+        roi: Optional[Tuple[int, int, int, int]] = None,
+        min_arc_length: int = 20,
+        min_radius: int = 10,
+        max_radius: int = 500,
+        arc_angle_threshold: float = 30.0,
+    ) -> List[ExtractedArc]:
+        """
+        Extract arcs (partial circles) using contour analysis and ellipse fitting.
+
+        Detects fillets, half-circles, quarter-circles, and other arc segments
+        by analyzing contours that have circular curvature but don't form
+        complete circles.
+
+        Args:
+            roi: Optional region of interest (x1, y1, x2, y2)
+            min_arc_length: Minimum arc length in pixels
+            min_radius: Minimum arc radius
+            max_radius: Maximum arc radius
+            arc_angle_threshold: Minimum arc angle span in degrees to be considered an arc
+
+        Returns:
+            List of ExtractedArc
+        """
+        cropped, offset_x, offset_y = self._get_roi(self.binary, roi)
+
+        if cropped.size == 0:
+            return []
+
+        # Find contours
+        contours, _ = cv2.findContours(
+            cropped,
+            cv2.RETR_LIST,
+            cv2.CHAIN_APPROX_NONE,  # Get all points for accurate arc detection
+        )
+
+        extracted: List[ExtractedArc] = []
+
+        for contour in contours:
+            # Need at least 5 points for ellipse fitting
+            if len(contour) < 5:
+                continue
+
+            # Calculate contour arc length
+            arc_length = cv2.arcLength(contour, closed=False)
+            if arc_length < min_arc_length:
+                continue
+
+            # Calculate area to determine if it's closed (full circle) or open (arc)
+            area = cv2.contourArea(contour)
+
+            # Fit ellipse to the contour
+            try:
+                ellipse = cv2.fitEllipse(contour)
+                (center_x, center_y), (axis_a, axis_b), angle = ellipse
+
+                # Calculate average radius
+                radius = (axis_a + axis_b) / 4  # Divided by 4 because axes are diameters
+
+                # Skip if radius outside bounds
+                if radius < min_radius or radius > max_radius:
+                    continue
+
+                # Check circularity - for arcs, the aspect ratio should be reasonable
+                aspect_ratio = min(axis_a, axis_b) / max(axis_a, axis_b) if max(axis_a, axis_b) > 0 else 0
+
+                # Skip highly elongated shapes (not circular)
+                if aspect_ratio < 0.5:
+                    continue
+
+                # Calculate the expected area for a full circle
+                full_circle_area = np.pi * radius * radius
+
+                # If area is close to full circle, it's a circle, not an arc
+                area_ratio = area / full_circle_area if full_circle_area > 0 else 0
+
+                # Arcs have area ratio between 0.1 and 0.9 (not too small, not full circle)
+                # Small area ratio indicates an arc, not a closed circle
+                if 0.05 < area_ratio < 0.85:
+                    # Calculate arc angles by analyzing contour points
+                    points = contour.reshape(-1, 2)
+
+                    # Calculate angles from center for each point
+                    angles = np.arctan2(
+                        points[:, 1] - center_y,
+                        points[:, 0] - center_x
+                    )
+                    angles_deg = np.degrees(angles)
+
+                    # Normalize to 0-360
+                    angles_deg = (angles_deg + 360) % 360
+
+                    # Find the angular span
+                    min_angle = np.min(angles_deg)
+                    max_angle = np.max(angles_deg)
+
+                    # Handle wraparound at 0/360 degrees
+                    angle_span = max_angle - min_angle
+                    if angle_span > 180:
+                        # Wraps around 0 degrees
+                        sorted_angles = np.sort(angles_deg)
+                        gaps = np.diff(sorted_angles)
+                        largest_gap_idx = np.argmax(gaps)
+                        start_angle = sorted_angles[largest_gap_idx + 1] if largest_gap_idx + 1 < len(sorted_angles) else sorted_angles[0]
+                        end_angle = sorted_angles[largest_gap_idx]
+                    else:
+                        start_angle = min_angle
+                        end_angle = max_angle
+
+                    actual_span = (end_angle - start_angle) % 360
+                    if actual_span > 180:
+                        actual_span = 360 - actual_span
+
+                    # Skip very small arcs
+                    if actual_span < arc_angle_threshold:
+                        continue
+
+                    # Skip nearly complete circles (>300 degrees)
+                    if actual_span > 300:
+                        continue
+
+                    extracted.append(
+                        ExtractedArc(
+                            center=(float(center_x + offset_x), float(center_y + offset_y)),
+                            radius=float(radius),
+                            start_angle=float(start_angle),
+                            end_angle=float(end_angle),
+                            confidence=float(aspect_ratio * 0.9),  # Higher aspect ratio = more circular = higher confidence
+                        )
+                    )
+
+            except cv2.error:
+                # Ellipse fitting can fail for some contours
+                continue
+
+        logger.debug("arcs_extracted", count=len(extracted), roi=roi)
+        return extracted
+
     def extract_all(
         self,
         roi: Optional[Tuple[int, int, int, int]] = None,
@@ -792,6 +933,9 @@ class OpenCVExtractor:
         # Extract circles
         result.circles = self.extract_circles(roi)
 
+        # Extract arcs (partial circles, fillets)
+        result.arcs = self.extract_arcs(roi)
+
         # Extract contours
         result.contours = self.extract_contours(roi)
 
@@ -802,6 +946,7 @@ class OpenCVExtractor:
             "opencv_extraction_complete",
             lines=len(result.lines),
             circles=len(result.circles),
+            arcs=len(result.arcs),
             contours=len(result.contours),
             polylines=len(result.polylines),
             total=result.total_elements,
