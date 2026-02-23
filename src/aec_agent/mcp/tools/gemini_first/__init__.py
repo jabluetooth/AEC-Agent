@@ -221,6 +221,10 @@ from .adaptive_extraction import (
     hybrid_extract_all,
     hybrid_opencv_extraction,
     hybrid_yolo_extraction,
+    # Draftsman-like cleanup
+    DraftCleanupConfig,
+    CleanupStatistics,
+    clean_entities_like_draftsman,
 )
 
 # Phase 4b: OpenCV Extraction Utilities
@@ -389,6 +393,10 @@ __all__ = [
     "hybrid_extract_all",
     "hybrid_opencv_extraction",
     "hybrid_yolo_extraction",
+    # Phase 4: Draftsman-like cleanup
+    "DraftCleanupConfig",
+    "CleanupStatistics",
+    "clean_entities_like_draftsman",
     # Phase 4b: OpenCV extraction utilities
     "OpenCVExtractor",
     "OpenCVExtractionResult",

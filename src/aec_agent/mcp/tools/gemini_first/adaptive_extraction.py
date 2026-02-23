@@ -1200,6 +1200,48 @@ def get_required_blocks(result: ExtractionResult) -> List[str]:
 # =============================================================================
 
 @dataclass
+class DraftCleanupConfig:
+    """
+    Configuration for draftsman-like cleanup of extracted entities.
+
+    Controls which cleanup operations to apply and their thresholds.
+    Like a draftsman reviewing a tracing, this removes noise and
+    incomplete elements.
+    """
+    # Enable/disable cleanup
+    enabled: bool = True
+
+    # Short segment removal (noise)
+    remove_short_segments: bool = True
+    min_line_length_px: float = 15.0  # Minimum line length in pixels
+    min_arc_length_deg: float = 15.0  # Minimum arc span in degrees
+
+    # Text intersection removal
+    remove_lines_through_text: bool = True
+    text_intersection_threshold: float = 0.3  # Max % of line that can cross text
+
+    # Incomplete curve cleanup
+    remove_incomplete_curves: bool = True
+    min_arc_completeness: float = 0.15  # Min arc as fraction of full circle (15%)
+
+    # Duplicate removal (stricter than merge)
+    remove_near_duplicates: bool = True
+    duplicate_distance_threshold: float = 3.0  # Pixels
+
+    # Confidence filtering
+    filter_low_confidence: bool = True
+    min_confidence_threshold: float = 0.3
+
+    # Isolated point removal
+    remove_isolated_circles: bool = False  # Very small circles (dots/noise)
+    max_isolated_circle_radius: float = 2.0  # Pixels
+
+    # Edge artifact removal
+    remove_edge_artifacts: bool = True
+    edge_margin_px: int = 5  # Distance from image edge
+
+
+@dataclass
 class HybridExtractionConfig:
     """Configuration for hybrid extraction pipeline."""
     # Strategy selection
@@ -1240,12 +1282,19 @@ class HybridExtractionConfig:
     max_validation_iterations: int = 2
 
     # Masking parameters for OpenCV (to exclude text/symbols from line detection)
-    text_mask_half_width: int = 40  # Half-width of text masking rectangle
-    text_mask_half_height: int = 10  # Half-height of text masking rectangle
-    symbol_mask_half_size: int = 25  # Half-size of symbol masking square
+    # Increased defaults for better text masking
+    text_mask_padding: int = 8  # Extra padding around text bounding box
+    text_mask_char_width: int = 8  # Estimated width per character in pixels
+    text_mask_min_width: int = 20  # Minimum mask width
+    text_mask_min_height: int = 16  # Minimum mask height
+    symbol_mask_half_size: int = 30  # Half-size of symbol masking square
+    symbol_mask_padding: int = 5  # Extra padding around symbols
 
     # Default DPI when calibration doesn't provide one
     default_dpi: int = 300
+
+    # Draftsman-like cleanup (NEW)
+    draft_cleanup: DraftCleanupConfig = field(default_factory=DraftCleanupConfig)
 
 
 def _get_dpi(calibration: ScaleCalibration, config: Optional["HybridExtractionConfig"] = None) -> int:
@@ -1290,6 +1339,10 @@ class HybridExtractionResult(ExtractionResult):
     lines_snapped: int = 0
     lines_aligned: int = 0
 
+    # Draftsman cleanup statistics (NEW)
+    cleanup_applied: bool = False
+    cleanup_stats: Optional[CleanupStatistics] = None
+
     # Validation results
     validation_passed: bool = False
     validation_accuracy: float = 0.0
@@ -1311,10 +1364,23 @@ class HybridExtractionResult(ExtractionResult):
             "endpoints_connected": self.endpoints_connected,
             "lines_snapped": self.lines_snapped,
             "lines_aligned": self.lines_aligned,
+            "cleanup_applied": self.cleanup_applied,
             "validation_passed": self.validation_passed,
             "validation_accuracy": self.validation_accuracy,
             "corrections_applied": self.corrections_applied,
         }
+        # Add cleanup details if available
+        if self.cleanup_stats:
+            base["cleanup_statistics"] = {
+                "short_segments_removed": self.cleanup_stats.short_segments_removed,
+                "text_intersections_removed": self.cleanup_stats.text_intersections_removed,
+                "incomplete_curves_removed": self.cleanup_stats.incomplete_curves_removed,
+                "duplicates_removed": self.cleanup_stats.duplicates_removed,
+                "low_confidence_removed": self.cleanup_stats.low_confidence_removed,
+                "edge_artifacts_removed": self.cleanup_stats.edge_artifacts_removed,
+                "total_removed": self.cleanup_stats.total_removed,
+                "total_kept": self.cleanup_stats.total_kept,
+            }
         return base
 
 
@@ -1418,46 +1484,85 @@ async def hybrid_opencv_extraction(
         return entities
 
     # =================================================================
-    # NEW STEP: Mask out text and symbols to prevent noise
+    # IMPROVED: Mask out text and symbols to prevent noise
+    # Calculate proper bounding boxes from text content and height
     # =================================================================
-    # Work on a copy of the image to avoid modifying the original
     import cv2
     processed_image = image.copy()
-    
+    height, width = processed_image.shape[:2]
+
+    text_regions_masked = 0
+    symbol_regions_masked = 0
+
     # Mask text regions (white rectangle over text)
+    # This prevents OpenCV from detecting text characters as lines
     if hasattr(analysis, 'elements') and hasattr(analysis.elements, 'text'):
         for text in analysis.elements.text:
-            # Try to get bounding box 
-            if hasattr(text, 'bounding_box') and text.bounding_box:
-                x1, y1, x2, y2 = text.bounding_box
-                # Draw white filled rectangle
-                cv2.rectangle(processed_image, (int(x1), int(y1)), (int(x2), int(y2)), (255, 255, 255), -1)
-            elif hasattr(text, 'position'):
-                # Fallback to configurable size around position
-                cx, cy = text.position
-                half_w = config.text_mask_half_width
-                half_h = config.text_mask_half_height
-                x1, y1 = int(cx - half_w), int(cy - half_h)
-                x2, y2 = int(cx + half_w), int(cy + half_h)
+            if not hasattr(text, 'position'):
+                continue
+
+            cx, cy = text.position
+
+            # Calculate bounding box from text content and height
+            text_height = getattr(text, 'height_px', 12)
+            text_content = getattr(text, 'content', '')
+
+            # Estimate width based on character count and height
+            # Average char width is roughly 0.6 * height for most fonts
+            char_width = max(config.text_mask_char_width, int(text_height * 0.6))
+            estimated_width = max(
+                config.text_mask_min_width,
+                len(text_content) * char_width
+            )
+
+            # Use text height with minimum
+            estimated_height = max(config.text_mask_min_height, int(text_height * 1.5))
+
+            # Add padding
+            padding = config.text_mask_padding
+            half_w = (estimated_width // 2) + padding
+            half_h = (estimated_height // 2) + padding
+
+            # Calculate bounds (position is typically at baseline-left or center)
+            # Assume position is at center-left of text
+            x1 = int(cx - padding)
+            y1 = int(cy - half_h)
+            x2 = int(cx + estimated_width + padding)
+            y2 = int(cy + half_h)
+
+            # Clamp to image bounds
+            x1 = max(0, min(x1, width - 1))
+            y1 = max(0, min(y1, height - 1))
+            x2 = max(0, min(x2, width))
+            y2 = max(0, min(y2, height))
+
+            if x2 > x1 and y2 > y1:
                 cv2.rectangle(processed_image, (x1, y1), (x2, y2), (255, 255, 255), -1)
+                text_regions_masked += 1
 
     # Mask symbol regions (white rectangle over symbols)
     if hasattr(analysis, 'elements') and hasattr(analysis.elements, 'symbols'):
         for symbol in analysis.elements.symbols:
-            if hasattr(symbol, 'bounding_box') and symbol.bounding_box:
-                x1, y1, x2, y2 = symbol.bounding_box
-                cv2.rectangle(processed_image, (int(x1), int(y1)), (int(x2), int(y2)), (255, 255, 255), -1)
-            elif hasattr(symbol, 'position'):
-                # Use configurable size if bounds not available
-                cx, cy = symbol.position
-                half_size = config.symbol_mask_half_size
+            if not hasattr(symbol, 'position'):
+                continue
 
-                x1 = int(cx - half_size)
-                y1 = int(cy - half_size)
-                x2 = int(cx + half_size)
-                y2 = int(cy + half_size)
+            cx, cy = symbol.position
+            half_size = config.symbol_mask_half_size + config.symbol_mask_padding
 
+            x1 = max(0, int(cx - half_size))
+            y1 = max(0, int(cy - half_size))
+            x2 = min(width, int(cx + half_size))
+            y2 = min(height, int(cy + half_size))
+
+            if x2 > x1 and y2 > y1:
                 cv2.rectangle(processed_image, (x1, y1), (x2, y2), (255, 255, 255), -1)
+                symbol_regions_masked += 1
+
+    logger.debug(
+        "opencv_masking_applied",
+        text_regions_masked=text_regions_masked,
+        symbol_regions_masked=symbol_regions_masked,
+    )
 
     height, width = processed_image.shape[:2]
     extractor = OpenCVExtractor(processed_image, dpi=_get_dpi(calibration, config))
@@ -1980,6 +2085,565 @@ def _merge_circles(
     return kept, removed
 
 
+# =============================================================================
+# DRAFTSMAN-LIKE CLEANUP FUNCTIONS
+# =============================================================================
+
+@dataclass
+class CleanupStatistics:
+    """Statistics from draftsman cleanup operations."""
+    short_segments_removed: int = 0
+    text_intersections_removed: int = 0
+    incomplete_curves_removed: int = 0
+    duplicates_removed: int = 0
+    low_confidence_removed: int = 0
+    edge_artifacts_removed: int = 0
+    isolated_circles_removed: int = 0
+    total_removed: int = 0
+    total_kept: int = 0
+
+
+def _calculate_text_bounding_boxes(
+    analysis: "DrawingAnalysis",
+    config: "HybridExtractionConfig",
+) -> List[Tuple[int, int, int, int]]:
+    """
+    Calculate bounding boxes for all text elements.
+
+    Args:
+        analysis: Drawing analysis containing text elements
+        config: Configuration with text sizing parameters
+
+    Returns:
+        List of (x1, y1, x2, y2) bounding boxes in pixels
+    """
+    boxes: List[Tuple[int, int, int, int]] = []
+
+    if not hasattr(analysis, 'elements') or not hasattr(analysis.elements, 'text'):
+        return boxes
+
+    for text in analysis.elements.text:
+        if not hasattr(text, 'position'):
+            continue
+
+        cx, cy = text.position
+        text_height = getattr(text, 'height_px', 12)
+        text_content = getattr(text, 'content', '')
+
+        # Estimate dimensions
+        char_width = max(config.text_mask_char_width, int(text_height * 0.6))
+        estimated_width = max(
+            config.text_mask_min_width,
+            len(text_content) * char_width
+        )
+        estimated_height = max(config.text_mask_min_height, int(text_height * 1.5))
+
+        padding = config.text_mask_padding
+        x1 = int(cx - padding)
+        y1 = int(cy - estimated_height // 2 - padding)
+        x2 = int(cx + estimated_width + padding)
+        y2 = int(cy + estimated_height // 2 + padding)
+
+        boxes.append((x1, y1, x2, y2))
+
+    return boxes
+
+
+def _line_intersects_box(
+    start: Tuple[float, float],
+    end: Tuple[float, float],
+    box: Tuple[int, int, int, int],
+) -> float:
+    """
+    Calculate what fraction of a line segment passes through a bounding box.
+
+    Uses Liang-Barsky algorithm for line-box intersection.
+
+    Args:
+        start: Line start point (x, y)
+        end: Line end point (x, y)
+        box: Bounding box (x1, y1, x2, y2)
+
+    Returns:
+        Fraction of line inside the box (0.0 to 1.0)
+    """
+    x1, y1, x2, y2 = box
+    sx, sy = start
+    ex, ey = end
+
+    dx = ex - sx
+    dy = ey - sy
+
+    # Check if line is completely outside box (quick reject)
+    if max(sx, ex) < x1 or min(sx, ex) > x2:
+        return 0.0
+    if max(sy, ey) < y1 or min(sy, ey) > y2:
+        return 0.0
+
+    # Liang-Barsky parameters
+    p = [-dx, dx, -dy, dy]
+    q = [sx - x1, x2 - sx, sy - y1, y2 - sy]
+
+    t0, t1 = 0.0, 1.0
+
+    for i in range(4):
+        if p[i] == 0:
+            if q[i] < 0:
+                return 0.0  # Line parallel and outside
+        else:
+            t = q[i] / p[i]
+            if p[i] < 0:
+                t0 = max(t0, t)
+            else:
+                t1 = min(t1, t)
+
+    if t0 > t1:
+        return 0.0
+
+    # Return fraction of line inside box
+    return t1 - t0
+
+
+def _remove_short_segments(
+    entities: List[EntityToCreate],
+    min_line_length: float,
+    min_arc_span: float,
+    calibration: "ScaleCalibration",
+) -> Tuple[List[EntityToCreate], int]:
+    """
+    Remove line segments and arcs that are too short (likely noise).
+
+    Args:
+        entities: List of entities to filter
+        min_line_length: Minimum line length in pixels
+        min_arc_span: Minimum arc span in degrees
+        calibration: For converting DWG units back to pixels
+
+    Returns:
+        Tuple of (filtered entities, count removed)
+    """
+    kept: List[EntityToCreate] = []
+    removed = 0
+
+    for entity in entities:
+        etype = entity.entity_type
+        if isinstance(etype, EntityType):
+            etype = etype.value
+
+        if etype == "line":
+            props = entity.properties
+            start = np.array(props.get("start", (0, 0)))
+            end = np.array(props.get("end", (0, 0)))
+            length_dwg = float(np.linalg.norm(end - start))
+
+            # Convert back to pixels for comparison
+            # Use inverse of scale_length
+            if hasattr(calibration, 'pixels_per_unit') and calibration.pixels_per_unit:
+                length_px = length_dwg * calibration.pixels_per_unit
+            else:
+                length_px = length_dwg * 10  # Rough estimate
+
+            if length_px >= min_line_length:
+                kept.append(entity)
+            else:
+                removed += 1
+
+        elif etype == "arc":
+            props = entity.properties
+            start_angle = props.get("start_angle", 0)
+            end_angle = props.get("end_angle", 0)
+
+            # Calculate arc span
+            span = abs(end_angle - start_angle)
+            if span > 180:
+                span = 360 - span
+
+            if span >= min_arc_span:
+                kept.append(entity)
+            else:
+                removed += 1
+
+        else:
+            # Keep all other entity types
+            kept.append(entity)
+
+    return kept, removed
+
+
+def _remove_lines_through_text(
+    entities: List[EntityToCreate],
+    text_boxes: List[Tuple[int, int, int, int]],
+    threshold: float,
+    calibration: "ScaleCalibration",
+) -> Tuple[List[EntityToCreate], int]:
+    """
+    Remove lines that pass through text regions.
+
+    A draftsman wouldn't draw lines through text - these are likely
+    detection artifacts from text characters.
+
+    Args:
+        entities: List of entities to filter
+        text_boxes: List of text bounding boxes in pixels
+        threshold: Maximum fraction of line that can intersect text
+        calibration: For coordinate conversion
+
+    Returns:
+        Tuple of (filtered entities, count removed)
+    """
+    if not text_boxes:
+        return entities, 0
+
+    kept: List[EntityToCreate] = []
+    removed = 0
+
+    for entity in entities:
+        etype = entity.entity_type
+        if isinstance(etype, EntityType):
+            etype = etype.value
+
+        if etype == "line":
+            props = entity.properties
+            start_dwg = props.get("start", (0, 0))
+            end_dwg = props.get("end", (0, 0))
+
+            # Convert DWG coordinates back to pixels
+            # This is approximate - we use inverse transform
+            if hasattr(calibration, 'from_dwg'):
+                start_px = calibration.from_dwg(*start_dwg)
+                end_px = calibration.from_dwg(*end_dwg)
+            else:
+                # Fallback: assume 1:1 if no inverse available
+                start_px = start_dwg
+                end_px = end_dwg
+
+            # Check intersection with each text box
+            max_intersection = 0.0
+            for box in text_boxes:
+                intersection = _line_intersects_box(start_px, end_px, box)
+                max_intersection = max(max_intersection, intersection)
+
+            if max_intersection <= threshold:
+                kept.append(entity)
+            else:
+                removed += 1
+        else:
+            kept.append(entity)
+
+    return kept, removed
+
+
+def _remove_incomplete_curves(
+    entities: List[EntityToCreate],
+    min_completeness: float,
+) -> Tuple[List[EntityToCreate], int]:
+    """
+    Remove arcs that are too small a fraction of a complete circle.
+
+    Very small arcs are often noise from corner detection or text.
+
+    Args:
+        entities: List of entities to filter
+        min_completeness: Minimum arc as fraction of 360 degrees
+
+    Returns:
+        Tuple of (filtered entities, count removed)
+    """
+    kept: List[EntityToCreate] = []
+    removed = 0
+
+    min_span = min_completeness * 360.0  # Convert to degrees
+
+    for entity in entities:
+        etype = entity.entity_type
+        if isinstance(etype, EntityType):
+            etype = etype.value
+
+        if etype == "arc":
+            props = entity.properties
+            start_angle = props.get("start_angle", 0)
+            end_angle = props.get("end_angle", 0)
+
+            span = abs(end_angle - start_angle)
+            if span > 180:
+                span = 360 - span
+
+            if span >= min_span:
+                kept.append(entity)
+            else:
+                removed += 1
+        else:
+            kept.append(entity)
+
+    return kept, removed
+
+
+def _remove_low_confidence(
+    entities: List[EntityToCreate],
+    min_confidence: float,
+) -> Tuple[List[EntityToCreate], int]:
+    """
+    Remove entities with confidence below threshold.
+
+    Args:
+        entities: List of entities to filter
+        min_confidence: Minimum confidence threshold (0.0 to 1.0)
+
+    Returns:
+        Tuple of (filtered entities, count removed)
+    """
+    kept: List[EntityToCreate] = []
+    removed = 0
+
+    for entity in entities:
+        if entity.confidence >= min_confidence:
+            kept.append(entity)
+        else:
+            removed += 1
+
+    return kept, removed
+
+
+def _remove_edge_artifacts(
+    entities: List[EntityToCreate],
+    image_size: Tuple[int, int],
+    margin: int,
+    calibration: "ScaleCalibration",
+) -> Tuple[List[EntityToCreate], int]:
+    """
+    Remove entities that are at the edge of the image (likely artifacts).
+
+    Args:
+        entities: List of entities to filter
+        image_size: (width, height) of the source image
+        margin: Pixel distance from edge to consider as artifact
+        calibration: For coordinate conversion
+
+    Returns:
+        Tuple of (filtered entities, count removed)
+    """
+    width, height = image_size
+    kept: List[EntityToCreate] = []
+    removed = 0
+
+    for entity in entities:
+        etype = entity.entity_type
+        if isinstance(etype, EntityType):
+            etype = etype.value
+
+        props = entity.properties
+        is_edge_artifact = False
+
+        if etype == "line":
+            start = props.get("start", (0, 0))
+            end = props.get("end", (0, 0))
+
+            # Convert to pixels
+            if hasattr(calibration, 'from_dwg'):
+                start_px = calibration.from_dwg(*start)
+                end_px = calibration.from_dwg(*end)
+            else:
+                start_px, end_px = start, end
+
+            # Check if both endpoints are near edge
+            start_near_edge = (
+                start_px[0] < margin or start_px[0] > width - margin or
+                start_px[1] < margin or start_px[1] > height - margin
+            )
+            end_near_edge = (
+                end_px[0] < margin or end_px[0] > width - margin or
+                end_px[1] < margin or end_px[1] > height - margin
+            )
+
+            # Only remove if BOTH endpoints are near edge (border line)
+            is_edge_artifact = start_near_edge and end_near_edge
+
+        elif etype == "circle":
+            center = props.get("center", (0, 0))
+            radius = props.get("radius", 0)
+
+            if hasattr(calibration, 'from_dwg'):
+                center_px = calibration.from_dwg(*center)
+            else:
+                center_px = center
+
+            # Check if circle touches edge
+            is_edge_artifact = (
+                center_px[0] - radius < margin or
+                center_px[0] + radius > width - margin or
+                center_px[1] - radius < margin or
+                center_px[1] + radius > height - margin
+            )
+
+        if not is_edge_artifact:
+            kept.append(entity)
+        else:
+            removed += 1
+
+    return kept, removed
+
+
+def _remove_isolated_small_circles(
+    entities: List[EntityToCreate],
+    max_radius: float,
+    calibration: "ScaleCalibration",
+) -> Tuple[List[EntityToCreate], int]:
+    """
+    Remove very small circles that are likely noise (dots, specks).
+
+    Args:
+        entities: List of entities to filter
+        max_radius: Maximum radius in pixels to consider as isolated
+        calibration: For coordinate conversion
+
+    Returns:
+        Tuple of (filtered entities, count removed)
+    """
+    kept: List[EntityToCreate] = []
+    removed = 0
+
+    for entity in entities:
+        etype = entity.entity_type
+        if isinstance(etype, EntityType):
+            etype = etype.value
+
+        if etype == "circle":
+            radius_dwg = entity.properties.get("radius", 0)
+
+            # Convert to pixels
+            if hasattr(calibration, 'pixels_per_unit') and calibration.pixels_per_unit:
+                radius_px = radius_dwg * calibration.pixels_per_unit
+            else:
+                radius_px = radius_dwg * 10
+
+            if radius_px > max_radius:
+                kept.append(entity)
+            else:
+                removed += 1
+        else:
+            kept.append(entity)
+
+    return kept, removed
+
+
+def clean_entities_like_draftsman(
+    entities: List[EntityToCreate],
+    analysis: "DrawingAnalysis",
+    calibration: "ScaleCalibration",
+    config: "HybridExtractionConfig",
+    image_size: Optional[Tuple[int, int]] = None,
+) -> Tuple[List[EntityToCreate], CleanupStatistics]:
+    """
+    Clean extracted entities like a draftsman would review a tracing.
+
+    Removes noise, artifacts, incomplete curves, and lines through text.
+    This produces cleaner output suitable for AutoCAD creation.
+
+    Args:
+        entities: List of extracted entities
+        analysis: Drawing analysis for text regions
+        calibration: Coordinate calibration
+        config: Hybrid extraction configuration
+        image_size: Optional (width, height) for edge artifact removal
+
+    Returns:
+        Tuple of (cleaned entities, cleanup statistics)
+
+    Example:
+        >>> cleaned, stats = clean_entities_like_draftsman(
+        ...     entities, analysis, calibration, config
+        ... )
+        >>> print(f"Removed {stats.total_removed} artifacts")
+    """
+    stats = CleanupStatistics()
+    cleanup_config = config.draft_cleanup
+
+    if not cleanup_config.enabled:
+        stats.total_kept = len(entities)
+        return entities, stats
+
+    current = entities
+
+    # 1. Remove short segments (noise)
+    if cleanup_config.remove_short_segments:
+        current, count = _remove_short_segments(
+            current,
+            cleanup_config.min_line_length_px,
+            cleanup_config.min_arc_length_deg,
+            calibration,
+        )
+        stats.short_segments_removed = count
+
+    # 2. Remove lines through text
+    if cleanup_config.remove_lines_through_text:
+        text_boxes = _calculate_text_bounding_boxes(analysis, config)
+        current, count = _remove_lines_through_text(
+            current,
+            text_boxes,
+            cleanup_config.text_intersection_threshold,
+            calibration,
+        )
+        stats.text_intersections_removed = count
+
+    # 3. Remove incomplete curves
+    if cleanup_config.remove_incomplete_curves:
+        current, count = _remove_incomplete_curves(
+            current,
+            cleanup_config.min_arc_completeness,
+        )
+        stats.incomplete_curves_removed = count
+
+    # 4. Filter low confidence
+    if cleanup_config.filter_low_confidence:
+        current, count = _remove_low_confidence(
+            current,
+            cleanup_config.min_confidence_threshold,
+        )
+        stats.low_confidence_removed = count
+
+    # 5. Remove edge artifacts
+    if cleanup_config.remove_edge_artifacts and image_size:
+        current, count = _remove_edge_artifacts(
+            current,
+            image_size,
+            cleanup_config.edge_margin_px,
+            calibration,
+        )
+        stats.edge_artifacts_removed = count
+
+    # 6. Remove isolated small circles
+    if cleanup_config.remove_isolated_circles:
+        current, count = _remove_isolated_small_circles(
+            current,
+            cleanup_config.max_isolated_circle_radius,
+            calibration,
+        )
+        stats.isolated_circles_removed = count
+
+    stats.total_removed = (
+        stats.short_segments_removed +
+        stats.text_intersections_removed +
+        stats.incomplete_curves_removed +
+        stats.low_confidence_removed +
+        stats.edge_artifacts_removed +
+        stats.isolated_circles_removed
+    )
+    stats.total_kept = len(current)
+
+    logger.info(
+        "draftsman_cleanup_complete",
+        short_segments_removed=stats.short_segments_removed,
+        text_intersections_removed=stats.text_intersections_removed,
+        incomplete_curves_removed=stats.incomplete_curves_removed,
+        low_confidence_removed=stats.low_confidence_removed,
+        edge_artifacts_removed=stats.edge_artifacts_removed,
+        total_removed=stats.total_removed,
+        total_kept=stats.total_kept,
+    )
+
+    return current, stats
+
+
 @dataclass
 class _TextExtractionResult:
     """Result of text extraction with OCR anchoring."""
@@ -2188,7 +2852,7 @@ async def hybrid_extract_all(
     result.duplicates_merged = duplicates
     result.direct_count = result.gemini_entities
 
-    # 5. Gemini Refinement Pass (NEW)
+    # 5. Gemini Refinement Pass
     if config.enable_refinement and result.entities:
         try:
             from .gemini_refinement import refine_entities_with_gemini, RefinementConfig
@@ -2224,6 +2888,32 @@ async def hybrid_extract_all(
             logger.warning("refinement_pass_failed", error=str(e))
             result.refinement_applied = False
 
+    # 6. Draftsman-like cleanup (remove noise, artifacts, incomplete curves)
+    if config.draft_cleanup.enabled and result.entities:
+        # Get image size for edge artifact detection
+        image_size: Optional[Tuple[int, int]] = None
+        if image is not None:
+            image_size = (image.shape[1], image.shape[0])  # (width, height)
+
+        cleaned_entities, cleanup_stats = clean_entities_like_draftsman(
+            entities=result.entities,
+            analysis=analysis,
+            calibration=calibration,
+            config=config,
+            image_size=image_size,
+        )
+
+        result.entities = cleaned_entities
+        result.cleanup_applied = True
+        result.cleanup_stats = cleanup_stats
+
+        logger.info(
+            "draftsman_cleanup_applied",
+            entities_before=cleanup_stats.total_kept + cleanup_stats.total_removed,
+            entities_after=cleanup_stats.total_kept,
+            total_removed=cleanup_stats.total_removed,
+        )
+
     logger.info(
         "hybrid_extraction_complete",
         gemini_entities=result.gemini_entities,
@@ -2231,6 +2921,7 @@ async def hybrid_extract_all(
         yolo_entities=result.yolo_entities,
         duplicates_merged=result.duplicates_merged,
         refinement_adjustments=result.refinement_adjustments,
+        cleanup_applied=result.cleanup_applied,
         total_entities=len(result.entities),
     )
 
