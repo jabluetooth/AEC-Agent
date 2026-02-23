@@ -267,6 +267,48 @@ from .ocr_text_anchoring import (
     TESSERACT_AVAILABLE,
 )
 
+# Phase A: Advanced Preprocessing (NEW - from VECTORIZATION_IMPROVEMENT_ROADMAP)
+from .binarization import (
+    BinarizationMethod,
+    BinarizationConfig,
+    BinarizationResult,
+    ensemble_binarize,
+    quick_binarize,
+    fast_binarize,
+    binarize_otsu,
+    binarize_adaptive_gaussian,
+    binarize_sauvola,
+    binarize_niblack,
+)
+
+from .preprocessing import (
+    SkewDetectionMethod,
+    DeskewConfig,
+    DeskewResult,
+    PreprocessingConfig,
+    PreprocessingResult,
+    deskew,
+    quick_deskew,
+    preprocess_image,
+    quick_preprocess,
+    denoise,
+    enhance_contrast,
+    remove_borders,
+)
+
+from .simplification import (
+    SimplificationMethod,
+    SimplificationConfig,
+    SimplificationResult,
+    simplify_line,
+    simplify_polygon,
+    simplify_entities,
+    rdp_simplify,
+    visvalingam_simplify,
+    quick_simplify_rdp,
+    quick_simplify_visvalingam,
+)
+
 # Phase 5: AutoCAD Entity Creation
 from .autocad_creation import (
     EntityCreationResult,
@@ -428,6 +470,41 @@ __all__ = [
     "anchor_text_positions",
     "is_ocr_available",
     "TESSERACT_AVAILABLE",
+    # Phase A: Binarization (ensemble pixel voting)
+    "BinarizationMethod",
+    "BinarizationConfig",
+    "BinarizationResult",
+    "ensemble_binarize",
+    "quick_binarize",
+    "fast_binarize",
+    "binarize_otsu",
+    "binarize_adaptive_gaussian",
+    "binarize_sauvola",
+    "binarize_niblack",
+    # Phase A: Preprocessing (deskewing, denoising)
+    "SkewDetectionMethod",
+    "DeskewConfig",
+    "DeskewResult",
+    "PreprocessingConfig",
+    "PreprocessingResult",
+    "deskew",
+    "quick_deskew",
+    "preprocess_image",
+    "quick_preprocess",
+    "denoise",
+    "enhance_contrast",
+    "remove_borders",
+    # Phase A: Line Simplification (RDP, Visvalingam-Whyatt)
+    "SimplificationMethod",
+    "SimplificationConfig",
+    "SimplificationResult",
+    "simplify_line",
+    "simplify_polygon",
+    "simplify_entities",
+    "rdp_simplify",
+    "visvalingam_simplify",
+    "quick_simplify_rdp",
+    "quick_simplify_visvalingam",
     # Phase 5: Data classes
     "EntityCreationResult",
     "LayerCreationResult",

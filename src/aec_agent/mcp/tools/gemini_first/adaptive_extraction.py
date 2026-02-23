@@ -1293,8 +1293,20 @@ class HybridExtractionConfig:
     # Default DPI when calibration doesn't provide one
     default_dpi: int = 300
 
-    # Draftsman-like cleanup (NEW)
+    # Draftsman-like cleanup
     draft_cleanup: DraftCleanupConfig = field(default_factory=DraftCleanupConfig)
+
+    # Phase A: Advanced Preprocessing (from VECTORIZATION_IMPROVEMENT_ROADMAP)
+    enable_preprocessing: bool = True
+    enable_deskew: bool = True
+    enable_ensemble_binarization: bool = True
+    enable_denoise: bool = False  # Can blur fine lines, disabled by default
+    enable_contrast_enhancement: bool = True
+
+    # Phase A: Line Simplification
+    enable_simplification: bool = True
+    simplification_epsilon: float = 1.5  # RDP tolerance in pixels (lower = more detail)
+    simplify_polylines_only: bool = True  # Only simplify polylines, not individual lines
 
 
 def _get_dpi(calibration: ScaleCalibration, config: Optional["HybridExtractionConfig"] = None) -> int:
@@ -2824,6 +2836,31 @@ async def hybrid_extract_all(
     if image_path and (config.use_opencv_for_lines or config.use_opencv_for_circles):
         image = _load_image(image_path)
         if image is not None:
+            # Phase A: Apply preprocessing if enabled
+            if config.enable_preprocessing:
+                try:
+                    from .preprocessing import preprocess_image, PreprocessingConfig, DeskewConfig
+                    from .binarization import ensemble_binarize, BinarizationConfig
+
+                    # Preprocess: deskew, denoise, contrast
+                    preprocess_config = PreprocessingConfig(
+                        enable_deskew=config.enable_deskew,
+                        enable_denoise=config.enable_denoise,
+                        enable_contrast=config.enable_contrast_enhancement,
+                        enable_border_removal=False,  # Don't crop for vectorization
+                    )
+                    preprocess_result = preprocess_image(image, preprocess_config)
+                    image = preprocess_result.image
+
+                    logger.info(
+                        "preprocessing_applied",
+                        operations=preprocess_result.operations_applied,
+                        skew_angle=preprocess_result.skew_angle,
+                    )
+
+                except Exception as e:
+                    logger.warning("preprocessing_failed", error=str(e))
+
             opencv_entities = await hybrid_opencv_extraction(
                 image, analysis, calibration, config
             )
@@ -2913,6 +2950,72 @@ async def hybrid_extract_all(
             entities_after=cleanup_stats.total_kept,
             total_removed=cleanup_stats.total_removed,
         )
+
+    # 7. Line simplification (reduce vertex count)
+    if config.enable_simplification and result.entities:
+        try:
+            from .simplification import (
+                simplify_line,
+                SimplificationConfig,
+                SimplificationMethod,
+            )
+
+            simplified_entities = []
+            total_points_before = 0
+            total_points_after = 0
+
+            for entity in result.entities:
+                etype = entity.entity_type
+                if isinstance(etype, EntityType):
+                    etype = etype.value
+
+                # Only simplify polylines (multi-point entities)
+                if etype == "polyline" and not config.simplify_polylines_only:
+                    points = entity.properties.get("points", [])
+                    if len(points) > 2:
+                        total_points_before += len(points)
+
+                        # Convert to tuples
+                        point_tuples = [(p[0], p[1]) for p in points]
+
+                        simplify_config = SimplificationConfig(
+                            method=SimplificationMethod.RDP,
+                            rdp_epsilon=config.simplification_epsilon,
+                        )
+                        simplify_result = simplify_line(point_tuples, simplify_config)
+
+                        # Update entity with simplified points
+                        simplified_entity = EntityToCreate(
+                            entity_type=entity.entity_type,
+                            layer=entity.layer,
+                            properties={
+                                **entity.properties,
+                                "points": [[p[0], p[1]] for p in simplify_result.points],
+                            },
+                            source=entity.source,
+                            confidence=entity.confidence,
+                        )
+                        simplified_entities.append(simplified_entity)
+                        total_points_after += len(simplify_result.points)
+                    else:
+                        simplified_entities.append(entity)
+                        total_points_after += len(points) if etype == "polyline" else 0
+                else:
+                    simplified_entities.append(entity)
+
+            result.entities = simplified_entities
+
+            if total_points_before > 0:
+                reduction = 1.0 - (total_points_after / total_points_before)
+                logger.info(
+                    "line_simplification_applied",
+                    points_before=total_points_before,
+                    points_after=total_points_after,
+                    reduction_ratio=reduction,
+                )
+
+        except Exception as e:
+            logger.warning("line_simplification_failed", error=str(e))
 
     logger.info(
         "hybrid_extraction_complete",
