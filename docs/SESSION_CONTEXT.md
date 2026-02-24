@@ -58,6 +58,7 @@
 - [x] **Phase B: VTracer Integration** (O(n) vectorizer, optional alternative to OpenCV)
 - [x] **Phase B: Real-ESRGAN Super-Resolution** (4x upscaling for low-DPI PDFs, GPU+CPU)
 - [x] **Phase B: Fletcher-Kasturi Separation** (text/graphics separation via connected components)
+- [x] **Repository Cleanup** (removed dead code, outdated docs, consolidated files)
 
 ## Key Patterns
 - **Tool results:** Return `{"success": False, "error": {...}}` — never raise exceptions
