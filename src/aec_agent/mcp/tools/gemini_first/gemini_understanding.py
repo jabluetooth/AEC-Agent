@@ -148,7 +148,7 @@ class DetectedText:
     """Text detected in the drawing."""
     content: str
     position: tuple[int, int]
-    height_px: int = 12
+    height_px: int = 24  # Default 24px ~ 0.08" at 300 DPI, reasonable for most drawings
     text_type: str = "note"  # room_name, dimension, equipment_tag, note, title, label
     associated_with: Optional[str] = None
 
@@ -379,7 +379,7 @@ UNDERSTANDING_PROMPT = """Analyze this technical drawing. Return ONLY JSON (no m
     "lines": [{"start": [x,y], "end": [x,y], "type": "wall|duct|pipe|wire|dimension|leader|other", "linetype": "continuous|dashed|dotted|hidden|center", "layer_suggestion": "NCS name"}],
     "arcs": [{"center": [x,y], "radius": px, "start_angle": deg, "end_angle": deg, "type": "door_swing|curved_wall|other"}],
     "circles": [{"center": [x,y], "radius": px, "type": "column|equipment|symbol|other"}],
-    "text": [{"content": "text (correct errors)", "position": [x,y], "height_px": px, "type": "room_name|dimension|equipment_tag|note|title|label|other", "associated_with": "labeled element"}],
+    "text": [{"content": "text (correct errors)", "position": [x,y], "height_px": measured_text_height_in_pixels, "type": "room_name|dimension|equipment_tag|note|title|label|other", "associated_with": "labeled element"}],
     "symbols": [{"type": "diffuser|outlet|switch|valve|fixture|detector|device|equipment|other", "subtype": "specific", "position": [x,y], "rotation": deg, "size": "24x24", "tag": "tag", "associated_text": ["labels"]}],
     "dimensions": [{"value": "shown", "numeric_value": num, "unit": "inches|feet|mm|m", "start": [x,y], "end": [x,y], "text_position": [x,y]}]
   },
@@ -387,7 +387,7 @@ UNDERSTANDING_PROMPT = """Analyze this technical drawing. Return ONLY JSON (no m
   "extraction_strategy": {"primary_strategy": "direct|guided_rasterization|hybrid", "rationale": "why", "per_element_strategy": {"walls": "direct|guided|skip", "ductwork": "...", "piping": "...", "electrical": "...", "text": "direct", "symbols": "direct", "dimensions": "direct"}, "special_regions": [{"bounds": [x1,y1,x2,y2], "strategy": "guided_rasterization|selective_opencv", "reason": "why", "expected_pattern": "parallel_lines|hatching|grid|curves"}]}
 }
 
-Rules: Pixel coords from top-left (0,0). Correct OCR errors semantically. Identify symbol subtypes. Max 50 items per category.
+Rules: Pixel coords from top-left (0,0). Correct OCR errors semantically. Identify symbol subtypes. Max 50 items per category. For text height_px, measure the actual height of text characters in pixels (capital letters typically 15-60px at 300 DPI). Prefer "direct" strategy when you can identify all elements clearly - use "hybrid" only for complex hatching/dense geometry.
 """
 
 

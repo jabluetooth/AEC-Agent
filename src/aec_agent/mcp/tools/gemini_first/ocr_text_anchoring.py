@@ -34,6 +34,9 @@ if TYPE_CHECKING:
 
 logger = structlog.get_logger(__name__)
 
+# Minimum readable text height (0.09375" = 3/32" is standard minimum in AutoCAD)
+MIN_TEXT_HEIGHT_INCHES = 0.09375
+
 # Check if pytesseract is available
 TESSERACT_AVAILABLE = False
 try:
@@ -344,7 +347,7 @@ async def anchor_text_positions(
         for text in analysis.elements.text:
             position_dwg = calibration.to_dwg(*text.position)
             height_dwg = calibration.scale_length(text.height_px)
-            height_dwg = max(height_dwg, 0.1)
+            height_dwg = max(height_dwg, MIN_TEXT_HEIGHT_INCHES)
             layer = get_layer_for_text(text.text_type)
 
             entities.append(EntityToCreate(
@@ -373,7 +376,7 @@ async def anchor_text_positions(
         for text in analysis.elements.text:
             position_dwg = calibration.to_dwg(*text.position)
             height_dwg = calibration.scale_length(text.height_px)
-            height_dwg = max(height_dwg, 0.1)
+            height_dwg = max(height_dwg, MIN_TEXT_HEIGHT_INCHES)
             layer = get_layer_for_text(text.text_type)
 
             entities.append(EntityToCreate(
@@ -402,7 +405,7 @@ async def anchor_text_positions(
         # Use OCR position, but Gemini's content (semantically corrected)
         position_dwg = calibration.to_dwg(*anchor.anchored_position)
         height_dwg = calibration.scale_length(anchor.height_px)
-        height_dwg = max(height_dwg, 0.1)
+        height_dwg = max(height_dwg, MIN_TEXT_HEIGHT_INCHES)
 
         # Find the original Gemini text for layer assignment
         text_type = "note"  # default
@@ -435,7 +438,7 @@ async def anchor_text_positions(
             if text.content == unmatched_content:
                 position_dwg = calibration.to_dwg(*text.position)
                 height_dwg = calibration.scale_length(text.height_px)
-                height_dwg = max(height_dwg, 0.1)
+                height_dwg = max(height_dwg, MIN_TEXT_HEIGHT_INCHES)
                 layer = get_layer_for_text(text.text_type)
 
                 entities.append(EntityToCreate(

@@ -549,8 +549,10 @@ def extract_text_direct(
         position_dwg = calibration.to_dwg(*text.position)
         height_dwg = calibration.scale_length(text.height_px)
 
-        # Ensure minimum height
-        height_dwg = max(height_dwg, 0.1)
+        # Ensure minimum readable text height (0.09375" = 3/32" is standard minimum)
+        # For feet units, this becomes 0.0078125'
+        min_height = 0.09375 if calibration.units in ("inches", "in") else 0.125
+        height_dwg = max(height_dwg, min_height)
 
         # Get layer
         layer = get_layer_for_text(text.text_type)
@@ -987,14 +989,15 @@ def _detect_circles_opencv(gray_image: np.ndarray) -> List[Dict[str, Any]]:
     detected: List[Dict[str, Any]] = []
 
     # Detect circles using Hough transform
+    # param2 controls accumulator threshold - higher = fewer false positives
     circles = cv2.HoughCircles(
         gray_image,
         cv2.HOUGH_GRADIENT,
         dp=1,
-        minDist=20,
+        minDist=30,  # Increased from 20 to reduce overlapping detections
         param1=50,
-        param2=30,
-        minRadius=5,
+        param2=80,  # Increased from 30 to reduce false positives (was too sensitive)
+        minRadius=8,  # Increased from 5 to ignore tiny noise
         maxRadius=100,
     )
 
@@ -1283,8 +1286,9 @@ async def extract_all(
             result.raster_commands.extend(raster_cmds)
             result.guided_count = len(raster_cmds)
 
-    # 3. Selective OpenCV for special regions
-    if image_path:
+    # 3. Selective OpenCV for special regions (only if strategy calls for it)
+    # Skip OpenCV for "direct" strategy to avoid false positives
+    if image_path and primary in ("guided_rasterization", "guided", "hybrid", "selective"):
         opencv_entities = await selective_opencv(analysis, calibration, image_path)
         result.entities.extend(opencv_entities)
         result.opencv_count = len(opencv_entities)
