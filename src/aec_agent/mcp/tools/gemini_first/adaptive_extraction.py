@@ -49,6 +49,7 @@ from .coordinate_calibration import ScaleCalibration
 # Lazy imports for optional dependencies
 if TYPE_CHECKING:
     from .opencv_extraction import OpenCVExtractor, OpenCVExtractionResult
+    from .vtracer_extraction import VTracerExtractor, VTracerExtractionResult
     from ..yolo_detection import YOLOSymbolDetector, DetectedBlock
 
 logger = structlog.get_logger(__name__)
@@ -59,6 +60,7 @@ class ExtractionSource(str, Enum):
     DIRECT = "direct"
     GUIDED_RASTERIZATION = "guided_rasterization"
     SELECTIVE_OPENCV = "selective_opencv"
+    VTRACER = "vtracer"  # Phase B: O(n) vectorization
     HYBRID = "hybrid"
 
 
@@ -1010,6 +1012,221 @@ def _detect_circles_opencv(gray_image: np.ndarray) -> List[Dict[str, Any]]:
 
 
 # =============================================================================
+# Phase B: VTracer Extraction
+# =============================================================================
+
+
+def _detect_with_vtracer(
+    image: np.ndarray,
+    calibration: ScaleCalibration,
+) -> List[EntityToCreate]:
+    """
+    Detect lines and curves using VTracer (O(n) vectorizer).
+
+    VTracer produces clean Bézier paths that are converted to AutoCAD entities.
+    Falls back to empty list if VTracer is not installed.
+
+    Args:
+        image: Binary or grayscale image for vectorization
+        calibration: Coordinate calibration for pixel-to-DWG conversion
+
+    Returns:
+        List of EntityToCreate objects from VTracer paths
+    """
+    from aec_agent.config.settings import get_settings
+
+    settings = get_settings()
+    if not settings.vtracer_enabled:
+        return []
+
+    try:
+        from .vtracer_extraction import (
+            VTracerExtractor,
+            VTracerConfig,
+            is_vtracer_available,
+            LineSegment,
+            BezierSegment,
+        )
+    except ImportError:
+        logger.warning("VTracer module not available")
+        return []
+
+    if not is_vtracer_available():
+        logger.debug("VTracer library not installed, skipping")
+        return []
+
+    entities: List[EntityToCreate] = []
+
+    try:
+        config = VTracerConfig.from_settings()
+        extractor = VTracerExtractor(image, config)
+        result = extractor.extract()
+
+        if not result.paths:
+            logger.debug("VTracer found no paths")
+            return []
+
+        # Convert VTracer paths to entities
+        for path in result.paths:
+            path_entities = _vtracer_path_to_entities(path, calibration)
+            entities.extend(path_entities)
+
+        logger.info(
+            "VTracer extraction complete",
+            num_paths=result.num_paths,
+            entities_created=len(entities),
+        )
+
+    except Exception as e:
+        logger.error("VTracer extraction failed", error=str(e), exc_info=True)
+
+    return entities
+
+
+def _vtracer_path_to_entities(
+    path: Any,  # ExtractedPath type
+    calibration: ScaleCalibration,
+) -> List[EntityToCreate]:
+    """
+    Convert a VTracer ExtractedPath to AutoCAD entities.
+
+    Line segments become LINE entities, Bézier curves become POLYLINE or SPLINE.
+
+    Args:
+        path: VTracer ExtractedPath with segments
+        calibration: Coordinate calibration
+
+    Returns:
+        List of EntityToCreate objects
+    """
+    from .vtracer_extraction import LineSegment, BezierSegment
+
+    entities: List[EntityToCreate] = []
+
+    # Group consecutive line segments into polylines
+    line_segments: List[Tuple[float, float]] = []
+
+    for segment in path.segments:
+        if isinstance(segment, LineSegment):
+            # Convert to DWG coordinates
+            start_dwg = calibration.pixel_to_dwg(segment.start[0], segment.start[1])
+            end_dwg = calibration.pixel_to_dwg(segment.end[0], segment.end[1])
+
+            if not line_segments:
+                line_segments.append(start_dwg)
+            line_segments.append(end_dwg)
+
+        elif isinstance(segment, BezierSegment):
+            # Flush any accumulated line segments first
+            if line_segments:
+                if len(line_segments) == 2:
+                    # Single line
+                    entities.append(EntityToCreate(
+                        entity_type=EntityType.LINE,
+                        layer="0",  # Default layer, will be assigned later
+                        properties={
+                            "start": line_segments[0],
+                            "end": line_segments[1],
+                        },
+                        source=ExtractionSource.VTRACER,
+                    ))
+                elif len(line_segments) > 2:
+                    # Polyline
+                    entities.append(EntityToCreate(
+                        entity_type=EntityType.POLYLINE,
+                        layer="0",
+                        properties={
+                            "points": line_segments,
+                            "closed": False,
+                        },
+                        source=ExtractionSource.VTRACER,
+                    ))
+                line_segments = []
+
+            # Convert Bézier to approximate polyline (for AutoCAD compatibility)
+            # Sample the curve at regular intervals
+            bezier_points = _sample_bezier(segment, calibration, num_samples=10)
+            if len(bezier_points) >= 2:
+                entities.append(EntityToCreate(
+                    entity_type=EntityType.POLYLINE,
+                    layer="0",
+                    properties={
+                        "points": bezier_points,
+                        "closed": False,
+                        "fit_type": "spline",  # Hint for fitting
+                    },
+                    source=ExtractionSource.VTRACER,
+                ))
+
+    # Flush remaining line segments
+    if line_segments:
+        if len(line_segments) == 2:
+            entities.append(EntityToCreate(
+                entity_type=EntityType.LINE,
+                layer="0",
+                properties={
+                    "start": line_segments[0],
+                    "end": line_segments[1],
+                },
+                source=ExtractionSource.VTRACER,
+            ))
+        elif len(line_segments) > 2:
+            entities.append(EntityToCreate(
+                entity_type=EntityType.POLYLINE,
+                layer="0",
+                properties={
+                    "points": line_segments,
+                    "closed": path.is_closed,
+                },
+                source=ExtractionSource.VTRACER,
+            ))
+
+    return entities
+
+
+def _sample_bezier(
+    bezier: Any,  # BezierSegment
+    calibration: ScaleCalibration,
+    num_samples: int = 10,
+) -> List[Tuple[float, float]]:
+    """
+    Sample a cubic Bézier curve at regular intervals.
+
+    Args:
+        bezier: BezierSegment with start, control1, control2, end
+        calibration: Coordinate calibration
+        num_samples: Number of sample points
+
+    Returns:
+        List of (x, y) DWG coordinates
+    """
+    points = []
+
+    for i in range(num_samples + 1):
+        t = i / num_samples
+        t2 = t * t
+        t3 = t2 * t
+        mt = 1 - t
+        mt2 = mt * mt
+        mt3 = mt2 * mt
+
+        # De Casteljau's algorithm
+        px = (mt3 * bezier.start[0] +
+              3 * mt2 * t * bezier.control1[0] +
+              3 * mt * t2 * bezier.control2[0] +
+              t3 * bezier.end[0])
+        py = (mt3 * bezier.start[1] +
+              3 * mt2 * t * bezier.control1[1] +
+              3 * mt * t2 * bezier.control2[1] +
+              t3 * bezier.end[1])
+
+        dwg_point = calibration.pixel_to_dwg(px, py)
+        points.append(dwg_point)
+
+    return points
+
+
+# =============================================================================
 # Coordinator: Extract All
 # =============================================================================
 
@@ -1307,6 +1524,13 @@ class HybridExtractionConfig:
     enable_simplification: bool = True
     simplification_epsilon: float = 1.5  # RDP tolerance in pixels (lower = more detail)
     simplify_polylines_only: bool = True  # Only simplify polylines, not individual lines
+
+    # Phase B: VTracer Vectorization (O(n) alternative to OpenCV)
+    use_vtracer: bool = False  # Enable VTracer for line/curve extraction
+    vtracer_fallback_to_opencv: bool = True  # Fall back to OpenCV if VTracer unavailable
+
+    # Phase B: Text/Graphics Separation (Fletcher-Kasturi)
+    enable_text_graphics_separation: bool = False  # Enable Fletcher-Kasturi separation
 
 
 def _get_dpi(calibration: ScaleCalibration, config: Optional["HybridExtractionConfig"] = None) -> int:
@@ -2832,6 +3056,45 @@ async def hybrid_extract_all(
         all_entities.extend(gemini_geometry)
         result.gemini_entities += len(gemini_geometry)
 
+    # 1b. Text/Graphics Separation (Phase B: Fletcher-Kasturi)
+    text_mask = None
+    graphics_mask = None
+    if image_path and config.enable_text_graphics_separation:
+        try:
+            from .text_graphics_separation import (
+                FletcherKasturiSeparator,
+                SeparationConfig,
+                is_separation_available,
+            )
+            from .binarization import ensemble_binarize
+
+            if is_separation_available():
+                if image is None:
+                    image = _load_image(image_path)
+
+                if image is not None:
+                    # Binarize first
+                    binary = ensemble_binarize(image)
+                    binary_image = binary.binarized_image
+
+                    # Separate text from graphics
+                    separation_config = SeparationConfig.from_settings()
+                    separator = FletcherKasturiSeparator(binary_image, separation_config)
+                    separation_result = separator.separate()
+
+                    text_mask = separation_result.text_mask
+                    graphics_mask = separation_result.graphics_mask
+
+                    logger.info(
+                        "text_graphics_separation_complete",
+                        text_components=separation_result.num_text_components,
+                        graphics_components=separation_result.num_graphics_components,
+                        text_lines=separation_result.num_text_lines,
+                    )
+
+        except Exception as e:
+            logger.warning("text_graphics_separation_failed", error=str(e))
+
     # 2. OpenCV extraction (lines, circles - pixel perfect)
     if image_path and (config.use_opencv_for_lines or config.use_opencv_for_circles):
         image = _load_image(image_path)
@@ -2867,6 +3130,28 @@ async def hybrid_extract_all(
             all_entities.extend(opencv_entities)
             result.opencv_entities = len(opencv_entities)
             result.opencv_count = len(opencv_entities)
+
+    # 2b. VTracer extraction (Phase B - O(n) vectorization, alternative to OpenCV)
+    vtracer_used = False
+    if image_path and config.use_vtracer:
+        from aec_agent.config.settings import get_settings
+        settings = get_settings()
+
+        if settings.vtracer_enabled:
+            if image is None:
+                image = _load_image(image_path)
+
+            if image is not None:
+                vtracer_entities = _detect_with_vtracer(image, calibration)
+                if vtracer_entities:
+                    all_entities.extend(vtracer_entities)
+                    vtracer_used = True
+                    logger.info(
+                        "vtracer_extraction_complete",
+                        entities=len(vtracer_entities),
+                    )
+                elif config.vtracer_fallback_to_opencv:
+                    logger.info("vtracer_fallback_to_opencv", reason="no entities from VTracer")
 
     # 3. YOLO extraction (symbols - trained detection)
     if image_path and config.use_yolo_for_symbols:

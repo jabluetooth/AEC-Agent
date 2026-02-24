@@ -243,6 +243,47 @@ from .opencv_extraction import (
     OPENCV_AVAILABLE,
 )
 
+# Phase B: Text/Graphics Separation (Fletcher-Kasturi)
+from .text_graphics_separation import (
+    SeparationConfig,
+    SeparationResult,
+    FletcherKasturiSeparator,
+    ConnectedComponent,
+    TextComponent,
+    GraphicsComponent,
+    TextLine,
+    ComponentType,
+    separate_text_from_graphics,
+    is_separation_available,
+)
+
+# Phase B: Super-Resolution (Real-ESRGAN)
+from .super_resolution import (
+    SuperResolutionConfig,
+    SuperResolutionResult,
+    RealESRGANUpscaler,
+    upscale_image,
+    is_super_resolution_available,
+    is_gpu_available,
+    REALESRGAN_AVAILABLE,
+    TORCH_AVAILABLE,
+)
+
+# Phase B: VTracer Extraction (O(n) vectorization)
+from .vtracer_extraction import (
+    VTracerExtractor,
+    VTracerExtractionResult,
+    VTracerConfig,
+    VTracerColorMode,
+    VTracerMode,
+    ExtractedPath,
+    BezierSegment,
+    LineSegment,
+    extract_with_vtracer,
+    is_vtracer_available,
+    VTRACER_AVAILABLE,
+)
+
 # Phase 4c: Gemini Refinement (coordinate adjustment)
 from .gemini_refinement import (
     RefinementConfig,
@@ -452,6 +493,38 @@ __all__ = [
     "extract_lines_from_region",
     "extract_circles_from_region",
     "OPENCV_AVAILABLE",
+    # Phase B: Text/Graphics Separation (Fletcher-Kasturi)
+    "SeparationConfig",
+    "SeparationResult",
+    "FletcherKasturiSeparator",
+    "ConnectedComponent",
+    "TextComponent",
+    "GraphicsComponent",
+    "TextLine",
+    "ComponentType",
+    "separate_text_from_graphics",
+    "is_separation_available",
+    # Phase B: Super-Resolution (Real-ESRGAN)
+    "SuperResolutionConfig",
+    "SuperResolutionResult",
+    "RealESRGANUpscaler",
+    "upscale_image",
+    "is_super_resolution_available",
+    "is_gpu_available",
+    "REALESRGAN_AVAILABLE",
+    "TORCH_AVAILABLE",
+    # Phase B: VTracer extraction (O(n) vectorization)
+    "VTracerExtractor",
+    "VTracerExtractionResult",
+    "VTracerConfig",
+    "VTracerColorMode",
+    "VTracerMode",
+    "ExtractedPath",
+    "BezierSegment",
+    "LineSegment",
+    "extract_with_vtracer",
+    "is_vtracer_available",
+    "VTRACER_AVAILABLE",
     # Phase 4c: Gemini Refinement
     "RefinementConfig",
     "RefinementResult",

@@ -501,6 +501,147 @@ class Settings(BaseSettings):
         description="Batch size for entity extraction (prevents memory issues)"
     )
 
+    # ==========================================================================
+    # Phase B: VTracer Vectorization
+    # ==========================================================================
+    vtracer_enabled: bool = Field(
+        default=False,
+        description="Enable VTracer vectorization (O(n) alternative to OpenCV)"
+    )
+
+    vtracer_mode: str = Field(
+        default="spline",
+        description="VTracer output mode: spline (Bézier curves), polygon, or none"
+    )
+
+    vtracer_filter_speckle: int = Field(
+        default=4,
+        ge=0,
+        le=100,
+        description="Remove noise smaller than N pixels"
+    )
+
+    vtracer_corner_threshold: int = Field(
+        default=60,
+        ge=0,
+        le=180,
+        description="Corner detection angle threshold in degrees"
+    )
+
+    vtracer_length_threshold: float = Field(
+        default=4.0,
+        ge=0.0,
+        le=100.0,
+        description="Minimum segment length for curve fitting"
+    )
+
+    vtracer_splice_threshold: int = Field(
+        default=45,
+        ge=0,
+        le=180,
+        description="Angle threshold for splicing splines"
+    )
+
+    vtracer_path_precision: int = Field(
+        default=3,
+        ge=0,
+        le=8,
+        description="Decimal places for path coordinates"
+    )
+
+    # ==========================================================================
+    # Phase B: Real-ESRGAN Super-Resolution
+    # ==========================================================================
+    enable_super_resolution: bool = Field(
+        default=False,
+        description="Enable Real-ESRGAN upscaling for low-DPI PDFs"
+    )
+
+    super_resolution_scale: int = Field(
+        default=4,
+        ge=2,
+        le=4,
+        description="Super-resolution upscale factor (2x, 3x, or 4x)"
+    )
+
+    super_resolution_model: str = Field(
+        default="RealESRGAN_x4plus",
+        description="Real-ESRGAN model name"
+    )
+
+    super_resolution_gpu_id: int | None = Field(
+        default=None,
+        description="GPU device ID (None = auto-detect, -1 = CPU only)"
+    )
+
+    super_resolution_tile_size: int = Field(
+        default=192,
+        ge=64,
+        le=1024,
+        description="Tile size for memory-efficient processing"
+    )
+
+    super_resolution_min_dpi_threshold: int = Field(
+        default=200,
+        ge=72,
+        le=600,
+        description="Only upscale images below this DPI threshold"
+    )
+
+    super_resolution_denoise_strength: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Denoising strength (0 = none, 1 = max)"
+    )
+
+    # ==========================================================================
+    # Phase B: Fletcher-Kasturi Text/Graphics Separation
+    # ==========================================================================
+    enable_text_graphics_separation: bool = Field(
+        default=True,
+        description="Enable Fletcher-Kasturi text/graphics separation"
+    )
+
+    text_graphics_area_factor: float = Field(
+        default=3.0,
+        ge=1.0,
+        le=10.0,
+        description="Area threshold factor (T_a = factor * median_area)"
+    )
+
+    text_graphics_elongation_max: float = Field(
+        default=10.0,
+        ge=2.0,
+        le=50.0,
+        description="Maximum aspect ratio for text classification"
+    )
+
+    text_graphics_min_text_height: int = Field(
+        default=8,
+        ge=4,
+        le=100,
+        description="Minimum text height in pixels"
+    )
+
+    text_graphics_gap_factor: float = Field(
+        default=2.0,
+        ge=0.5,
+        le=5.0,
+        description="Word gap threshold (factor * avg_char_width)"
+    )
+
+    # ==========================================================================
+    # Phase B: Model Cache Directory
+    # ==========================================================================
+    model_cache_dir: Path = Field(
+        default_factory=lambda: Path(os.environ.get(
+            "LOCALAPPDATA",
+            os.path.expanduser("~/.local/share")
+        )) / "AECAgent" / "ml_models",
+        description="Directory for cached ML model weights"
+    )
+
     @property
     def has_database(self) -> bool:
         """Check if PostgreSQL database is configured."""

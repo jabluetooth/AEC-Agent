@@ -74,9 +74,21 @@ yolo = [
     "ultralytics>=8.0.0",
     "onnxruntime>=1.15.0",
 ]
+# Phase B: Core improvements (VTracer, Real-ESRGAN, Fletcher-Kasturi)
+phase_b = [
+    "vtracer>=0.6.0",
+]
+# Phase B with GPU support (Real-ESRGAN super-resolution)
+phase_b_gpu = [
+    "vtracer>=0.6.0",
+    "realesrgan>=0.3.0",
+    "basicsr>=1.4.2",
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
 # All optional dependencies
 all = [
-    "aec-agent[dev,yolo]",
+    "aec-agent[dev,yolo,phase_b]",
 ]
 
 [project.scripts]
@@ -98,6 +110,8 @@ markers = [
     "slow: Slow running tests",
     "requires_postgres: Tests requiring PostgreSQL with PostGIS + pgvector",
     "requires_embedding_model: Tests requiring sentence-transformers",
+    "requires_vtracer: Tests requiring VTracer library",
+    "requires_realesrgan: Tests requiring Real-ESRGAN with GPU",
 ]
 
 [tool.mypy]

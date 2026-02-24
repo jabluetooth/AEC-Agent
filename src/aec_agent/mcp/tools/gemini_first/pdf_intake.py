@@ -330,6 +330,7 @@ def render_pdf_high_quality(
     output_filename: str | None = None,
     convert_grayscale: bool = True,
     grayscale_threshold: float = GRAYSCALE_THRESHOLD,
+    enable_super_resolution: bool | None = None,  # Phase B: None = use settings
 ) -> PDFRenderResult:
     """
     Render a PDF page to a high-quality image file.
@@ -387,6 +388,58 @@ def render_pdf_high_quality(
         color_mode = "L"
         logger.debug("converted_to_grayscale", reason="no_color_variance")
 
+    # Phase B: Apply super-resolution if enabled and DPI is below threshold
+    effective_dpi = dpi
+    super_resolution_applied = False
+
+    from aec_agent.config.settings import get_settings
+    settings = get_settings()
+
+    # Use parameter if provided, otherwise use settings
+    should_upscale = enable_super_resolution
+    if should_upscale is None:
+        should_upscale = settings.enable_super_resolution
+
+    if should_upscale and dpi < settings.super_resolution_min_dpi_threshold:
+        try:
+            from .super_resolution import (
+                RealESRGANUpscaler,
+                is_super_resolution_available,
+            )
+
+            if is_super_resolution_available():
+                import numpy as np
+
+                upscaler = RealESRGANUpscaler.get_instance()
+                if upscaler.is_available:
+                    # Convert PIL Image to numpy array
+                    image_array = np.array(image)
+
+                    # Upscale
+                    result = upscaler.upscale(image_array)
+
+                    if result.scale_factor > 1:
+                        # Convert back to PIL Image
+                        from PIL import Image as PILImage
+                        image = PILImage.fromarray(result.image)
+                        effective_dpi = dpi * result.scale_factor
+                        super_resolution_applied = True
+
+                        logger.info(
+                            "super_resolution_applied",
+                            original_dpi=dpi,
+                            effective_dpi=effective_dpi,
+                            scale=result.scale_factor,
+                            device=result.device_used,
+                            time_ms=round(result.processing_time_ms, 2),
+                        )
+                else:
+                    logger.debug("super_resolution_not_available", reason="model_not_loaded")
+            else:
+                logger.debug("super_resolution_not_available", reason="library_not_installed")
+        except Exception as e:
+            logger.warning("super_resolution_failed", error=str(e))
+
     # Determine output path
     if output_dir is None:
         output_dir = Path(tempfile.gettempdir()) / "aec_agent" / "gemini_first"
@@ -412,11 +465,14 @@ def render_pdf_high_quality(
         file_size_kb=output_path.stat().st_size / 1024,
     )
 
+    # Get actual image dimensions after potential super-resolution
+    actual_width, actual_height = image.size
+
     return PDFRenderResult(
         image_path=output_path,
-        width_px=page_info["width_px"],
-        height_px=page_info["height_px"],
-        dpi=dpi,
+        width_px=actual_width,
+        height_px=actual_height,
+        dpi=effective_dpi,  # Use effective DPI (may be scaled by super-resolution)
         color_mode=color_mode,
         original_pdf=pdf_path,
         page_number=page_number,

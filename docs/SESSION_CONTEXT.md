@@ -16,6 +16,9 @@
 | Gemini-First pipeline | `src/aec_agent/mcp/tools/gemini_first/` |
 | **Hybrid extraction** | `adaptive_extraction.py` → `hybrid_extract_all()` |
 | **OpenCV utilities** | `opencv_extraction.py` → `OpenCVExtractor` |
+| **Phase B: VTracer** | `vtracer_extraction.py` → O(n) vectorization |
+| **Phase B: Super-Resolution** | `super_resolution.py` → Real-ESRGAN upscaling |
+| **Phase B: Text/Graphics** | `text_graphics_separation.py` → Fletcher-Kasturi |
 | YOLO detection | `src/aec_agent/mcp/tools/yolo_detection.py` |
 | CAD standards YAML | `knowledge_base/cad_standards/*.yaml` |
 | Main MCP tools | `gemini_complete_pipeline`, `gemini_vectorize_pdf` |
@@ -52,6 +55,9 @@
 - [x] **Line Straightening** (5° tolerance for aggressive alignment to H/V/45°)
 - [x] **Line Weight Support** (thickness from OpenCV passed through to AutoCAD)
 - [x] **Circle Detection Tuning** (param2=70 to reduce false positives)
+- [x] **Phase B: VTracer Integration** (O(n) vectorizer, optional alternative to OpenCV)
+- [x] **Phase B: Real-ESRGAN Super-Resolution** (4x upscaling for low-DPI PDFs, GPU+CPU)
+- [x] **Phase B: Fletcher-Kasturi Separation** (text/graphics separation via connected components)
 
 ## Key Patterns
 - **Tool results:** Return `{"success": False, "error": {...}}` — never raise exceptions
