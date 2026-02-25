@@ -86,9 +86,14 @@ phase_b_gpu = [
     "torch>=2.0.0",
     "torchvision>=0.15.0",
 ]
+# Phase C: Advanced Vectorization (Neural junction detection, Bezier Splatting, LIVE)
+phase_c = [
+    "torch>=2.0.0",
+    "torchvision>=0.15.0",
+]
 # All optional dependencies
 all = [
-    "aec-agent[dev,yolo,phase_b]",
+    "aec-agent[dev,yolo,phase_b,phase_c]",
 ]
 
 [project.scripts]
@@ -112,6 +117,9 @@ markers = [
     "requires_embedding_model: Tests requiring sentence-transformers",
     "requires_vtracer: Tests requiring VTracer library",
     "requires_realesrgan: Tests requiring Real-ESRGAN with GPU",
+    "requires_phase_c: Tests requiring Phase C dependencies (PyTorch)",
+    "requires_hawp: Tests requiring HAWP for junction detection",
+    "requires_gpu: Tests requiring GPU acceleration",
 ]
 
 [tool.mypy]

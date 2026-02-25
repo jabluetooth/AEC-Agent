@@ -391,6 +391,49 @@ from .validation import (
     summarize_validation,
 )
 
+# Phase C: Advanced Vectorization Techniques
+# C.1: Neural Junction Detection (HAWP)
+from .neural_junction_detection import (
+    JunctionType,
+    JunctionDetectionConfig,
+    DetectedJunction,
+    DetectedWireframeLine,
+    JunctionDetectionResult,
+    JunctionDetector,
+    detect_junctions,
+    snap_endpoints_to_junctions,
+    is_junction_detection_available,
+)
+
+# C.2: Bezier Splatting (differentiable curve fitting)
+from .bezier_splatting import (
+    CurveType,
+    BezierSplattingConfig,
+    OptimizedCurve,
+    BezierSplattingResult,
+    BezierSplattingOptimizer,
+    bezier_splat,
+    is_bezier_splatting_available,
+)
+
+# C.3: LIVE Layered Vectorization
+from .live_vectorization import (
+    LIVEConfig,
+    VectorPath,
+    VectorLayer,
+    LIVEResult,
+    LIVEVectorizer,
+    live_vectorize,
+    is_live_available,
+)
+
+# Phase C: Pipeline Visualizer (for assessment/debugging)
+from .pipeline_visualizer import (
+    VisualizationResult,
+    visualize_pipeline,
+    visualize_pipeline_sync,
+)
+
 # Import MCP tools to register them with the server
 from . import mcp_tools
 
@@ -620,6 +663,36 @@ __all__ = [
     "get_critical_issues",
     "get_issues_by_type",
     "summarize_validation",
+    # Phase C: Neural Junction Detection (C.1)
+    "JunctionType",
+    "JunctionDetectionConfig",
+    "DetectedJunction",
+    "DetectedWireframeLine",
+    "JunctionDetectionResult",
+    "JunctionDetector",
+    "detect_junctions",
+    "snap_endpoints_to_junctions",
+    "is_junction_detection_available",
+    # Phase C: Bezier Splatting (C.2)
+    "CurveType",
+    "BezierSplattingConfig",
+    "OptimizedCurve",
+    "BezierSplattingResult",
+    "BezierSplattingOptimizer",
+    "bezier_splat",
+    "is_bezier_splatting_available",
+    # Phase C: LIVE Vectorization (C.3)
+    "LIVEConfig",
+    "VectorPath",
+    "VectorLayer",
+    "LIVEResult",
+    "LIVEVectorizer",
+    "live_vectorize",
+    "is_live_available",
+    # Phase C: Pipeline Visualizer
+    "VisualizationResult",
+    "visualize_pipeline",
+    "visualize_pipeline_sync",
     # MCP tools module
     "mcp_tools",
 ]

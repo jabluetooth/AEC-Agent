@@ -2699,3 +2699,422 @@ async def gemini_hybrid_extract(
     except Exception as e:
         logger.exception("gemini_hybrid_extract_failed", error=str(e))
         return error_result(ErrorCode.INTERNAL_ERROR, f"Hybrid extraction failed: {e}")
+
+
+# =============================================================================
+# Phase C: Advanced Vectorization Tools
+# =============================================================================
+
+
+@mcp.tool()
+async def phase_c_detect_junctions(
+    image_path: str,
+    confidence_threshold: float = 0.5,
+    model_name: str = "hawpv3",
+    snap_distance: float = 5.0,
+) -> dict:
+    """
+    Detect T, L, X, Y junctions, corners, and endpoints in floor plan images.
+
+    Uses HAWP (Holistically-Attracted Wireframe Parsing) neural network to
+    detect structural junctions that can be used to improve line endpoint
+    snapping and connection accuracy.
+
+    Phase C.1 of Advanced Vectorization.
+
+    Args:
+        image_path: Path to floor plan or technical drawing image
+        confidence_threshold: Minimum confidence for junction detection (0-1)
+        model_name: Model to use (default: hawpv3)
+        snap_distance: Distance threshold for endpoint snapping (pixels)
+
+    Returns:
+        dict with detected junctions, wireframe lines, and snapping suggestions
+    """
+    from .neural_junction_detection import (
+        is_junction_detection_available,
+        JunctionDetector,
+        JunctionDetectionConfig,
+    )
+
+    logger.info(
+        "phase_c_detect_junctions",
+        image_path=image_path,
+        confidence=confidence_threshold,
+        model=model_name,
+    )
+
+    try:
+        # Check availability
+        if not is_junction_detection_available():
+            return error_result(
+                ErrorCode.MISSING_DEPENDENCY,
+                "Junction detection requires PyTorch. Install with: pip install torch torchvision"
+            )
+
+        image_file = Path(image_path)
+        if not image_file.exists():
+            return error_result(
+                ErrorCode.ELEMENT_NOT_FOUND,
+                f"Image not found: {image_path}"
+            )
+
+        # Create config
+        config = JunctionDetectionConfig(
+            model_name=model_name,
+            confidence_threshold=confidence_threshold,
+        )
+
+        # Run detection
+        detector = JunctionDetector.get_instance(config)
+        result = detector.detect(str(image_file), config)
+
+        # Summarize junctions by type
+        junction_counts = {}
+        for junction in result.junctions:
+            jtype = junction.junction_type.value
+            junction_counts[jtype] = junction_counts.get(jtype, 0) + 1
+
+        result_data = {
+            "success": True,
+            "total_junctions": len(result.junctions),
+            "total_lines": len(result.lines),
+            "junction_counts": junction_counts,
+            "image_size": result.image_size,
+            "processing_time_ms": result.processing_time_ms,
+            "junctions": [
+                {
+                    "position": j.position,
+                    "type": j.junction_type.value,
+                    "confidence": f"{j.confidence:.2%}",
+                    "connected_lines": j.connected_line_indices,
+                }
+                for j in result.junctions[:20]  # Limit output
+            ],
+            "lines": [
+                {
+                    "start": line.start,
+                    "end": line.end,
+                    "confidence": f"{line.confidence:.2%}",
+                }
+                for line in result.lines[:20]  # Limit output
+            ],
+        }
+
+        message = (
+            f"Detected {len(result.junctions)} junctions and {len(result.lines)} lines "
+            f"in {result.processing_time_ms:.0f}ms"
+        )
+        return success_result(data=result_data, message=message)
+
+    except Exception as e:
+        logger.exception("phase_c_detect_junctions_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Junction detection failed: {e}")
+
+
+@mcp.tool()
+async def phase_c_bezier_splatting(
+    image_path: str,
+    num_curves: int = 64,
+    iterations: int = 500,
+    output_svg: str = "",
+    curve_type: str = "cubic",
+    learning_rate: float = 0.01,
+) -> dict:
+    """
+    Vectorize an image using Bezier Splatting (150x faster curve fitting).
+
+    Uses differentiable 2D Gaussian splatting to optimize Bezier curve control
+    points, achieving fast convergence for stroke-based vectorization.
+
+    Phase C.2 of Advanced Vectorization.
+
+    Reference: arxiv 2503.16424 "Bezier Splatting"
+
+    Args:
+        image_path: Path to input image (grayscale line drawing works best)
+        num_curves: Number of Bezier curves to fit (default: 64)
+        iterations: Number of optimization iterations (default: 500)
+        output_svg: Optional path to save SVG output (empty = don't save)
+        curve_type: Type of curves: "linear", "quadratic", or "cubic"
+        learning_rate: Optimizer learning rate (default: 0.01)
+
+    Returns:
+        dict with optimized curves, loss history, and optional SVG path
+    """
+    from .bezier_splatting import (
+        is_bezier_splatting_available,
+        bezier_splat,
+        BezierSplattingConfig,
+        CurveType,
+    )
+
+    logger.info(
+        "phase_c_bezier_splatting",
+        image_path=image_path,
+        num_curves=num_curves,
+        iterations=iterations,
+    )
+
+    try:
+        # Check availability
+        if not is_bezier_splatting_available():
+            return error_result(
+                ErrorCode.MISSING_DEPENDENCY,
+                "Bezier Splatting requires PyTorch. Install with: pip install torch torchvision"
+            )
+
+        image_file = Path(image_path)
+        if not image_file.exists():
+            return error_result(
+                ErrorCode.ELEMENT_NOT_FOUND,
+                f"Image not found: {image_path}"
+            )
+
+        # Parse curve type
+        try:
+            curve_type_enum = CurveType(curve_type.lower())
+        except ValueError:
+            return error_result(
+                ErrorCode.INVALID_PARAMS,
+                f"Invalid curve_type: {curve_type}. Use 'linear', 'quadratic', or 'cubic'"
+            )
+
+        # Create config
+        config = BezierSplattingConfig(
+            num_curves=num_curves,
+            curve_type=curve_type_enum,
+            iterations=iterations,
+            learning_rate=learning_rate,
+        )
+
+        # Run optimization
+        output_path = Path(output_svg) if output_svg else None
+        result = bezier_splat(image_file, config, output_path)
+
+        result_data = {
+            "success": True,
+            "num_curves": len(result.curves),
+            "final_loss": result.final_loss,
+            "image_size": result.image_size,
+            "processing_time_ms": result.processing_time_ms,
+            "device": result.device,
+            "curve_type": curve_type,
+            "curves_preview": [
+                {
+                    "control_points": c.control_points,
+                    "stroke_width": c.stroke_width,
+                    "opacity": c.opacity,
+                }
+                for c in result.curves[:10]  # Limit output
+            ],
+        }
+
+        if output_path:
+            result_data["svg_path"] = str(output_path)
+
+        message = (
+            f"Bezier Splatting complete: {len(result.curves)} curves, "
+            f"loss={result.final_loss:.6f}, time={result.processing_time_ms:.0f}ms"
+        )
+        return success_result(data=result_data, message=message)
+
+    except Exception as e:
+        logger.exception("phase_c_bezier_splatting_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Bezier Splatting failed: {e}")
+
+
+@mcp.tool()
+async def phase_c_live_vectorize(
+    image_path: str,
+    num_layers: int = 5,
+    paths_per_layer: int = 1,
+    output_svg: str = "",
+    iterations_per_layer: int = 500,
+) -> dict:
+    """
+    Vectorize an image using LIVE (Layer-wise Image Vectorization).
+
+    Progressive coarse-to-fine vectorization that builds up the image
+    layer by layer using closed Bezier paths. Each layer captures
+    remaining detail from previous layers.
+
+    Phase C.3 of Advanced Vectorization.
+
+    Reference: "Towards Layer-wise Image Vectorization" (CVPR 2022)
+
+    Args:
+        image_path: Path to input image (color images work well)
+        num_layers: Number of vector layers (default: 5)
+        paths_per_layer: Closed paths per layer (default: 1)
+        output_svg: Optional path to save SVG output (empty = don't save)
+        iterations_per_layer: Optimization iterations per layer (default: 500)
+
+    Returns:
+        dict with vector layers, loss history, and optional SVG path
+    """
+    from .live_vectorization import (
+        is_live_available,
+        live_vectorize,
+        LIVEConfig,
+    )
+
+    logger.info(
+        "phase_c_live_vectorize",
+        image_path=image_path,
+        num_layers=num_layers,
+        paths_per_layer=paths_per_layer,
+    )
+
+    try:
+        # Check availability
+        if not is_live_available():
+            return error_result(
+                ErrorCode.MISSING_DEPENDENCY,
+                "LIVE vectorization requires PyTorch. Install with: pip install torch torchvision"
+            )
+
+        image_file = Path(image_path)
+        if not image_file.exists():
+            return error_result(
+                ErrorCode.ELEMENT_NOT_FOUND,
+                f"Image not found: {image_path}"
+            )
+
+        # Create config
+        config = LIVEConfig(
+            num_layers=num_layers,
+            paths_per_layer=paths_per_layer,
+            iterations_per_layer=iterations_per_layer,
+        )
+
+        # Run vectorization
+        output_path = Path(output_svg) if output_svg else None
+        result = live_vectorize(image_file, config, output_path)
+
+        total_paths = sum(len(layer.paths) for layer in result.layers)
+
+        result_data = {
+            "success": True,
+            "num_layers": len(result.layers),
+            "total_paths": total_paths,
+            "final_loss": result.final_loss,
+            "image_size": result.image_size,
+            "processing_time_ms": result.processing_time_ms,
+            "device": result.device,
+            "layers_preview": [
+                {
+                    "layer_index": layer.layer_index,
+                    "num_paths": len(layer.paths),
+                    "fill_color": layer.fill_color,
+                }
+                for layer in result.layers
+            ],
+        }
+
+        if output_path:
+            result_data["svg_path"] = str(output_path)
+
+        message = (
+            f"LIVE complete: {len(result.layers)} layers, {total_paths} paths, "
+            f"loss={result.final_loss:.6f}, time={result.processing_time_ms:.0f}ms"
+        )
+        return success_result(data=result_data, message=message)
+
+    except Exception as e:
+        logger.exception("phase_c_live_vectorize_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"LIVE vectorization failed: {e}")
+
+
+@mcp.tool()
+async def phase_c_visualize_pipeline(
+    image_path: str,
+    output_dir: str = "",
+    run_junction_detection: bool = True,
+    run_bezier_splatting: bool = True,
+    run_live_vectorization: bool = True,
+    bezier_num_curves: int = 64,
+    bezier_iterations: int = 300,
+    live_num_layers: int = 4,
+    live_iterations: int = 300,
+) -> dict:
+    """
+    Visualize the Phase C vectorization pipeline on an image.
+
+    Creates a side-by-side comparison showing:
+    1. Original input image
+    2. Junction detection overlay (junctions + wireframe lines)
+    3. Bezier Splatting result (SVG vectorization)
+    4. LIVE layered vectorization result
+
+    Use this tool to assess what each technique produces and identify gaps.
+
+    Args:
+        image_path: Path to input image (PNG, JPG, PDF page render)
+        output_dir: Output directory (default: creates phase_c_output next to image)
+        run_junction_detection: Enable C.1 Junction Detection
+        run_bezier_splatting: Enable C.2 Bezier Splatting
+        run_live_vectorization: Enable C.3 LIVE Vectorization
+        bezier_num_curves: Number of Bezier curves to fit (more = finer detail)
+        bezier_iterations: Optimization iterations for Bezier (more = better fit)
+        live_num_layers: Number of LIVE layers (more = finer detail)
+        live_iterations: Iterations per LIVE layer
+
+    Returns:
+        dict with paths to all output files and statistics
+    """
+    from .pipeline_visualizer import visualize_pipeline
+
+    logger.info(
+        "phase_c_visualize_pipeline",
+        image_path=image_path,
+        output_dir=output_dir,
+    )
+
+    try:
+        image_file = Path(image_path)
+        if not image_file.exists():
+            return error_result(
+                ErrorCode.ELEMENT_NOT_FOUND,
+                f"Image not found: {image_path}"
+            )
+
+        out_dir = Path(output_dir) if output_dir else None
+
+        result = await visualize_pipeline(
+            image_path=image_file,
+            output_dir=out_dir,
+            run_junction_detection=run_junction_detection,
+            run_bezier_splatting=run_bezier_splatting,
+            run_live_vectorization=run_live_vectorization,
+            bezier_num_curves=bezier_num_curves,
+            bezier_iterations=bezier_iterations,
+            live_num_layers=live_num_layers,
+            live_iterations=live_iterations,
+        )
+
+        result_data = result.to_dict()
+        result_data["success"] = True
+
+        # Build summary message
+        parts = []
+        if result.junction_count > 0:
+            parts.append(f"{result.junction_count} junctions")
+        if result.bezier_curve_count > 0:
+            parts.append(f"{result.bezier_curve_count} Bezier curves")
+        if result.live_path_count > 0:
+            parts.append(f"{result.live_layer_count} LIVE layers ({result.live_path_count} paths)")
+
+        message = f"Pipeline visualization complete: {', '.join(parts) if parts else 'no results'}"
+
+        if result.comparison_path:
+            message += f". Comparison saved to: {result.comparison_path}"
+
+        if result.errors:
+            message += f". Warnings: {len(result.errors)} errors occurred."
+
+        return success_result(data=result_data, message=message)
+
+    except Exception as e:
+        logger.exception("phase_c_visualize_pipeline_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Pipeline visualization failed: {e}")

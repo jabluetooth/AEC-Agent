@@ -642,6 +642,167 @@ class Settings(BaseSettings):
         description="Directory for cached ML model weights"
     )
 
+    # ==========================================================================
+    # Phase C: Neural Junction Detection (HAWP)
+    # ==========================================================================
+    enable_junction_detection: bool = Field(
+        default=False,
+        description="Enable HAWP neural junction detection for floor plans"
+    )
+
+    junction_model_name: str = Field(
+        default="hawpv3",
+        description="HAWP model variant: hawpv2 (supervised) or hawpv3 (self-supervised)"
+    )
+
+    junction_confidence_threshold: float = Field(
+        default=0.5,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence threshold for junction detection"
+    )
+
+    junction_line_threshold: float = Field(
+        default=0.05,
+        ge=0.0,
+        le=1.0,
+        description="Minimum confidence threshold for line detection"
+    )
+
+    junction_gpu_id: int | None = Field(
+        default=None,
+        description="GPU device for junction detection (None=auto, -1=CPU only)"
+    )
+
+    junction_snap_distance: float = Field(
+        default=5.0,
+        ge=1.0,
+        le=50.0,
+        description="Distance threshold in pixels for snapping endpoints to junctions"
+    )
+
+    # ==========================================================================
+    # Phase C: Bezier Splatting (Differentiable Curve Fitting)
+    # ==========================================================================
+    enable_bezier_splatting: bool = Field(
+        default=False,
+        description="Enable Bezier Splatting for differentiable curve fitting (150x faster)"
+    )
+
+    bezier_num_curves: int = Field(
+        default=64,
+        ge=4,
+        le=512,
+        description="Initial number of Bezier curves for optimization"
+    )
+
+    bezier_points_per_curve: int = Field(
+        default=32,
+        ge=8,
+        le=128,
+        description="Number of Gaussian samples per curve"
+    )
+
+    bezier_iterations: int = Field(
+        default=500,
+        ge=50,
+        le=5000,
+        description="Number of optimization iterations"
+    )
+
+    bezier_learning_rate: float = Field(
+        default=0.01,
+        ge=0.0001,
+        le=0.1,
+        description="Optimization learning rate"
+    )
+
+    bezier_gaussian_sigma: float = Field(
+        default=0.01,
+        ge=0.001,
+        le=0.1,
+        description="Initial Gaussian standard deviation for splatting"
+    )
+
+    bezier_enable_densification: bool = Field(
+        default=True,
+        description="Enable adaptive pruning and densification of curves"
+    )
+
+    bezier_densify_interval: int = Field(
+        default=100,
+        ge=10,
+        le=500,
+        description="Iterations between densification steps"
+    )
+
+    bezier_gpu_id: int | None = Field(
+        default=None,
+        description="GPU device for Bezier Splatting (None=auto, -1=CPU only)"
+    )
+
+    # ==========================================================================
+    # Phase C: LIVE Layer-wise Vectorization
+    # ==========================================================================
+    enable_live_vectorization: bool = Field(
+        default=False,
+        description="Enable LIVE coarse-to-fine layer-wise vectorization"
+    )
+
+    live_num_layers: int = Field(
+        default=5,
+        ge=1,
+        le=20,
+        description="Number of LIVE layers (coarse to fine)"
+    )
+
+    live_paths_per_layer: int = Field(
+        default=1,
+        ge=1,
+        le=10,
+        description="Number of Bezier paths per layer"
+    )
+
+    live_control_points_per_path: int = Field(
+        default=4,
+        ge=3,
+        le=16,
+        description="Control points per closed Bezier path"
+    )
+
+    live_iterations_per_layer: int = Field(
+        default=500,
+        ge=50,
+        le=2000,
+        description="Optimization iterations per layer"
+    )
+
+    live_learning_rate: float = Field(
+        default=0.01,
+        ge=0.0001,
+        le=0.1,
+        description="LIVE optimization learning rate"
+    )
+
+    live_udf_weight: float = Field(
+        default=1.0,
+        ge=0.0,
+        le=10.0,
+        description="Weight for Unsigned Distance Field (UDF) loss"
+    )
+
+    live_xing_weight: float = Field(
+        default=0.1,
+        ge=0.0,
+        le=1.0,
+        description="Weight for self-crossing (Xing) loss"
+    )
+
+    live_gpu_id: int | None = Field(
+        default=None,
+        description="GPU device for LIVE vectorization (None=auto, -1=CPU only)"
+    )
+
     @property
     def has_database(self) -> bool:
         """Check if PostgreSQL database is configured."""
