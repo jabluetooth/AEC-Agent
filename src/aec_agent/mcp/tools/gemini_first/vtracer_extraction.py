@@ -27,8 +27,7 @@ import re
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass, field
 from enum import Enum
-from pathlib import Path
-from typing import Any, ClassVar, List, Optional, Tuple, Union
+from typing import List, Optional, Tuple, Union
 
 import numpy as np
 import structlog
