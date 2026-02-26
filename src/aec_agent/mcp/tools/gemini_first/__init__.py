@@ -434,6 +434,33 @@ from .pipeline_visualizer import (
     visualize_pipeline_sync,
 )
 
+# Phase D: RAG Symbol Recognition
+from .symbol_rag import (
+    SymbolRAG,
+    CLIPEncoder,
+    SymbolRAGRepository,
+    SymbolMatch,
+    SymbolLibraryEntry,
+    SymbolRecognitionConfig,
+    SymbolDomain,
+    is_symbol_rag_available,
+    extract_symbol_region,
+    image_to_base64,
+    base64_to_image,
+)
+
+# Best Practices Pipeline (7-stage orchestrator with all optimal algorithms)
+from .best_practices_pipeline import (
+    BestPracticesPipeline,
+    BestPracticesConfig,
+    PipelineResult,
+    StageResult,
+    VectorizationMethod,
+    SymbolRecognitionMethod,
+    run_best_practices_pipeline,
+    run_best_practices_pipeline_sync,
+)
+
 # Import MCP tools to register them with the server
 from . import mcp_tools
 
@@ -693,6 +720,27 @@ __all__ = [
     "VisualizationResult",
     "visualize_pipeline",
     "visualize_pipeline_sync",
+    # Phase D: RAG Symbol Recognition
+    "SymbolRAG",
+    "CLIPEncoder",
+    "SymbolRAGRepository",
+    "SymbolMatch",
+    "SymbolLibraryEntry",
+    "SymbolRecognitionConfig",
+    "SymbolDomain",
+    "is_symbol_rag_available",
+    "extract_symbol_region",
+    "image_to_base64",
+    "base64_to_image",
+    # Best Practices Pipeline (7-stage orchestrator)
+    "BestPracticesPipeline",
+    "BestPracticesConfig",
+    "PipelineResult",
+    "StageResult",
+    "VectorizationMethod",
+    "SymbolRecognitionMethod",
+    "run_best_practices_pipeline",
+    "run_best_practices_pipeline_sync",
     # MCP tools module
     "mcp_tools",
 ]

@@ -3118,3 +3118,539 @@ async def phase_c_visualize_pipeline(
     except Exception as e:
         logger.exception("phase_c_visualize_pipeline_failed", error=str(e))
         return error_result(ErrorCode.INTERNAL_ERROR, f"Pipeline visualization failed: {e}")
+
+
+# =============================================================================
+# Phase D: RAG Symbol Recognition Tools
+# =============================================================================
+
+@mcp.tool()
+async def symbol_recognize(
+    image_path: str,
+    bbox: Optional[str] = None,
+    domain: Optional[str] = None,
+    category: Optional[str] = None,
+    top_k: int = 5,
+    min_confidence: float = 0.5,
+) -> dict[str, Any]:
+    """
+    Recognize a CAD symbol from an image using CLIP embeddings and RAG.
+
+    This tool uses visual similarity search to identify symbols from image patches,
+    returning matching block names and confidence scores.
+
+    Args:
+        image_path: Path to image containing the symbol
+        bbox: Optional bounding box "x1,y1,x2,y2" (pixels). If not provided, uses full image.
+        domain: Filter by domain: electrical, mechanical, plumbing, fire, architectural
+        category: Filter by category: outlet, switch, diffuser, detector, etc.
+        top_k: Number of top matches to return (default 5)
+        min_confidence: Minimum confidence threshold 0-1 (default 0.5)
+
+    Returns:
+        Success result with list of matching symbols, or error result.
+
+    Example:
+        >>> result = await symbol_recognize("symbol.png", domain="electrical")
+        >>> if result["success"]:
+        ...     for match in result["data"]["matches"]:
+        ...         print(f"{match['block_name']}: {match['confidence']:.1%}")
+    """
+    from .symbol_rag import (
+        SymbolRAG,
+        SymbolDomain,
+        is_symbol_rag_available,
+        extract_symbol_region,
+    )
+    from PIL import Image as PILImage
+    from aec_agent.db.connection import get_database_pool
+
+    logger.info(
+        "symbol_recognize_called",
+        image_path=image_path,
+        bbox=bbox,
+        domain=domain,
+    )
+
+    # Check dependencies
+    if not is_symbol_rag_available():
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            "Symbol RAG not available. Install: pip install torch transformers"
+        )
+
+    # Validate image path
+    img_path = Path(image_path)
+    if not img_path.exists():
+        return error_result(
+            ErrorCode.ELEMENT_NOT_FOUND,
+            f"Image not found: {image_path}"
+        )
+
+    try:
+        # Load image
+        image = PILImage.open(img_path)
+
+        # Extract region if bbox provided
+        if bbox:
+            try:
+                coords = [int(x.strip()) for x in bbox.split(",")]
+                if len(coords) != 4:
+                    return error_result(
+                        ErrorCode.INVALID_PARAMS,
+                        "bbox must be 4 comma-separated integers: x1,y1,x2,y2"
+                    )
+                image = extract_symbol_region(image, tuple(coords))
+            except ValueError:
+                return error_result(
+                    ErrorCode.INVALID_PARAMS,
+                    "bbox coordinates must be integers"
+                )
+
+        # Validate domain
+        domain_enum = None
+        if domain:
+            try:
+                domain_enum = SymbolDomain(domain.lower())
+            except ValueError:
+                valid_domains = [d.value for d in SymbolDomain]
+                return error_result(
+                    ErrorCode.INVALID_PARAMS,
+                    f"Invalid domain '{domain}'. Valid: {valid_domains}"
+                )
+
+        # Get database pool
+        pool = await get_database_pool()
+        if pool is None:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                "Database not configured. Set DATABASE_URL environment variable."
+            )
+
+        # Initialize RAG
+        rag = SymbolRAG(pool)
+        await rag.initialize()
+
+        # Recognize symbol
+        matches = await rag.recognize_symbol(
+            image=image,
+            domain=domain_enum,
+            category=category,
+            top_k=top_k,
+            min_confidence=min_confidence,
+        )
+
+        # Format results
+        match_data = []
+        for m in matches:
+            match_data.append({
+                "symbol_id": str(m.symbol_id),
+                "block_name": m.block_name,
+                "display_name": m.display_name,
+                "domain": m.domain.value,
+                "category": m.category,
+                "subcategory": m.subcategory,
+                "layer": m.layer,
+                "confidence": round(m.confidence, 4),
+                "default_scale": m.default_scale,
+                "default_rotation": m.default_rotation,
+                "attributes": m.attributes,
+            })
+
+        if matches:
+            best = matches[0]
+            message = f"Found {len(matches)} matches. Best: {best.block_name} ({best.confidence:.1%})"
+        else:
+            message = "No matching symbols found above confidence threshold"
+
+        return success_result(
+            data={
+                "matches": match_data,
+                "match_count": len(matches),
+                "domain_filter": domain,
+                "category_filter": category,
+            },
+            message=message,
+        )
+
+    except Exception as e:
+        logger.exception("symbol_recognize_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Symbol recognition failed: {e}")
+
+
+@mcp.tool()
+async def symbol_search(
+    query: str,
+    domain: Optional[str] = None,
+    top_k: int = 5,
+) -> dict[str, Any]:
+    """
+    Search for CAD symbols by text description using CLIP text embeddings.
+
+    This tool searches the symbol library using natural language queries,
+    returning matching symbols based on semantic similarity.
+
+    Args:
+        query: Text description (e.g., "smoke detector", "duplex outlet")
+        domain: Filter by domain: electrical, mechanical, plumbing, fire, architectural
+        top_k: Number of results to return (default 5)
+
+    Returns:
+        Success result with list of matching symbols, or error result.
+
+    Example:
+        >>> result = await symbol_search("fire alarm pull station")
+        >>> if result["success"]:
+        ...     for match in result["data"]["matches"]:
+        ...         print(f"{match['block_name']}: {match['display_name']}")
+    """
+    from .symbol_rag import (
+        SymbolRAG,
+        SymbolDomain,
+        is_symbol_rag_available,
+    )
+    from aec_agent.db.connection import get_database_pool
+
+    logger.info("symbol_search_called", query=query, domain=domain)
+
+    # Check dependencies
+    if not is_symbol_rag_available():
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            "Symbol RAG not available. Install: pip install torch transformers"
+        )
+
+    # Validate domain
+    domain_enum = None
+    if domain:
+        try:
+            domain_enum = SymbolDomain(domain.lower())
+        except ValueError:
+            valid_domains = [d.value for d in SymbolDomain]
+            return error_result(
+                ErrorCode.INVALID_PARAMS,
+                f"Invalid domain '{domain}'. Valid: {valid_domains}"
+            )
+
+    try:
+        # Get database pool
+        pool = await get_database_pool()
+        if pool is None:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                "Database not configured. Set DATABASE_URL environment variable."
+            )
+
+        # Initialize RAG
+        rag = SymbolRAG(pool)
+        await rag.initialize()
+
+        # Search by text
+        matches = await rag.search_by_description(
+            description=query,
+            domain=domain_enum,
+            top_k=top_k,
+        )
+
+        # Format results
+        match_data = []
+        for m in matches:
+            match_data.append({
+                "symbol_id": str(m.symbol_id),
+                "block_name": m.block_name,
+                "display_name": m.display_name,
+                "domain": m.domain.value,
+                "category": m.category,
+                "subcategory": m.subcategory,
+                "layer": m.layer,
+                "confidence": round(m.confidence, 4),
+            })
+
+        if matches:
+            message = f"Found {len(matches)} symbols matching '{query}'"
+        else:
+            message = f"No symbols found matching '{query}'"
+
+        return success_result(
+            data={
+                "query": query,
+                "matches": match_data,
+                "match_count": len(matches),
+                "domain_filter": domain,
+            },
+            message=message,
+        )
+
+    except Exception as e:
+        logger.exception("symbol_search_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Symbol search failed: {e}")
+
+
+@mcp.tool()
+async def symbol_library_stats() -> dict[str, Any]:
+    """
+    Get statistics about the symbol library.
+
+    Returns counts of symbols by domain and embedding status.
+
+    Returns:
+        Success result with library statistics, or error result.
+
+    Example:
+        >>> result = await symbol_library_stats()
+        >>> if result["success"]:
+        ...     print(f"Total symbols: {result['data']['total']}")
+        ...     for domain, data in result['data']['by_domain'].items():
+        ...         print(f"  {domain}: {data['count']}")
+    """
+    from .symbol_library_seed import get_symbol_stats
+    from aec_agent.db.connection import get_database_pool
+
+    logger.info("symbol_library_stats_called")
+
+    try:
+        pool = await get_database_pool()
+        if pool is None:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                "Database not configured. Set DATABASE_URL environment variable."
+            )
+
+        stats = await get_symbol_stats(pool)
+
+        return success_result(
+            data=stats,
+            message=f"Symbol library: {stats['total']} symbols ({stats['with_embeddings']} with embeddings)",
+        )
+
+    except Exception as e:
+        logger.exception("symbol_library_stats_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Failed to get stats: {e}")
+
+
+@mcp.tool()
+async def symbol_library_seed(
+    generate_embeddings: bool = True,
+) -> dict[str, Any]:
+    """
+    Seed the symbol library with standard CAD symbols.
+
+    Populates the database with ~80 common electrical, mechanical, plumbing,
+    fire alarm, and architectural symbols with NCS-compliant layer mapping.
+
+    Args:
+        generate_embeddings: Generate CLIP text embeddings for search (default True)
+
+    Returns:
+        Success result with seeding statistics, or error result.
+
+    Example:
+        >>> result = await symbol_library_seed()
+        >>> if result["success"]:
+        ...     print(f"Seeded {result['data']['symbols_added']} symbols")
+    """
+    from .symbol_library_seed import seed_symbol_library, get_symbol_stats
+    from aec_agent.db.connection import get_database_pool
+
+    logger.info("symbol_library_seed_called", generate_embeddings=generate_embeddings)
+
+    try:
+        pool = await get_database_pool()
+        if pool is None:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                "Database not configured. Set DATABASE_URL environment variable."
+            )
+
+        # Seed symbols
+        count = await seed_symbol_library(pool, generate_embeddings=generate_embeddings)
+
+        # Get updated stats
+        stats = await get_symbol_stats(pool)
+
+        return success_result(
+            data={
+                "symbols_added": count,
+                "total_in_library": stats["total"],
+                "with_embeddings": stats["with_embeddings"],
+                "by_domain": stats["by_domain"],
+            },
+            message=f"Seeded {count} symbols. Library now has {stats['total']} symbols.",
+        )
+
+    except Exception as e:
+        logger.exception("symbol_library_seed_failed", error=str(e))
+        return error_result(ErrorCode.INTERNAL_ERROR, f"Seeding failed: {e}")
+
+
+# =============================================================================
+# Best Practices Pipeline Tool
+# =============================================================================
+
+
+@mcp.tool()
+async def run_best_practices_vectorization(
+    pdf_path: str,
+    page: int = 1,
+    output_dir: Optional[str] = None,
+    dpi: int = 300,
+    use_super_resolution: bool = True,
+    use_symbol_rag: bool = True,
+    straighten_tolerance_deg: float = 5.0,
+    connect_endpoints: bool = True,
+    gemini_visual_qa: bool = True,
+) -> dict[str, Any]:
+    """
+    Run the Best Practices PDF to AutoCAD vectorization pipeline.
+
+    This is the recommended 7-stage pipeline that combines the optimal algorithms
+    for each step as documented in docs/BEST_ALGORITHMS_PIPELINE.md:
+
+    1. PDF Rendering (PyMuPDF @ 300-600 DPI, Real-ESRGAN super-resolution)
+    2. Preprocessing (NLM denoise + Hough deskew + 7-method ensemble binarization)
+    3. Gemini Analysis (scale, type, MText, layers, element detection)
+    4. Vector Extraction (LSD lines + Hough circles + HAWP junctions)
+    5. Symbol Recognition (CLIP embeddings + pgvector RAG lookup)
+    6. Validation (5° line straightening + endpoint connection + Gemini QA)
+    7. Output (scaled entities ready for AutoCAD)
+
+    Args:
+        pdf_path: Path to the PDF file to vectorize
+        page: Page number to process (1-indexed, default 1)
+        output_dir: Output directory for intermediate files (default: pdf_dir/vectorized)
+        dpi: Base DPI for rendering (default 300, auto-adjusts for small pages)
+        use_super_resolution: Apply Real-ESRGAN 4x upscaling if DPI < 200 (default True)
+        use_symbol_rag: Use CLIP + pgvector RAG for symbol recognition (default True)
+        straighten_tolerance_deg: Snap lines to H/V/45° if within this tolerance (default 5.0)
+        connect_endpoints: Connect nearby line endpoints (default True)
+        gemini_visual_qa: Run Gemini visual QA validation pass (default True)
+
+    Returns:
+        Success result with pipeline results including:
+        - entity_count: Total entities extracted
+        - symbol_count: Symbols recognized via RAG
+        - line_count: Lines extracted
+        - text_count: Text elements extracted
+        - stages: Results from each pipeline stage
+        - entities: List of EntityToCreate objects (summarized)
+
+    Example:
+        >>> result = await run_best_practices_vectorization(
+        ...     pdf_path="/path/to/drawing.pdf",
+        ...     page=1,
+        ...     use_symbol_rag=True,
+        ... )
+        >>> if result["success"]:
+        ...     print(f"Extracted {result['data']['entity_count']} entities")
+        ...     print(f"Recognized {result['data']['symbol_count']} symbols via RAG")
+    """
+    from .best_practices_pipeline import (
+        BestPracticesPipeline,
+        BestPracticesConfig,
+        SymbolRecognitionMethod,
+    )
+
+    logger.info(
+        "run_best_practices_vectorization_called",
+        pdf_path=pdf_path,
+        page=page,
+        dpi=dpi,
+        use_symbol_rag=use_symbol_rag,
+    )
+
+    try:
+        # Validate PDF exists
+        pdf_file = Path(pdf_path)
+        if not pdf_file.exists():
+            return error_result(
+                ErrorCode.FILE_NOT_FOUND,
+                f"PDF not found: {pdf_path}"
+            )
+
+        # Configure pipeline
+        config = BestPracticesConfig(
+            dpi=dpi,
+            auto_dpi=True,
+            super_resolution=use_super_resolution,
+            symbol_method=(
+                SymbolRecognitionMethod.RAG if use_symbol_rag
+                else SymbolRecognitionMethod.HARDCODED
+            ),
+            straighten_lines=True,
+            straighten_tolerance_deg=straighten_tolerance_deg,
+            connect_endpoints=connect_endpoints,
+            gemini_visual_qa=gemini_visual_qa,
+        )
+
+        # Run pipeline
+        pipeline = BestPracticesPipeline(config)
+        result = await pipeline.process_pdf(
+            pdf_path=pdf_file,
+            page=page,
+            output_dir=Path(output_dir) if output_dir else None,
+        )
+
+        # Summarize entities for response
+        entity_summary = []
+        for entity in result.entities[:MAX_ELEMENTS_IN_RESULT]:
+            entity_summary.append({
+                "type": entity.entity_type.value,
+                "layer": entity.layer,
+                "properties": {
+                    k: v for k, v in entity.properties.items()
+                    if k in ("start", "end", "center", "radius", "content", "block_name")
+                },
+            })
+
+        # Build stage summary
+        stage_summary = []
+        for stage in result.stages:
+            stage_summary.append({
+                "name": stage.stage,
+                "success": stage.success,
+                "duration_ms": round(stage.duration_ms, 2),
+                "errors": stage.errors[:3] if stage.errors else [],
+                "warnings": stage.warnings[:3] if stage.warnings else [],
+            })
+
+        response_data = {
+            "success": result.success,
+            "entity_count": result.entity_count,
+            "symbol_count": result.symbol_count,
+            "line_count": result.line_count,
+            "text_count": result.text_count,
+            "total_duration_ms": round(result.total_duration_ms, 2),
+            "stages": stage_summary,
+            "entities_sample": entity_summary,
+            "entities_truncated": len(result.entities) > MAX_ELEMENTS_IN_RESULT,
+            "image_path": str(result.image_path) if result.image_path else None,
+            "symbols_recognized": result.symbols_recognized[:10],
+        }
+
+        if result.success:
+            return success_result(
+                data=response_data,
+                message=(
+                    f"Pipeline complete: {result.entity_count} entities, "
+                    f"{result.symbol_count} symbols via RAG, "
+                    f"{round(result.total_duration_ms / 1000, 1)}s"
+                ),
+            )
+        else:
+            # Collect errors from failed stages
+            all_errors = []
+            for stage in result.stages:
+                if not stage.success and stage.errors:
+                    all_errors.extend(stage.errors)
+
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                f"Pipeline failed: {'; '.join(all_errors[:3])}"
+            )
+
+    except Exception as e:
+        logger.exception("run_best_practices_vectorization_failed", error=str(e))
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            f"Best practices pipeline failed: {e}"
+        )
