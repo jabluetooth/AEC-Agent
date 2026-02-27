@@ -3492,7 +3492,7 @@ async def symbol_library_seed(
 async def run_best_practices_vectorization(
     pdf_path: str,
     page: int = 1,
-    output_dir: Optional[str] = None,
+    output_dir: str = "",
     dpi: int = 300,
     use_super_resolution: bool = True,
     use_symbol_rag: bool = True,
@@ -3517,7 +3517,7 @@ async def run_best_practices_vectorization(
     Args:
         pdf_path: Path to the PDF file to vectorize
         page: Page number to process (1-indexed, default 1)
-        output_dir: Output directory for intermediate files (default: pdf_dir/vectorized)
+        output_dir: Output directory for intermediate files (empty string = pdf_dir/vectorized)
         dpi: Base DPI for rendering (default 300, auto-adjusts for small pages)
         use_super_resolution: Apply Real-ESRGAN 4x upscaling if DPI < 200 (default True)
         use_symbol_rag: Use CLIP + pgvector RAG for symbol recognition (default True)
@@ -3590,11 +3590,17 @@ async def run_best_practices_vectorization(
             output_dir=Path(output_dir) if output_dir else None,
         )
 
+        # Helper to get entity type as string
+        def get_entity_type_str(entity):
+            if hasattr(entity.entity_type, 'value'):
+                return entity.entity_type.value
+            return str(entity.entity_type)
+
         # Summarize entities for response
         entity_summary = []
         for entity in result.entities[:MAX_ELEMENTS_IN_RESULT]:
             entity_summary.append({
-                "type": entity.entity_type.value,
+                "type": get_entity_type_str(entity),
                 "layer": entity.layer,
                 "properties": {
                     k: v for k, v in entity.properties.items()

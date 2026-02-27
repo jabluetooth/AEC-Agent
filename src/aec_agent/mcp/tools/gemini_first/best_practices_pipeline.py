@@ -345,8 +345,15 @@ class BestPracticesPipeline:
             result.entities = validated_entities
             result.entity_count = len(validated_entities)
             result.symbol_count = len(result.symbols_recognized)
-            result.line_count = sum(1 for e in validated_entities if e.entity_type.value == "LINE")
-            result.text_count = sum(1 for e in validated_entities if e.entity_type.value in ("TEXT", "MTEXT"))
+
+            # Handle entity_type as either enum or string
+            def get_entity_type_value(e):
+                if hasattr(e.entity_type, 'value'):
+                    return e.entity_type.value
+                return str(e.entity_type)
+
+            result.line_count = sum(1 for e in validated_entities if get_entity_type_value(e) == "LINE")
+            result.text_count = sum(1 for e in validated_entities if get_entity_type_value(e) in ("TEXT", "MTEXT"))
 
             result.success = stage7.success
 
