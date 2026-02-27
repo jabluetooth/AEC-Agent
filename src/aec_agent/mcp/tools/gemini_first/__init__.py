@@ -47,6 +47,7 @@ async def gemini_call_with_retry(
     max_retries: int = 5,
     base_delay: float = 5.0,
     model_name: str = "gemini-2.0-flash",
+    timeout_seconds: float = 120.0,
 ) -> str:
     """
     Call Gemini API with exponential backoff retry for 429 rate limits.
@@ -57,9 +58,10 @@ async def gemini_call_with_retry(
         client_or_model: Gemini Client instance (new SDK) or model name string
         content: Content to send (prompt + image as list)
         generation_config: Generation configuration dict with temperature, max_output_tokens, etc.
-        max_retries: Maximum retry attempts (default 3)
+        max_retries: Maximum retry attempts (default 5)
         base_delay: Base delay in seconds (doubles each retry)
         model_name: Model name to use (default gemini-2.0-flash)
+        timeout_seconds: Timeout for each API call (default 120s)
 
     Returns:
         Response text from Gemini
@@ -87,13 +89,44 @@ async def gemini_call_with_retry(
         if isinstance(item, str):
             parts.append(types.Part.from_text(text=item))
         elif hasattr(item, 'mode'):  # PIL Image
-            # Convert PIL Image to bytes
+            # Convert PIL Image to bytes with size optimization
             import io
+            from PIL import Image
+
+            img = item
+            # Resize if too large (max 4096px on longest side for Gemini)
+            max_dimension = 4096
+            if max(img.width, img.height) > max_dimension:
+                ratio = max_dimension / max(img.width, img.height)
+                new_size = (int(img.width * ratio), int(img.height * ratio))
+                img = img.resize(new_size, Image.Resampling.LANCZOS)
+                logger.debug(
+                    "image_resized_for_gemini",
+                    original_size=(item.width, item.height),
+                    new_size=new_size,
+                )
+
+            # Save as JPEG for smaller file size (unless it's grayscale/binary)
             buf = io.BytesIO()
-            item.save(buf, format='PNG')
+            if img.mode in ('L', '1'):
+                img.save(buf, format='PNG', optimize=True)
+                mime_type = 'image/png'
+            else:
+                # Convert to RGB if needed (JPEG doesn't support RGBA)
+                if img.mode == 'RGBA':
+                    img = img.convert('RGB')
+                img.save(buf, format='JPEG', quality=85, optimize=True)
+                mime_type = 'image/jpeg'
+
+            logger.debug(
+                "image_prepared_for_gemini",
+                size_bytes=buf.tell(),
+                mime_type=mime_type,
+            )
+
             parts.append(types.Part.from_bytes(
                 data=buf.getvalue(),
-                mime_type='image/png'
+                mime_type=mime_type
             ))
         else:
             # Assume it's already a Part or can be converted
@@ -111,12 +144,30 @@ async def gemini_call_with_retry(
 
     for attempt in range(max_retries + 1):
         try:
-            response = await client.aio.models.generate_content(
-                model=model_name,
-                contents=contents,
-                config=config,
+            # Wrap API call in timeout
+            response = await asyncio.wait_for(
+                client.aio.models.generate_content(
+                    model=model_name,
+                    contents=contents,
+                    config=config,
+                ),
+                timeout=timeout_seconds,
             )
             return response.text
+        except asyncio.TimeoutError:
+            last_error = TimeoutError(
+                f"Gemini API call timed out after {timeout_seconds}s"
+            )
+            logger.warning(
+                "gemini_timeout",
+                attempt=attempt + 1,
+                timeout_seconds=timeout_seconds,
+            )
+            # Timeouts are retryable
+            if attempt < max_retries:
+                await asyncio.sleep(base_delay)
+                continue
+            raise last_error
         except Exception as e:
             error_str = str(e)
             last_error = e
