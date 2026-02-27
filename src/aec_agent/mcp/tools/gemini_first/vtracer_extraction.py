@@ -370,11 +370,13 @@ class VTracerExtractor:
 
         # Run VTracer
         try:
+            colormode_str = cfg.colormode.value if hasattr(cfg.colormode, 'value') else str(cfg.colormode)
+            mode_str = cfg.mode.value if hasattr(cfg.mode, 'value') else str(cfg.mode)
             svg_content = vtracer.convert_pixels_to_svg(
                 np.array(pil_image).flatten().tolist(),
                 size=(width, height),
-                colormode=cfg.colormode.value,
-                mode=cfg.mode.value,
+                colormode=colormode_str,
+                mode=mode_str,
                 filter_speckle=cfg.filter_speckle,
                 corner_threshold=cfg.corner_threshold,
                 length_threshold=cfg.length_threshold,

@@ -434,7 +434,8 @@ def ensemble_binarize(
                 logger.warning(f"Unknown binarization method: {method}")
                 continue
 
-            method_results[method.value] = result
+            method_key = method.value if hasattr(method, 'value') else str(method)
+            method_results[method_key] = result
 
         except Exception as e:
             logger.warning(f"Binarization method {method} failed: {e}")

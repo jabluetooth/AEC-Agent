@@ -81,7 +81,7 @@ class ExtractedLine:
             "start": list(self.start),
             "end": list(self.end),
             "thickness": self.thickness,
-            "line_type": self.line_type.value,
+            "line_type": self.line_type.value if hasattr(self.line_type, 'value') else str(self.line_type),
             "confidence": self.confidence,
             "length": self.length,
             "angle": self.angle,

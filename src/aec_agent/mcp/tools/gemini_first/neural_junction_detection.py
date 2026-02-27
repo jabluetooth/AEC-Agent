@@ -118,7 +118,7 @@ class DetectedJunction:
         """Convert to dictionary for serialization."""
         return {
             "position": list(self.position),
-            "type": self.junction_type.value,
+            "type": self.junction_type.value if hasattr(self.junction_type, 'value') else str(self.junction_type),
             "confidence": self.confidence,
             "connected_lines": self.connected_line_indices,
             "angle_spread": self.angle_spread,
@@ -189,7 +189,7 @@ class JunctionDetectionResult:
         """Get counts of each junction type."""
         counts: Dict[str, int] = {}
         for j in self.junctions:
-            key = j.junction_type.value
+            key = j.junction_type.value if hasattr(j.junction_type, 'value') else str(j.junction_type)
             counts[key] = counts.get(key, 0) + 1
         return counts
 

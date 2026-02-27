@@ -226,7 +226,6 @@ class BestPracticesPipeline:
                     if pool:
                         self._symbol_rag = SymbolRAG(pool)
                         await self._symbol_rag.initialize()
-                        logger.info("Symbol RAG initialized")
                     else:
                         logger.warning("Database not available, falling back to hardcoded symbols")
                         self.config.symbol_method = SymbolRecognitionMethod.HARDCODED
@@ -300,6 +299,7 @@ class BestPracticesPipeline:
                 processed_image,
                 result.analysis,
                 result.calibration,
+                image_path=result.image_path,
             )
             result.stages.append(stage4)
             if not stage4.success:
@@ -490,7 +490,7 @@ class BestPracticesPipeline:
                     config=DeskewConfig(method=self.config.deskew_method),
                 )
                 processed = deskew_result.image
-                skew_angle = deskew_result.angle
+                skew_angle = deskew_result.skew_angle
                 if abs(skew_angle) > 0.5:
                     warnings.append(f"Corrected {skew_angle:.2f}° skew")
 
@@ -505,11 +505,10 @@ class BestPracticesPipeline:
                 if self.config.binarize_method == "ensemble":
                     from .binarization import ensemble_binarize
                     binarize_result = ensemble_binarize(processed)
-                    binary = binarize_result.image
+                    binary = binarize_result.binary_image
                 else:
                     from .binarization import quick_binarize
-                    binarize_result = quick_binarize(processed)
-                    binary = binarize_result.image
+                    binary = quick_binarize(processed)  # Returns np.ndarray directly
 
             # Convert back to PIL
             from PIL import Image
@@ -558,8 +557,8 @@ class BestPracticesPipeline:
 
             # Analyze with Gemini
             analysis = await analyze_drawing(
-                image,
-                model_name=self.config.gemini_model,
+                image_path,
+                model=self.config.gemini_model,
             )
 
             # Calibrate scale
@@ -599,6 +598,7 @@ class BestPracticesPipeline:
         image: "PILImage.Image",
         analysis: Any,
         calibration: Any,
+        image_path: Optional[Path] = None,
     ) -> StageResult:
         """Stage 4: Extract vectors (lines, circles, arcs, text)."""
         import time
@@ -614,19 +614,18 @@ class BestPracticesPipeline:
 
             # Configure hybrid extraction
             hybrid_config = HybridExtractionConfig(
-                use_gemini=True,
-                use_opencv=True,
-                use_yolo=False,
-                gemini_weight=0.4,
-                opencv_weight=0.3,
-                yolo_weight=0.3,
+                use_opencv_for_lines=True,
+                use_opencv_for_circles=True,
+                use_yolo_for_symbols=False,
+                use_gemini_for_text=True,
+                use_gemini_for_semantic=True,
             )
 
             # Run hybrid extraction
             extraction_result = await hybrid_extract_all(
-                image=image,
                 analysis=analysis,
                 calibration=calibration,
+                image_path=image_path,
                 config=hybrid_config,
             )
 
@@ -788,6 +787,13 @@ class BestPracticesPipeline:
                     calibration,
                 )
 
+            # Get method value (handle both enum and string)
+            method_value = (
+                self.config.symbol_method.value
+                if hasattr(self.config.symbol_method, 'value')
+                else str(self.config.symbol_method)
+            )
+
             return StageResult(
                 stage="5_symbol_rag",
                 success=True,
@@ -795,7 +801,7 @@ class BestPracticesPipeline:
                 data={
                     "symbol_entities": symbol_entities,
                     "recognized_symbols": recognized_symbols,
-                    "method": self.config.symbol_method.value,
+                    "method": method_value,
                 },
                 warnings=warnings,
             )

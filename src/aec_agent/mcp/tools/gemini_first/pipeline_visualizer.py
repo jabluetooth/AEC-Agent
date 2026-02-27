@@ -140,7 +140,7 @@ def _draw_junctions_on_image(
     # Draw junctions
     for junction in junctions:
         x, y = junction.position
-        jtype = junction.junction_type.value
+        jtype = junction.junction_type.value if hasattr(junction.junction_type, 'value') else str(junction.junction_type)
         color = junction_colors.get(jtype, (128, 128, 128, 200))
 
         # Draw circle for junction

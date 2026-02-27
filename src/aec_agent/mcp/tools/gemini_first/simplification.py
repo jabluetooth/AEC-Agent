@@ -372,12 +372,13 @@ def simplify_line(
     original_count = len(points)
 
     if original_count <= config.min_points:
+        method_str = config.method.value if hasattr(config.method, 'value') else str(config.method)
         return SimplificationResult(
             points=list(points),
             original_count=original_count,
             final_count=original_count,
             reduction_ratio=0.0,
-            method_used=config.method.value,
+            method_used=method_str,
         )
 
     if config.method == SimplificationMethod.RDP:
@@ -401,10 +402,11 @@ def simplify_line(
 
     final_count = len(simplified)
     reduction = 1.0 - (final_count / original_count) if original_count > 0 else 0.0
+    method_str = config.method.value if hasattr(config.method, 'value') else str(config.method)
 
     logger.debug(
         "line_simplified",
-        method=config.method.value,
+        method=method_str,
         original_count=original_count,
         final_count=final_count,
         reduction_ratio=reduction,
@@ -415,7 +417,7 @@ def simplify_line(
         original_count=original_count,
         final_count=final_count,
         reduction_ratio=reduction,
-        method_used=config.method.value,
+        method_used=method_str,
     )
 
 
@@ -439,12 +441,13 @@ def simplify_polygon(
     config = config or SimplificationConfig()
 
     if len(points) < 4:  # Triangle or less
+        method_str = config.method.value if hasattr(config.method, 'value') else str(config.method)
         return SimplificationResult(
             points=list(points),
             original_count=len(points),
             final_count=len(points),
             reduction_ratio=0.0,
-            method_used=config.method.value,
+            method_used=method_str,
         )
 
     # Check if already closed

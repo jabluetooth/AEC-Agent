@@ -250,7 +250,7 @@ def _summarize_extraction(extraction: ExtractionResult) -> dict:
     """Summarize extraction for compact tool results."""
     by_type = {}
     for entity in extraction.entities:
-        t = entity.entity_type.value
+        t = entity.entity_type.value if hasattr(entity.entity_type, 'value') else str(entity.entity_type)
         by_type[t] = by_type.get(t, 0) + 1
 
     return {
@@ -2242,16 +2242,17 @@ async def gemini_validate_extraction(
             model=model,
         )
 
+        status_str = validation.status.value if hasattr(validation.status, 'value') else str(validation.status)
         logger.info(
             "gemini_validate_extraction_success",
-            status=validation.status.value,
+            status=status_str,
             accuracy=validation.accuracy_estimate,
             issues=len(validation.issues),
         )
 
         return success_result(
             data=validation.to_dict(),
-            message=f"Validation {validation.status.value}: "
+            message=f"Validation {status_str}: "
                     f"{validation.accuracy_estimate:.0f}% accurate, "
                     f"{len(validation.issues)} issues found",
         )
@@ -2412,21 +2413,26 @@ async def gemini_complete_pipeline(
             )
 
             validation_data = validation.to_dict()
+            validation_status_str = validation.status.value if hasattr(validation.status, 'value') else str(validation.status)
 
             logger.info(
                 "gemini_complete_phase6_done",
-                status=validation.status.value,
+                status=validation_status_str,
                 accuracy=validation.accuracy_estimate,
             )
 
         # ═══════════════════════════════════════════════════════════════════
         # BUILD RESULT
         # ═══════════════════════════════════════════════════════════════════
+        validation_status_for_log = (
+            (validation.status.value if hasattr(validation.status, 'value') else str(validation.status))
+            if validate else "skipped"
+        )
         logger.info(
             "gemini_complete_pipeline_done",
             drawing_type=analysis.drawing_type,
             entities_created=creation.success_count,
-            validation_status=validation.status.value if validate else "skipped",
+            validation_status=validation_status_for_log,
         )
 
         # Build compact result to reduce token usage
@@ -2457,16 +2463,18 @@ async def gemini_complete_pipeline(
         }
 
         if validation_data:
+            val_status = validation.status.value if hasattr(validation.status, 'value') else str(validation.status)
             result_data["phases"]["phase6_validation"] = validation_data
-            result_data["summary"]["validation_status"] = validation.status.value
+            result_data["summary"]["validation_status"] = val_status
             result_data["summary"]["validation_accuracy"] = f"{validation.accuracy_estimate:.0f}%"
             result_data["summary"]["validation_issues"] = len(validation.issues)
 
         # Build message
         if validate:
+            val_status_msg = validation.status.value if hasattr(validation.status, 'value') else str(validation.status)
             message = (
                 f"Complete pipeline finished: {creation.success_count} entities created, "
-                f"validation {validation.status.value} ({validation.accuracy_estimate:.0f}% accurate)"
+                f"validation {val_status_msg} ({validation.accuracy_estimate:.0f}% accurate)"
             )
         else:
             message = (
@@ -2772,7 +2780,7 @@ async def phase_c_detect_junctions(
         # Summarize junctions by type
         junction_counts = {}
         for junction in result.junctions:
-            jtype = junction.junction_type.value
+            jtype = junction.junction_type.value if hasattr(junction.junction_type, 'value') else str(junction.junction_type)
             junction_counts[jtype] = junction_counts.get(jtype, 0) + 1
 
         result_data = {
@@ -2785,7 +2793,7 @@ async def phase_c_detect_junctions(
             "junctions": [
                 {
                     "position": j.position,
-                    "type": j.junction_type.value,
+                    "type": j.junction_type.value if hasattr(j.junction_type, 'value') else str(j.junction_type),
                     "confidence": f"{j.confidence:.2%}",
                     "connected_lines": j.connected_line_indices,
                 }
@@ -3243,11 +3251,12 @@ async def symbol_recognize(
         # Format results
         match_data = []
         for m in matches:
+            domain_str = m.domain.value if hasattr(m.domain, 'value') else str(m.domain)
             match_data.append({
                 "symbol_id": str(m.symbol_id),
                 "block_name": m.block_name,
                 "display_name": m.display_name,
-                "domain": m.domain.value,
+                "domain": domain_str,
                 "category": m.category,
                 "subcategory": m.subcategory,
                 "layer": m.layer,
@@ -3355,11 +3364,12 @@ async def symbol_search(
         # Format results
         match_data = []
         for m in matches:
+            domain_str = m.domain.value if hasattr(m.domain, 'value') else str(m.domain)
             match_data.append({
                 "symbol_id": str(m.symbol_id),
                 "block_name": m.block_name,
                 "display_name": m.display_name,
-                "domain": m.domain.value,
+                "domain": domain_str,
                 "category": m.category,
                 "subcategory": m.subcategory,
                 "layer": m.layer,

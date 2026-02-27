@@ -584,9 +584,10 @@ async def apply_corrections(
                 ))
 
         except Exception as e:
+            action_str = correction.action.value if hasattr(correction.action, 'value') else str(correction.action)
             logger.warning(
                 "correction_failed",
-                action=correction.action.value,
+                action=action_str,
                 error=str(e),
             )
             results.append(CorrectionResult(
@@ -820,8 +821,9 @@ def get_issues_by_type(result: ValidationResult) -> Dict[str, List[ValidationIss
 
 def summarize_validation(result: ValidationResult) -> str:
     """Generate a human-readable summary of validation result."""
+    status_str = result.status.value if hasattr(result.status, 'value') else str(result.status)
     lines = [
-        f"Validation Status: {result.status.value}",
+        f"Validation Status: {status_str}",
         f"Accuracy Estimate: {result.accuracy_estimate:.0f}%",
         f"Iterations: {result.iteration}/{result.max_iterations}",
         "",

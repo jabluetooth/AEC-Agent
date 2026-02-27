@@ -1859,7 +1859,12 @@ async def hybrid_opencv_extraction(
                 layer = _infer_layer_for_region(region, "line", analysis)
 
                 # Map OpenCV line type to AutoCAD linetype
-                linetype = _map_line_type_to_autocad(line.line_type.value)
+                line_type_str = (
+                    line.line_type.value
+                    if hasattr(line.line_type, 'value')
+                    else str(line.line_type)
+                )
+                linetype = _map_line_type_to_autocad(line_type_str)
 
                 # Scale thickness from pixels to DWG units
                 thickness_dwg = calibration.scale_length(line.thickness) if line.thickness > 1.0 else 0.0
@@ -3079,7 +3084,7 @@ async def hybrid_extract_all(
                 if image is not None:
                     # Binarize first
                     binary = ensemble_binarize(image)
-                    binary_image = binary.binarized_image
+                    binary_image = binary.binary_image
 
                     # Separate text from graphics
                     separation_config = SeparationConfig.from_settings()

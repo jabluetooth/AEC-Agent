@@ -764,7 +764,7 @@ class SymbolRAG:
         embedding = self.encoder.encode_image(image)
 
         # Search for similar symbols
-        domain_str = domain.value if domain else None
+        domain_str = (domain.value if hasattr(domain, 'value') else str(domain)) if domain else None
         matches = await self.repository.search_similar(
             embedding=embedding.tolist(),
             domain=domain_str,
@@ -808,7 +808,7 @@ class SymbolRAG:
 
         # Search for each
         results = []
-        domain_str = domain.value if domain else None
+        domain_str = (domain.value if hasattr(domain, 'value') else str(domain)) if domain else None
         for embedding in embeddings:
             matches = await self.repository.search_similar(
                 embedding=embedding.tolist(),
@@ -844,7 +844,7 @@ class SymbolRAG:
         embedding = self.encoder.encode_text(description)
 
         # Search
-        domain_str = domain.value if domain else None
+        domain_str = (domain.value if hasattr(domain, 'value') else str(domain)) if domain else None
         return await self.repository.search_by_text(
             text_embedding=embedding.tolist(),
             domain=domain_str,
@@ -892,12 +892,13 @@ class SymbolRAG:
         preview = self._create_preview(image)
 
         # Create entry
+        domain_str = domain.value if hasattr(domain, 'value') else str(domain)
         entry = SymbolLibraryEntry(
             id=uuid4(),
             block_name=block_name,
             display_name=display_name,
             description=description,
-            domain=domain.value,
+            domain=domain_str,
             category=category,
             subcategory=subcategory,
             layer=layer,

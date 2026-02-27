@@ -93,9 +93,10 @@ class BezierSplattingConfig:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
+        curve_type_str = self.curve_type.value if hasattr(self.curve_type, 'value') else str(self.curve_type)
         return {
             "num_curves": self.num_curves,
-            "curve_type": self.curve_type.value,
+            "curve_type": curve_type_str,
             "points_per_curve": self.points_per_curve,
             "iterations": self.iterations,
             "learning_rate": self.learning_rate,
@@ -164,9 +165,10 @@ class OptimizedCurve:
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary."""
+        curve_type_str = self.curve_type.value if hasattr(self.curve_type, 'value') else str(self.curve_type)
         return {
             "control_points": self.control_points,
-            "curve_type": self.curve_type.value,
+            "curve_type": curve_type_str,
             "stroke_width": self.stroke_width,
             "color": self.color,
             "opacity": self.opacity,

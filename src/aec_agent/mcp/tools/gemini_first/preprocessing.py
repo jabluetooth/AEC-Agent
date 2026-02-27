@@ -382,13 +382,15 @@ def deskew(
         confidence > 0.3
     )
 
+    method_str = config.method.value if hasattr(config.method, 'value') else str(config.method)
+
     if should_correct:
         corrected = rotate_image(image, angle, config.border_color)
         logger.info(
             "deskew_applied",
             angle=angle,
             confidence=confidence,
-            method=config.method.value,
+            method=method_str,
         )
     else:
         corrected = image
@@ -403,7 +405,7 @@ def deskew(
         image=corrected,
         skew_angle=angle,
         was_corrected=should_correct,
-        method_used=config.method.value,
+        method_used=method_str,
         confidence=confidence,
     )
 
