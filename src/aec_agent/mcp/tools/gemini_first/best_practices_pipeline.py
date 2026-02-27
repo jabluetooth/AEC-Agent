@@ -272,29 +272,36 @@ class BestPracticesPipeline:
 
         try:
             # Stage 1: PDF Rendering
+            logger.info("pipeline_stage_starting", stage="1_render_pdf")
             stage1 = await self._stage1_render_pdf(pdf_path, page, output_dir)
             result.stages.append(stage1)
+            logger.info("pipeline_stage_complete", stage="1_render_pdf", success=stage1.success)
             if not stage1.success:
                 return result
             result.image_path = stage1.data.get("image_path")
             image = stage1.data.get("image")
 
             # Stage 2: Preprocessing
+            logger.info("pipeline_stage_starting", stage="2_preprocess")
             stage2 = await self._stage2_preprocess(image, stage1.data.get("dpi", 300))
             result.stages.append(stage2)
+            logger.info("pipeline_stage_complete", stage="2_preprocess", success=stage2.success)
             if not stage2.success:
                 return result
             processed_image = stage2.data.get("processed_image", image)
 
             # Stage 3: Gemini Analysis
+            logger.info("pipeline_stage_starting", stage="3_gemini_analysis")
             stage3 = await self._stage3_analyze(processed_image, result.image_path)
             result.stages.append(stage3)
+            logger.info("pipeline_stage_complete", stage="3_gemini_analysis", success=stage3.success)
             if not stage3.success:
                 return result
             result.analysis = stage3.data.get("analysis")
             result.calibration = stage3.data.get("calibration")
 
             # Stage 4: Vector Extraction
+            logger.info("pipeline_stage_starting", stage="4_extract")
             stage4 = await self._stage4_extract(
                 processed_image,
                 result.analysis,
@@ -302,17 +309,20 @@ class BestPracticesPipeline:
                 image_path=result.image_path,
             )
             result.stages.append(stage4)
+            logger.info("pipeline_stage_complete", stage="4_extract", success=stage4.success)
             if not stage4.success:
                 return result
             entities = stage4.data.get("entities", [])
 
             # Stage 5: Symbol Recognition (RAG)
+            logger.info("pipeline_stage_starting", stage="5_symbol_rag")
             stage5 = await self._stage5_recognize_symbols(
                 processed_image,
                 result.analysis,
                 result.calibration,
             )
             result.stages.append(stage5)
+            logger.info("pipeline_stage_complete", stage="5_symbol_rag", success=stage5.success)
             # Symbol recognition failures are non-fatal
             symbol_entities = stage5.data.get("symbol_entities", [])
             result.symbols_recognized = stage5.data.get("recognized_symbols", [])
@@ -321,18 +331,21 @@ class BestPracticesPipeline:
             entities.extend(symbol_entities)
 
             # Stage 6: Validation & Correction
+            logger.info("pipeline_stage_starting", stage="6_validate")
             stage6 = await self._stage6_validate(
                 entities,
                 processed_image,
                 result.analysis,
             )
             result.stages.append(stage6)
+            logger.info("pipeline_stage_complete", stage="6_validate", success=stage6.success)
             if not stage6.success:
                 return result
             validated_entities = stage6.data.get("entities", entities)
             result.validation_result = stage6.data.get("validation_result")
 
             # Stage 7: Output
+            logger.info("pipeline_stage_starting", stage="7_output")
             stage7 = await self._stage7_output(
                 validated_entities,
                 result.calibration,
@@ -340,6 +353,7 @@ class BestPracticesPipeline:
                 pdf_path.stem,
             )
             result.stages.append(stage7)
+            logger.info("pipeline_stage_complete", stage="7_output", success=stage7.success)
 
             # Final statistics
             result.entities = validated_entities
@@ -467,7 +481,21 @@ class BestPracticesPipeline:
         warnings = []
 
         try:
+            # Check image size - skip expensive operations for very large images
+            total_pixels = image.width * image.height
+            is_large_image = total_pixels > 20_000_000  # 20 megapixels
+
+            if is_large_image:
+                logger.info(
+                    "large_image_detected",
+                    width=image.width,
+                    height=image.height,
+                    pixels=total_pixels,
+                    skipping="NLM denoise, ensemble binarization"
+                )
+
             # Convert PIL to OpenCV
+            logger.debug("preprocess_converting_to_opencv")
             img_array = np.array(image)
             if len(img_array.shape) == 3:
                 gray = cv2.cvtColor(img_array, cv2.COLOR_RGB2GRAY)
@@ -476,14 +504,18 @@ class BestPracticesPipeline:
 
             processed = gray.copy()
 
-            # 2.1 Denoise (NLM)
-            if self.config.denoise:
+            # 2.1 Denoise (NLM) - skip for large images (too slow)
+            if self.config.denoise and not is_large_image:
+                logger.debug("preprocess_denoising")
                 from .preprocessing import denoise
                 processed = denoise(processed, strength=self.config.denoise_strength)
+            elif is_large_image and self.config.denoise:
+                warnings.append("Skipped NLM denoise for large image")
 
             # 2.2 Deskew
             skew_angle = 0.0
             if self.config.deskew:
+                logger.debug("preprocess_deskewing")
                 from .preprocessing import deskew, DeskewConfig
                 deskew_result = deskew(
                     processed,
@@ -496,21 +528,26 @@ class BestPracticesPipeline:
 
             # 2.3 Enhance contrast (CLAHE)
             if self.config.enhance_contrast:
+                logger.debug("preprocess_enhancing_contrast")
                 from .preprocessing import enhance_contrast
                 processed = enhance_contrast(processed)
 
-            # 2.4 Binarize (7-method ensemble)
+            # 2.4 Binarize - use quick method for large images
             binary = None
             if self.config.binarize:
-                if self.config.binarize_method == "ensemble":
+                logger.debug("preprocess_binarizing")
+                if self.config.binarize_method == "ensemble" and not is_large_image:
                     from .binarization import ensemble_binarize
                     binarize_result = ensemble_binarize(processed)
                     binary = binarize_result.binary_image
                 else:
                     from .binarization import quick_binarize
                     binary = quick_binarize(processed)  # Returns np.ndarray directly
+                    if is_large_image:
+                        warnings.append("Used quick binarize for large image")
 
             # Convert back to PIL
+            logger.debug("preprocess_converting_to_pil")
             from PIL import Image
             processed_pil = Image.fromarray(processed)
             binary_pil = Image.fromarray(binary) if binary is not None else None
