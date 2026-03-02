@@ -1473,8 +1473,8 @@ class HybridExtractionConfig:
     use_gemini_for_semantic: bool = True  # Layer assignment, classification
 
     # OpenCV parameters
-    opencv_line_min_length: int = 30
-    opencv_circle_min_radius: int = 5
+    opencv_line_min_length: int = 50  # Increased from 30 to reduce noise
+    opencv_circle_min_radius: int = 10  # Increased from 5 to reduce tiny circle noise
     opencv_circle_max_radius: int = 200
 
     # YOLO parameters
@@ -1501,6 +1501,10 @@ class HybridExtractionConfig:
     # Validation
     enable_gemini_validation: bool = True
     max_validation_iterations: int = 2
+
+    # Entity limits (prevent runaway extraction)
+    max_entities_per_source: int = 5000  # Max entities from OpenCV/YOLO each
+    max_total_entities: int = 10000  # Max total entities after merge
 
     # Masking parameters for OpenCV (to exclude text/symbols from line detection)
     # Increased defaults for better text masking
@@ -3136,6 +3140,19 @@ async def hybrid_extract_all(
             opencv_entities = await hybrid_opencv_extraction(
                 image, analysis, calibration, config
             )
+
+            # Enforce entity limit to prevent crashes
+            if len(opencv_entities) > config.max_entities_per_source:
+                logger.warning(
+                    "opencv_entities_limited",
+                    original_count=len(opencv_entities),
+                    limit=config.max_entities_per_source,
+                    reason="Too many entities detected, keeping highest confidence"
+                )
+                # Sort by confidence and keep top N
+                opencv_entities.sort(key=lambda e: e.confidence, reverse=True)
+                opencv_entities = opencv_entities[:config.max_entities_per_source]
+
             all_entities.extend(opencv_entities)
             result.opencv_entities = len(opencv_entities)
             result.opencv_count = len(opencv_entities)
@@ -3179,6 +3196,18 @@ async def hybrid_extract_all(
         tolerance=config.coordinate_tolerance,
         prefer_opencv=config.prefer_opencv_geometry,
     )
+
+    # Enforce total entity limit
+    if len(merged_entities) > config.max_total_entities:
+        logger.warning(
+            "total_entities_limited",
+            original_count=len(merged_entities),
+            limit=config.max_total_entities,
+            reason="Too many total entities, keeping highest confidence"
+        )
+        merged_entities.sort(key=lambda e: e.confidence, reverse=True)
+        merged_entities = merged_entities[:config.max_total_entities]
+
     result.entities = merged_entities
     result.duplicates_merged = duplicates
     result.direct_count = result.gemini_entities
