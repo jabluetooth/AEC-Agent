@@ -910,21 +910,21 @@ class BestPracticesPipeline:
 
             # 6.1 Line straightening (5° tolerance)
             if self.config.straighten_lines:
-                validated = align_nearly_parallel_lines(
+                validated, _ = align_nearly_parallel_lines(
                     validated,
-                    tolerance_deg=self.config.straighten_tolerance_deg,
+                    angle_tolerance=self.config.straighten_tolerance_deg,
                 )
 
             # 6.2 Endpoint connection
             if self.config.connect_endpoints:
-                validated = connect_nearby_endpoints(
+                validated, _ = connect_nearby_endpoints(
                     validated,
                     tolerance=self.config.connect_tolerance_px,
                 )
 
             # 6.3 Grid snapping
             if self.config.snap_to_grid:
-                validated = snap_to_grid(
+                validated, _ = snap_to_grid(
                     validated,
                     grid_size=self.config.grid_tolerance_px,
                 )

@@ -278,6 +278,30 @@ class Settings(BaseSettings):
     )
 
     # ==========================================================================
+    # MCP Client Configuration
+    # ==========================================================================
+    mcp_sse_connect_timeout: float = Field(
+        default=30.0,
+        ge=5.0,
+        le=120.0,
+        description="MCP SSE connection timeout in seconds"
+    )
+
+    mcp_sse_read_timeout: float = Field(
+        default=600.0,
+        ge=60.0,
+        le=1800.0,
+        description="MCP SSE read timeout in seconds (for long-running operations)"
+    )
+
+    sse_ping_interval: int = Field(
+        default=15,
+        ge=5,
+        le=60,
+        description="SSE keep-alive ping interval in seconds"
+    )
+
+    # ==========================================================================
     # Security Configuration
     # ==========================================================================
     session_token_expiry: int = Field(

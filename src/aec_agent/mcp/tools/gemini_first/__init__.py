@@ -44,8 +44,8 @@ async def gemini_call_with_retry(
     client_or_model: Any,
     content: list,
     generation_config: dict,
-    max_retries: int = 5,
-    base_delay: float = 5.0,
+    max_retries: int = 8,
+    base_delay: float = 10.0,
     model_name: str = "gemini-2.0-flash",
     timeout_seconds: float = 120.0,
 ) -> str:
@@ -58,8 +58,8 @@ async def gemini_call_with_retry(
         client_or_model: Gemini Client instance (new SDK) or model name string
         content: Content to send (prompt + image as list)
         generation_config: Generation configuration dict with temperature, max_output_tokens, etc.
-        max_retries: Maximum retry attempts (default 5)
-        base_delay: Base delay in seconds (doubles each retry)
+        max_retries: Maximum retry attempts (default 8 for resilience against rate limits)
+        base_delay: Base delay in seconds (doubles each retry, default 10s)
         model_name: Model name to use (default gemini-2.0-flash)
         timeout_seconds: Timeout for each API call (default 120s)
 
@@ -67,7 +67,7 @@ async def gemini_call_with_retry(
         Response text from Gemini
 
     Raises:
-        Exception: If all retries exhausted
+        Exception: If all retries exhausted (after ~42 minutes of retrying)
     """
     from google import genai
     from google.genai import types
@@ -173,14 +173,16 @@ async def gemini_call_with_retry(
             last_error = e
 
             # Check if it's a rate limit error (429)
-            if "429" in error_str or "Resource exhausted" in error_str:
+            if "429" in error_str or "Resource exhausted" in error_str or "RESOURCE_EXHAUSTED" in error_str:
                 if attempt < max_retries:
-                    delay = base_delay * (2 ** attempt)
+                    # Exponential backoff with max cap of 5 minutes
+                    delay = min(base_delay * (2 ** attempt), 300.0)
                     logger.warning(
                         "gemini_rate_limited",
                         attempt=attempt + 1,
                         max_retries=max_retries,
                         delay_seconds=delay,
+                        error=error_str[:200],
                     )
                     await asyncio.sleep(delay)
                     continue
@@ -504,12 +506,27 @@ from .symbol_rag import (
 from .best_practices_pipeline import (
     BestPracticesPipeline,
     BestPracticesConfig,
-    PipelineResult,
-    StageResult,
+    PipelineResult as BestPracticesPipelineResult,
+    StageResult as BestPracticesStageResult,
     VectorizationMethod,
     SymbolRecognitionMethod,
     run_best_practices_pipeline,
     run_best_practices_pipeline_sync,
+)
+
+# Unified Pipeline (RECOMMENDED - consolidates all vectorization workflows)
+from .unified_pipeline import (
+    UnifiedPipeline,
+    PipelineConfig,
+    PipelineResult,
+    StageResult,
+    ExtractionMethod,
+    SymbolMethod,
+    OutputFormat,
+    RefinementConfig,
+    GeometryRefinementPipeline,
+    ExtractionFactory,
+    vectorize_pdf,
 )
 
 # Import MCP tools to register them with the server
@@ -792,6 +809,18 @@ __all__ = [
     "SymbolRecognitionMethod",
     "run_best_practices_pipeline",
     "run_best_practices_pipeline_sync",
+    # Unified Pipeline (RECOMMENDED)
+    "UnifiedPipeline",
+    "PipelineConfig",
+    "PipelineResult",
+    "StageResult",
+    "ExtractionMethod",
+    "SymbolMethod",
+    "OutputFormat",
+    "RefinementConfig",
+    "GeometryRefinementPipeline",
+    "ExtractionFactory",
+    "vectorize_pdf",
     # MCP tools module
     "mcp_tools",
 ]

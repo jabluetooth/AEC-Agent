@@ -1416,7 +1416,16 @@ async def gemini_extract_pdf_entities(
     include_opencv: bool = True,
 ) -> dict[str, Any]:
     """
+    DEPRECATED: Use `vectorize_pdf` instead.
+
     Complete PDF-to-entities pipeline: render, analyze, calibrate, and extract.
+
+    MIGRATION: Replace with:
+        >>> result = await vectorize_pdf(
+        ...     pdf_path="drawings.pdf",
+        ...     extraction_method="hybrid" if include_opencv else "direct",
+        ...     create_in_autocad=False,
+        ... )
 
     This combines all four phases of the Gemini-First pipeline:
     1. Phase 1: Render PDF to high-quality image
@@ -1434,13 +1443,6 @@ async def gemini_extract_pdf_entities(
     Returns:
         Success result with rendered image info, analysis, calibration,
         and extracted entities.
-
-    Example:
-        >>> result = await gemini_extract_pdf_entities("drawings.pdf", page=1)
-        >>> if result["success"]:
-        ...     data = result["data"]
-        ...     print(f"Drawing type: {data['analysis']['drawing_analysis']['type']}")
-        ...     print(f"Entities: {data['extraction']['statistics']['total_entities']}")
     """
     logger.info(
         "gemini_extract_pdf_entities_called",
@@ -1916,10 +1918,16 @@ async def gemini_vectorize_pdf(
     create_layers: bool = True,
 ) -> dict[str, Any]:
     """
+    DEPRECATED: Use `vectorize_pdf` instead.
+
     Complete PDF-to-AutoCAD vectorization using Gemini-First pipeline.
 
-    This is the main entry point for converting a PDF drawing to AutoCAD
-    entities. It runs the complete Gemini-First pipeline (Phases 1-5).
+    MIGRATION: Replace with:
+        >>> result = await vectorize_pdf(
+        ...     pdf_path="mechanical_plan.pdf",
+        ...     extraction_method="hybrid",
+        ...     create_in_autocad=True,
+        ... )
 
     This tool:
     1. Renders the PDF at high quality (preserving grayscale)
@@ -1932,19 +1940,12 @@ async def gemini_vectorize_pdf(
         file_path: Path to the PDF file
         page: Page number to vectorize (1-indexed)
         dpi: Resolution for rendering (72-1200, default 300)
-        model: Gemini model for analysis (gemini-2.0-flash recommended - has free tier)
+        model: Gemini model for analysis
         include_opencv: Use OpenCV for special regions (default True)
         create_layers: Create layers that don't exist (default True)
 
     Returns:
         Success result with complete pipeline results.
-
-    Example:
-        >>> result = await gemini_vectorize_pdf("mechanical_plan.pdf")
-        >>> if result["success"]:
-        ...     print(f"Drawing type: {result['data']['summary']['drawing_type']}")
-        ...     print(f"Entities created: {result['data']['summary']['created']}")
-        ...     print(f"Success rate: {result['data']['summary']['success_rate']}")
     """
     logger.info(
         "gemini_vectorize_pdf_called",
@@ -2275,7 +2276,17 @@ async def gemini_complete_pipeline(
     apply_corrections: bool = True,
 ) -> dict[str, Any]:
     """
+    DEPRECATED: Use `vectorize_pdf` instead.
+
     Run the complete Gemini-First PDF-to-AutoCAD pipeline (Phases 1-6).
+
+    MIGRATION: Replace with:
+        >>> result = await vectorize_pdf(
+        ...     pdf_path="floor_plan.pdf",
+        ...     extraction_method="hybrid",
+        ...     create_in_autocad=True,
+        ...     validate=True,
+        ... )
 
     This is the full pipeline that:
     1. Renders PDF at high quality (Phase 1)
@@ -2298,14 +2309,6 @@ async def gemini_complete_pipeline(
 
     Returns:
         Success result with complete pipeline results.
-
-    Example:
-        >>> result = await gemini_complete_pipeline("floor_plan.pdf")
-        >>> if result["success"]:
-        ...     data = result["data"]
-        ...     print(f"Drawing type: {data['summary']['drawing_type']}")
-        ...     print(f"Entities created: {data['summary']['created']}")
-        ...     print(f"Validation: {data['validation']['status']}")
     """
     logger.info(
         "gemini_complete_pipeline_called",
@@ -3669,4 +3672,187 @@ async def run_best_practices_vectorization(
         return error_result(
             ErrorCode.INTERNAL_ERROR,
             f"Best practices pipeline failed: {e}"
+        )
+
+
+# =============================================================================
+# Unified Pipeline Tool (Recommended)
+# =============================================================================
+
+
+@mcp.tool()
+async def vectorize_pdf(
+    pdf_path: str,
+    page: int = 1,
+    extraction_method: str = "hybrid",
+    preprocess: bool = True,
+    use_symbol_rag: bool = True,
+    refine_geometry: bool = True,
+    create_in_autocad: bool = False,
+    validate: bool = False,
+    dpi: int = 300,
+    straighten_tolerance_deg: float = 5.0,
+    connect_tolerance_px: float = 10.0,
+    grid_size_px: float = 5.0,
+) -> dict[str, Any]:
+    """
+    Unified PDF to AutoCAD vectorization pipeline.
+
+    This is the RECOMMENDED tool for PDF vectorization. It consolidates all
+    previous vectorization tools into a single, configurable entry point.
+
+    Pipeline stages (configurable):
+    1. PDF Rendering (always)
+    2. Image Preprocessing (optional - denoise, deskew, binarize)
+    3. Gemini Analysis (always - detects elements, scale, layers)
+    4. Coordinate Calibration (always - maps pixels to DWG units)
+    5. Entity Extraction (configurable method)
+    6. Symbol Recognition (optional - RAG or hardcoded)
+    7. Geometry Refinement (optional - straighten, connect, snap)
+    8. AutoCAD Creation (optional)
+    9. Validation (optional - Gemini visual QA)
+
+    Args:
+        pdf_path: Path to the PDF file to vectorize
+        page: Page number to process (1-indexed, default 1)
+        extraction_method: Extraction algorithm to use:
+            - "direct": Gemini coordinates only (fast, less accurate)
+            - "hybrid": Gemini + OpenCV (balanced, recommended)
+            - "best": Optimal algorithm per entity type (highest quality)
+            - "vtracer": Raster-to-vector (for scanned drawings)
+        preprocess: Apply image preprocessing (denoise, deskew, binarize)
+        use_symbol_rag: Use CLIP + pgvector RAG for symbol recognition
+        refine_geometry: Apply geometry refinement (straighten, connect, snap)
+        create_in_autocad: Create entities in AutoCAD after extraction
+        validate: Run Gemini visual QA validation
+        dpi: Rendering DPI (default 300)
+        straighten_tolerance_deg: Snap lines to H/V/45° if within tolerance
+        connect_tolerance_px: Connect endpoints within this distance
+        grid_size_px: Snap to grid with this cell size
+
+    Returns:
+        Success result with:
+        - total_entities: Total entities extracted
+        - entities_by_type: Count by entity type
+        - entities_created: Count created in AutoCAD (if enabled)
+        - validation_passed: Whether validation passed (if enabled)
+        - stages: Results from each pipeline stage
+        - total_duration_ms: Total processing time
+
+    Example:
+        >>> # Simple extraction
+        >>> result = await vectorize_pdf("/path/to/drawing.pdf")
+
+        >>> # Full pipeline with AutoCAD creation
+        >>> result = await vectorize_pdf(
+        ...     pdf_path="/path/to/drawing.pdf",
+        ...     extraction_method="best",
+        ...     create_in_autocad=True,
+        ...     validate=True,
+        ... )
+
+        >>> # Fast extraction without preprocessing
+        >>> result = await vectorize_pdf(
+        ...     pdf_path="/path/to/drawing.pdf",
+        ...     extraction_method="direct",
+        ...     preprocess=False,
+        ...     refine_geometry=False,
+        ... )
+    """
+    from .unified_pipeline import (
+        UnifiedPipeline,
+        PipelineConfig,
+        ExtractionMethod,
+        SymbolMethod,
+    )
+
+    logger.info(
+        "vectorize_pdf_called",
+        pdf_path=pdf_path,
+        page=page,
+        extraction_method=extraction_method,
+        create_in_autocad=create_in_autocad,
+    )
+
+    try:
+        # Validate PDF exists
+        pdf_file = Path(pdf_path)
+        if not pdf_file.exists():
+            return error_result(
+                ErrorCode.FILE_NOT_FOUND,
+                f"PDF not found: {pdf_path}"
+            )
+
+        # Validate extraction method
+        valid_methods = ["direct", "hybrid", "best", "vtracer"]
+        if extraction_method not in valid_methods:
+            return error_result(
+                ErrorCode.INVALID_PARAMETER,
+                f"Invalid extraction_method: {extraction_method}. Valid: {valid_methods}"
+            )
+
+        # Configure pipeline
+        config = PipelineConfig(
+            dpi=dpi,
+            preprocess=preprocess,
+            extraction_method=ExtractionMethod(extraction_method),
+            symbol_method=SymbolMethod.RAG if use_symbol_rag else SymbolMethod.HARDCODED,
+            refine_geometry=refine_geometry,
+            straighten_tolerance_deg=straighten_tolerance_deg,
+            connect_tolerance_px=connect_tolerance_px,
+            grid_size_px=grid_size_px,
+            create_in_autocad=create_in_autocad,
+            validate=validate,
+            gemini_visual_qa=validate,
+        )
+
+        # Run unified pipeline
+        pipeline = UnifiedPipeline(config)
+        result = await pipeline.process(
+            pdf_path=str(pdf_file),
+            page=page,
+        )
+
+        # Build response
+        response_data = result.to_dict()
+
+        # Add entity sample if available
+        if result.entities:
+            entity_sample = []
+            for entity in result.entities[:MAX_ELEMENTS_IN_RESULT]:
+                entity_type = (
+                    entity.entity_type.value
+                    if hasattr(entity.entity_type, 'value')
+                    else str(entity.entity_type)
+                )
+                entity_sample.append({
+                    "type": entity_type,
+                    "layer": entity.layer,
+                    "properties": {
+                        k: v for k, v in entity.properties.items()
+                        if k in ("start", "end", "center", "radius", "content", "block_name")
+                    },
+                })
+            response_data["entities_sample"] = entity_sample
+            response_data["entities_truncated"] = len(result.entities) > MAX_ELEMENTS_IN_RESULT
+
+        if result.success:
+            return success_result(
+                data=response_data,
+                message=(
+                    f"Vectorization complete: {result.total_entities} entities "
+                    f"in {round(result.total_duration_ms / 1000, 1)}s"
+                ),
+            )
+        else:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                f"Pipeline failed: {result.error}"
+            )
+
+    except Exception as e:
+        logger.exception("vectorize_pdf_failed", error=str(e))
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            f"Vectorization failed: {e}"
         )

@@ -15,6 +15,11 @@ from aec_agent.cache.sqlite_cache import CacheManager
 from aec_agent.config.settings import get_settings
 from aec_agent.mcp.concurrency import ToolLock
 
+# Apply SSE keep-alive patch BEFORE creating FastMCP instance
+# This fixes ReadTimeout errors by sending periodic ping events
+from aec_agent.mcp.sse_keepalive import apply_sse_keepalive_patch
+apply_sse_keepalive_patch()
+
 logger = structlog.get_logger(__name__)
 
 # Global instances

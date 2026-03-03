@@ -413,12 +413,14 @@ class MCPClient:
                 headers["X-Session-Token"] = self.session_token
 
             # Connect to MCP server via SSE
+            # Use configurable timeouts to prevent ReadTimeout errors
+            settings = get_settings()
             read_stream, write_stream = await self._exit_stack.enter_async_context(
                 sse_client(
                     url=sse_url,
                     headers=headers,
-                    timeout=5.0,
-                    sse_read_timeout=300.0,  # 5 minutes for long operations
+                    timeout=settings.mcp_sse_connect_timeout,
+                    sse_read_timeout=settings.mcp_sse_read_timeout,
                 )
             )
 
