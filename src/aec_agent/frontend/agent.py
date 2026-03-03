@@ -801,7 +801,7 @@ class GroqBackend(LLMBackend):
 class GeminiBackend(LLMBackend):
     """Google Gemini backend using the new google.genai SDK."""
 
-    def __init__(self, api_key: str, model: str = "gemini-2.0-flash"):
+    def __init__(self, api_key: str, model: str = "gemini-1.5-flash"):
         self.api_key = api_key
         self.model = model
         self._client = None
@@ -912,8 +912,10 @@ class GeminiBackend(LLMBackend):
         system_instruction, contents = self._convert_messages_to_gemini(messages)
         gemini_tools = self._convert_tools_to_gemini(tools)
 
-        max_retries = 3
-        base_delay = 2.0
+        # Resilient retry settings for rate limiting
+        max_retries = 8
+        base_delay = 10.0
+        max_delay = 300.0  # Cap at 5 minutes
 
         for attempt in range(max_retries + 1):
             try:
@@ -960,13 +962,20 @@ class GeminiBackend(LLMBackend):
             except Exception as e:
                 error_str = str(e)
                 # Check if it's a rate limit error (429)
-                if ("429" in error_str or "Resource exhausted" in error_str) and attempt < max_retries:
-                    delay = base_delay * (2 ** attempt)
+                is_rate_limit = (
+                    "429" in error_str or
+                    "Resource exhausted" in error_str or
+                    "RESOURCE_EXHAUSTED" in error_str
+                )
+                if is_rate_limit and attempt < max_retries:
+                    # Exponential backoff with cap
+                    delay = min(base_delay * (2 ** attempt), max_delay)
                     logger.warning(
                         "Gemini rate limited, retrying",
                         attempt=attempt + 1,
                         max_retries=max_retries,
                         delay_seconds=delay,
+                        error=error_str[:100],
                     )
                     await asyncio.sleep(delay)
                     continue
@@ -995,8 +1004,10 @@ class GeminiBackend(LLMBackend):
         client = self._get_client()
         system_instruction, contents = self._convert_messages_to_gemini(messages)
 
-        max_retries = 3
-        base_delay = 2.0
+        # Resilient retry settings for rate limiting
+        max_retries = 8
+        base_delay = 10.0
+        max_delay = 300.0  # Cap at 5 minutes
 
         for attempt in range(max_retries + 1):
             try:
@@ -1021,13 +1032,20 @@ class GeminiBackend(LLMBackend):
             except Exception as e:
                 error_str = str(e)
                 # Check if it's a rate limit error (429)
-                if ("429" in error_str or "Resource exhausted" in error_str) and attempt < max_retries:
-                    delay = base_delay * (2 ** attempt)
+                is_rate_limit = (
+                    "429" in error_str or
+                    "Resource exhausted" in error_str or
+                    "RESOURCE_EXHAUSTED" in error_str
+                )
+                if is_rate_limit and attempt < max_retries:
+                    # Exponential backoff with cap
+                    delay = min(base_delay * (2 ** attempt), max_delay)
                     logger.warning(
                         "Gemini stream rate limited, retrying",
                         attempt=attempt + 1,
                         max_retries=max_retries,
                         delay_seconds=delay,
+                        error=error_str[:100],
                     )
                     await asyncio.sleep(delay)
                     continue

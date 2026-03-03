@@ -168,7 +168,7 @@ class Settings(BaseSettings):
 
     gemini_model: str = Field(
         default="gemini-2.0-flash",
-        description="Gemini model to use (gemini-2.0-flash recommended - has free tier)"
+        description="Gemini model to use (gemini-2.0-flash for vision tools)"
     )
 
     # Provider fallback chain

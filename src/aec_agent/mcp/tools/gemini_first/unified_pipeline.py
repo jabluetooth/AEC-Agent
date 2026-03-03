@@ -105,7 +105,7 @@ class PipelineConfig:
     super_resolution_scale: int = 4
 
     # === Stage 3: Gemini Analysis ===
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-2.5-flash"
     analyze_scale: bool = True
     analyze_layers: bool = True
 
@@ -133,8 +133,8 @@ class PipelineConfig:
     duplicate_tolerance_px: float = 2.0
 
     # === Stage 7: Validation (optional) ===
-    validate: bool = False
-    gemini_visual_qa: bool = False
+    validate: bool = True
+    gemini_visual_qa: bool = True
     max_validation_iterations: int = 3
 
     # === Stage 8: Output ===
@@ -578,7 +578,7 @@ class UnifiedPipeline:
 
             render_result = await render_pdf_high_quality_async(
                 pdf_path=pdf_path,
-                page=page,
+                page_number=page,
                 dpi=self.config.dpi,
                 output_dir=output_dir,
             )

@@ -46,7 +46,7 @@ async def gemini_call_with_retry(
     generation_config: dict,
     max_retries: int = 8,
     base_delay: float = 10.0,
-    model_name: str = "gemini-2.0-flash",
+    model_name: str = "gemini-1.5-flash",
     timeout_seconds: float = 120.0,
 ) -> str:
     """

@@ -82,7 +82,7 @@ class BestPracticesConfig:
     super_resolution_scale: int = 4
 
     # Stage 3: Gemini Analysis
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-1.5-flash"
     analyze_scale: bool = True
     analyze_drawing_type: bool = True
     analyze_layers: bool = True

@@ -405,7 +405,7 @@ async def validate_with_gemini(
     creation_result: AutoCADCreationResult,
     extraction_result: Optional[ExtractionResult] = None,
     analysis: Optional[DrawingAnalysis] = None,
-    model: str = "gemini-2.0-flash",
+    model: str = "gemini-1.5-flash",
 ) -> dict:
     """
     Use Gemini Vision to validate created entities against original image.
@@ -435,14 +435,14 @@ async def validate_with_gemini(
     from . import get_gemini_client, gemini_call_with_retry
     client = get_gemini_client(api_key)
 
-    # Map all model names to gemini-2.0-flash (has free tier)
+    # Map all model names to gemini-1.5-flash (stable, good rate limits)
     # Pro models don't have free tier - always use Flash
     model_mapping = {
-        "gemini-pro-latest": "gemini-2.0-flash",
-        "gemini-flash-latest": "gemini-2.0-flash",
-        "gemini-1.5-pro": "gemini-2.0-flash",
-        "gemini-1.5-flash": "gemini-2.0-flash",
-        "gemini-3-pro": "gemini-2.0-flash",  # Pro has no free tier
+        "gemini-pro-latest": "gemini-1.5-flash",
+        "gemini-flash-latest": "gemini-1.5-flash",
+        "gemini-1.5-pro": "gemini-1.5-flash",
+        "gemini-2.0-flash": "gemini-1.5-flash",
+        "gemini-3-pro": "gemini-1.5-flash",  # Pro has no free tier
     }
     actual_model = model_mapping.get(model, model)
 
@@ -607,7 +607,7 @@ async def validate_extraction(
     calibration: Optional[ScaleCalibration] = None,
     max_iterations: int = 3,
     apply_corrections_enabled: bool = True,
-    model: str = "gemini-2.0-flash",
+    model: str = "gemini-1.5-flash",
     call_command: Optional[Callable] = None,
 ) -> ValidationResult:
     """
