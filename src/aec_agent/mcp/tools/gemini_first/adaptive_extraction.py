@@ -261,10 +261,14 @@ class EntityToCreate:
     @classmethod
     def from_dict(cls, data: dict) -> "EntityToCreate":
         """Create from dictionary."""
+        # Ensure properties is a dict (guard against malformed JSON)
+        props = data.get("properties", {})
+        if not isinstance(props, dict):
+            props = {}
         return cls(
             entity_type=data["entity_type"],
             layer=data["layer"],
-            properties=data["properties"],
+            properties=props,
             source=data.get("source", "direct"),
             confidence=data.get("confidence", 1.0),
             source_element=data.get("source_element"),

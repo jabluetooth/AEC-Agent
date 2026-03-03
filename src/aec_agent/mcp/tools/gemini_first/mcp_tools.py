@@ -151,7 +151,8 @@ async def _store_extraction_to_database(
             geom_wkt = None
             centroid = None
 
-            props = entity.properties or {}
+            # Ensure properties is a dict (guard against malformed data)
+            props = entity.properties if isinstance(entity.properties, dict) else {}
             entity_type = entity.entity_type.value if hasattr(entity.entity_type, "value") else str(entity.entity_type)
 
             if entity_type == "LINE":
