@@ -1343,10 +1343,13 @@ async def raster_pdf_to_vector_pipeline(
     collinear_merge: bool = True,
 ) -> dict:
     """
-    PRIMARY TOOL for converting any PDF or image file to AutoCAD vector
-    entities.  Accepts PDF, TIFF, PNG, JPG, and BMP files.  Use this tool
-    whenever the user wants to vectorize, trace, or convert a file to CAD
-    entities.  Do NOT call raster_auto_vectorize, raster_convert_pdf,
+    REQUIRES AutoCAD Raster Design add-on. For standard PDF vectorization,
+    use vectorize_pdf instead (Gemini + OpenCV, no add-ons required).
+
+    This tool uses AutoCAD's Raster Design toolset to convert PDF or image
+    files to AutoCAD vector entities.  Accepts PDF, TIFF, PNG, JPG, and BMP.
+    Only use this if you specifically need Raster Design features or the user
+    explicitly requests it. Do NOT call raster_auto_vectorize, raster_convert_pdf,
     raster_attach_image, or raster_cleanup individually.
 
     Pipeline steps (all automatic, all inside this one call):

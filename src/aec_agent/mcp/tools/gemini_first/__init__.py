@@ -529,6 +529,124 @@ from .unified_pipeline import (
     vectorize_pdf,
 )
 
+# Phase A (Scan2CAD Parity): Linetype Detection
+from .linetype_detection import (
+    LinetypeName,
+    LinetypeResult,
+    LinetypeConfig,
+    detect_linetype,
+    detect_linetypes_batch,
+    map_to_autocad_linetype,
+    parse_linetype_name,
+    LINETYPE_PATTERNS,
+)
+
+# Phase A (Scan2CAD Parity): Bezier Curve Fitting
+from .bezier_fitting import (
+    BezierCurve,
+    CurveSegment,
+    BezierFitConfig,
+    fit_bezier_to_points,
+    detect_corners,
+    detect_curves,
+    curves_to_spline_data,
+)
+
+# Phase A (Scan2CAD Parity): DXF Export
+from .dxf_export import (
+    DXFVersion,
+    Units as DXFUnits,
+    DXFExportConfig,
+    DXFExportResult,
+    DXFExporter,
+    export_to_dxf,
+    is_ezdxf_available,
+)
+
+# Phase A (Scan2CAD Parity): Line Thickness Detection
+from .thickness_detection import (
+    ThicknessCategory,
+    ThicknessResult,
+    ThicknessConfig,
+    detect_line_thickness,
+    detect_thickness_batch,
+    pixels_to_mm,
+    mm_to_lineweight,
+    categorize_thickness,
+    suggest_layer_from_thickness,
+    AUTOCAD_LINEWEIGHTS,
+)
+
+# Phase B (Scan2CAD Parity): Batch Processing
+from .batch_processor import (
+    BatchStatus,
+    FileStatus,
+    FileResult,
+    BatchConfig,
+    BatchResult,
+    BatchProcessor,
+    process_batch,
+    process_batch_sync,
+    get_batch_status,
+    cancel_batch,
+)
+
+# Phase B (Scan2CAD Parity): Polyline Auto-Join
+from .polyline_builder import (
+    PolylineConfig,
+    PolylineResult,
+    EndpointGraph,
+    build_polylines,
+    auto_join_lines,
+)
+
+# Phase C (Scan2CAD Parity): Preview Generation
+from .preview_generator import (
+    PreviewConfig,
+    PreviewResult,
+    generate_preview,
+    generate_preview_from_pipeline,
+    ENTITY_COLORS,
+    LAYER_COLORS,
+)
+
+# Phase C (Scan2CAD Parity): Conversion Profiles
+from .profiles import (
+    ProfileType,
+    LayerMapping,
+    ExtractionSettings,
+    ScaleSettings,
+    OutputSettings,
+    ConversionProfile,
+    get_profile,
+    get_profile_by_name,
+    get_architectural_profile,
+    get_mechanical_profile,
+    get_electrical_profile,
+    get_structural_profile,
+    get_civil_profile,
+    get_hvac_profile,
+    get_plumbing_profile,
+    get_fire_alarm_profile,
+    get_general_profile,
+    register_custom_profile,
+    list_profiles,
+    auto_detect_profile,
+    create_custom_profile,
+)
+
+# Phase C (Scan2CAD Parity): Ellipse Detection
+from .ellipse_detection import (
+    DetectedEllipse,
+    EllipseDetectionConfig,
+    EllipseDetectionResult,
+    detect_ellipses,
+    ellipse_to_entity,
+    detect_ellipses_in_regions,
+    fit_ellipse_to_arcs,
+    is_ellipse_detection_available,
+)
+
 # Import MCP tools to register them with the server
 from . import mcp_tools
 
@@ -821,6 +939,97 @@ __all__ = [
     "GeometryRefinementPipeline",
     "ExtractionFactory",
     "vectorize_pdf",
+    # Phase A (Scan2CAD Parity): Linetype Detection
+    "LinetypeName",
+    "LinetypeResult",
+    "LinetypeConfig",
+    "detect_linetype",
+    "detect_linetypes_batch",
+    "map_to_autocad_linetype",
+    "parse_linetype_name",
+    "LINETYPE_PATTERNS",
+    # Phase A (Scan2CAD Parity): Bezier Curve Fitting
+    "BezierCurve",
+    "CurveSegment",
+    "BezierFitConfig",
+    "fit_bezier_to_points",
+    "detect_corners",
+    "detect_curves",
+    "curves_to_spline_data",
+    # Phase A (Scan2CAD Parity): DXF Export
+    "DXFVersion",
+    "DXFUnits",
+    "DXFExportConfig",
+    "DXFExportResult",
+    "DXFExporter",
+    "export_to_dxf",
+    "is_ezdxf_available",
+    # Phase A (Scan2CAD Parity): Line Thickness Detection
+    "ThicknessCategory",
+    "ThicknessResult",
+    "ThicknessConfig",
+    "detect_line_thickness",
+    "detect_thickness_batch",
+    "pixels_to_mm",
+    "mm_to_lineweight",
+    "categorize_thickness",
+    "suggest_layer_from_thickness",
+    "AUTOCAD_LINEWEIGHTS",
+    # Phase B (Scan2CAD Parity): Batch Processing
+    "BatchStatus",
+    "FileStatus",
+    "FileResult",
+    "BatchConfig",
+    "BatchResult",
+    "BatchProcessor",
+    "process_batch",
+    "process_batch_sync",
+    "get_batch_status",
+    "cancel_batch",
+    # Phase B (Scan2CAD Parity): Polyline Auto-Join
+    "PolylineConfig",
+    "PolylineResult",
+    "EndpointGraph",
+    "build_polylines",
+    "auto_join_lines",
+    # Phase C (Scan2CAD Parity): Preview Generation
+    "PreviewConfig",
+    "PreviewResult",
+    "generate_preview",
+    "generate_preview_from_pipeline",
+    "ENTITY_COLORS",
+    "LAYER_COLORS",
+    # Phase C (Scan2CAD Parity): Conversion Profiles
+    "ProfileType",
+    "LayerMapping",
+    "ExtractionSettings",
+    "ScaleSettings",
+    "OutputSettings",
+    "ConversionProfile",
+    "get_profile",
+    "get_profile_by_name",
+    "get_architectural_profile",
+    "get_mechanical_profile",
+    "get_electrical_profile",
+    "get_structural_profile",
+    "get_civil_profile",
+    "get_hvac_profile",
+    "get_plumbing_profile",
+    "get_fire_alarm_profile",
+    "get_general_profile",
+    "register_custom_profile",
+    "list_profiles",
+    "auto_detect_profile",
+    "create_custom_profile",
+    # Phase C (Scan2CAD Parity): Ellipse Detection
+    "DetectedEllipse",
+    "EllipseDetectionConfig",
+    "EllipseDetectionResult",
+    "detect_ellipses",
+    "ellipse_to_entity",
+    "detect_ellipses_in_regions",
+    "fit_ellipse_to_arcs",
+    "is_ellipse_detection_available",
     # MCP tools module
     "mcp_tools",
 ]

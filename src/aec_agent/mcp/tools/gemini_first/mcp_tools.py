@@ -1774,13 +1774,16 @@ async def gemini_create_entities(
     create_layers: bool = True,
 ) -> dict[str, Any]:
     """
-    Extract entities from a PDF and create them in AutoCAD.
+    DEPRECATED: Use vectorize_pdf with create_in_autocad=True instead.
+    This tool only extracts text (MTEXT) reliably. For full geometry
+    extraction (lines, circles, arcs), use vectorize_pdf with
+    extraction_method="hybrid".
 
-    This combines Phases 1-5 of the Gemini-First pipeline:
+    Legacy tool that combines Phases 1-5 of the Gemini-First pipeline:
     1. Phase 1: Render PDF to high-quality image
     2. Phase 2: Analyze with Gemini Vision
     3. Phase 3: Calibrate coordinates
-    4. Phase 4: Extract entities
+    4. Phase 4: Extract entities (Gemini-only, no OpenCV)
     5. Phase 5: Create entities in AutoCAD
 
     Args:
@@ -3697,10 +3700,12 @@ async def vectorize_pdf(
     grid_size_px: float = 5.0,
 ) -> dict[str, Any]:
     """
-    Unified PDF to AutoCAD vectorization pipeline.
+    PRIMARY TOOL for PDF to AutoCAD vectorization. Use this tool whenever
+    the user wants to vectorize a PDF, convert PDF to CAD, or create AutoCAD
+    entities from a PDF drawing.
 
-    This is the RECOMMENDED tool for PDF vectorization. It consolidates all
-    previous vectorization tools into a single, configurable entry point.
+    This is the unified pipeline using Gemini Vision + OpenCV (no add-ons required).
+    It consolidates all vectorization tools into a single, configurable entry point.
 
     Pipeline stages (configurable):
     1. PDF Rendering (always)
@@ -3863,4 +3868,442 @@ async def vectorize_pdf(
         return error_result(
             ErrorCode.INTERNAL_ERROR,
             f"Vectorization failed: {e}"
+        )
+
+
+# =============================================================================
+# Scan2CAD Parity Tools - Batch Processing, DXF Export, Preview, Profiles
+# =============================================================================
+
+
+@mcp.tool()
+async def batch_process_pdfs(
+    input_dir: str,
+    output_dir: str,
+    file_pattern: str = "*.pdf",
+    max_parallel: int = 4,
+    extraction_method: str = "hybrid",
+    export_dxf: bool = True,
+    overwrite_existing: bool = False,
+) -> dict[str, Any]:
+    """
+    Batch process multiple PDF files to vectorize them.
+
+    Processes all matching PDFs in a directory with parallel execution,
+    error isolation per file, and comprehensive reporting.
+
+    Args:
+        input_dir: Directory containing PDF files
+        output_dir: Directory for output files (DXF, previews)
+        file_pattern: Glob pattern for files (default "*.pdf")
+        max_parallel: Maximum concurrent files (default 4)
+        extraction_method: Extraction method (direct, hybrid, best, vtracer)
+        export_dxf: Export results to DXF files (default True)
+        overwrite_existing: Overwrite existing output files (default False)
+
+    Returns:
+        Batch result with status and per-file results
+    """
+    try:
+        from pathlib import Path
+        from .batch_processor import BatchConfig, BatchProcessor
+
+        input_path = Path(input_dir)
+        output_path = Path(output_dir)
+
+        if not input_path.exists():
+            return error_result(
+                ErrorCode.FILE_NOT_FOUND,
+                f"Input directory not found: {input_dir}"
+            )
+
+        # Create output directory if needed
+        output_path.mkdir(parents=True, exist_ok=True)
+
+        config = BatchConfig(
+            input_dir=input_path,
+            output_dir=output_path,
+            file_pattern=file_pattern,
+            max_parallel=max_parallel,
+            extraction_method=extraction_method,
+            export_dxf=export_dxf,
+            overwrite_existing=overwrite_existing,
+        )
+
+        processor = BatchProcessor(config)
+        result = await processor.process()
+
+        return success_result(
+            data=result.to_dict(),
+            message=(
+                f"Batch complete: {result.success_count}/{result.total_files} "
+                f"succeeded ({result.success_rate:.0%})"
+            ),
+        )
+
+    except Exception as e:
+        logger.exception("batch_process_failed", error=str(e))
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            f"Batch processing failed: {e}"
+        )
+
+
+@mcp.tool()
+async def export_entities_to_dxf(
+    pdf_path: str,
+    output_path: str,
+    page: int = 1,
+    extraction_method: str = "hybrid",
+    dxf_version: str = "R2018",
+    units: str = "inches",
+) -> dict[str, Any]:
+    """
+    Extract entities from a PDF and export directly to DXF file.
+
+    Does NOT require AutoCAD - uses ezdxf library for standalone DXF generation.
+
+    Args:
+        pdf_path: Path to input PDF file
+        output_path: Path for output DXF file
+        page: Page number (1-indexed, default 1)
+        extraction_method: Extraction method (direct, hybrid, best, vtracer)
+        dxf_version: DXF version (R12, R2000, R2004, R2007, R2010, R2013, R2018)
+        units: Drawing units (inches, feet, mm, cm, m)
+
+    Returns:
+        Export result with entity count and output path
+    """
+    try:
+        from pathlib import Path
+        from .dxf_export import (
+            export_to_dxf,
+            DXFExportConfig,
+            DXFVersion,
+            Units as DXFUnits,
+            is_ezdxf_available,
+        )
+        from .unified_pipeline import (
+            UnifiedPipeline,
+            PipelineConfig,
+            ExtractionMethod,
+        )
+
+        if not is_ezdxf_available():
+            return error_result(
+                ErrorCode.MODULE_NOT_FOUND,
+                "ezdxf library not installed. Run: pip install ezdxf"
+            )
+
+        pdf_file = Path(pdf_path)
+        if not pdf_file.exists():
+            return error_result(
+                ErrorCode.FILE_NOT_FOUND,
+                f"PDF file not found: {pdf_path}"
+            )
+
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Run extraction pipeline
+        config = PipelineConfig(
+            extraction_method=ExtractionMethod(extraction_method),
+            create_in_autocad=False,  # Don't need AutoCAD
+        )
+        pipeline = UnifiedPipeline(config)
+        result = await pipeline.process(
+            pdf_path=str(pdf_file),
+            page=page - 1,  # Convert to 0-indexed
+        )
+
+        if not result.success or not result.entities:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                f"Extraction failed: {result.error or 'No entities extracted'}"
+            )
+
+        # Export to DXF
+        try:
+            version = DXFVersion(dxf_version)
+        except ValueError:
+            version = DXFVersion.R2018
+
+        try:
+            dxf_units = DXFUnits(units.lower())
+        except ValueError:
+            dxf_units = DXFUnits.INCHES
+
+        export_config = DXFExportConfig(
+            version=version,
+            units=dxf_units,
+        )
+
+        export_result = export_to_dxf(
+            result.entities,
+            output_file,
+            export_config,
+        )
+
+        if export_result.success:
+            return success_result(
+                data=export_result.to_dict(),
+                message=(
+                    f"DXF export complete: {export_result.entity_count} entities "
+                    f"to {output_path}"
+                ),
+            )
+        else:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                f"DXF export failed: {', '.join(export_result.errors)}"
+            )
+
+    except Exception as e:
+        logger.exception("export_dxf_failed", error=str(e))
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            f"DXF export failed: {e}"
+        )
+
+
+@mcp.tool()
+async def generate_vectorization_preview(
+    pdf_path: str,
+    output_path: str,
+    page: int = 1,
+    extraction_method: str = "hybrid",
+    include_legend: bool = True,
+    overlay_alpha: float = 0.6,
+) -> dict[str, Any]:
+    """
+    Generate a visual preview of vectorization results.
+
+    Creates an image showing extracted entities overlaid on the original PDF,
+    color-coded by entity type. Useful for quality assessment before AutoCAD creation.
+
+    Args:
+        pdf_path: Path to input PDF file
+        output_path: Path for output preview image (PNG/JPEG)
+        page: Page number (1-indexed, default 1)
+        extraction_method: Extraction method (direct, hybrid, best, vtracer)
+        include_legend: Include entity count legend (default True)
+        overlay_alpha: Entity overlay opacity 0-1 (default 0.6)
+
+    Returns:
+        Preview result with entity counts and output path
+    """
+    try:
+        from pathlib import Path
+        from .preview_generator import generate_preview, PreviewConfig
+        from .unified_pipeline import (
+            UnifiedPipeline,
+            PipelineConfig,
+            ExtractionMethod,
+        )
+        from .pdf_intake import render_pdf_page
+
+        pdf_file = Path(pdf_path)
+        if not pdf_file.exists():
+            return error_result(
+                ErrorCode.FILE_NOT_FOUND,
+                f"PDF file not found: {pdf_path}"
+            )
+
+        output_file = Path(output_path)
+        output_file.parent.mkdir(parents=True, exist_ok=True)
+
+        # Render PDF to image
+        render_result = render_pdf_page(str(pdf_file), page - 1, dpi=300)
+        if not render_result or not render_result.image:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                "Failed to render PDF page"
+            )
+
+        # Run extraction pipeline
+        config = PipelineConfig(
+            extraction_method=ExtractionMethod(extraction_method),
+            create_in_autocad=False,
+        )
+        pipeline = UnifiedPipeline(config)
+        result = await pipeline.process(
+            pdf_path=str(pdf_file),
+            page=page - 1,
+        )
+
+        if not result.entities:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                f"Extraction failed: {result.error or 'No entities extracted'}"
+            )
+
+        # Generate preview
+        preview_config = PreviewConfig(
+            include_legend=include_legend,
+            overlay_alpha=overlay_alpha,
+        )
+
+        preview_result = generate_preview(
+            render_result.image,
+            result.entities,
+            str(output_file),
+            preview_config,
+        )
+
+        if preview_result.success:
+            return success_result(
+                data=preview_result.to_dict(),
+                message=(
+                    f"Preview generated: {preview_result.entity_count} entities "
+                    f"visualized in {output_path}"
+                ),
+            )
+        else:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                f"Preview generation failed: {preview_result.error}"
+            )
+
+    except Exception as e:
+        logger.exception("generate_preview_failed", error=str(e))
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            f"Preview generation failed: {e}"
+        )
+
+
+@mcp.tool()
+async def list_conversion_profiles() -> dict[str, Any]:
+    """
+    List all available conversion profiles.
+
+    Profiles provide pre-configured settings optimized for different drawing types:
+    - ARCHITECTURAL: Floor plans, elevations, sections
+    - MECHANICAL: Machine drawings, assemblies
+    - ELECTRICAL: Schematic diagrams, wiring diagrams
+    - STRUCTURAL: Beam layouts, foundation plans
+    - And more...
+
+    Returns:
+        List of available profiles with names and descriptions
+    """
+    try:
+        from .profiles import list_profiles
+
+        profiles = list_profiles()
+
+        return success_result(
+            data={
+                "profiles": profiles,
+                "count": len(profiles),
+            },
+            message=f"Found {len(profiles)} conversion profiles",
+        )
+
+    except Exception as e:
+        logger.exception("list_profiles_failed", error=str(e))
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            f"Failed to list profiles: {e}"
+        )
+
+
+@mcp.tool()
+async def get_conversion_profile(
+    profile_name: str,
+) -> dict[str, Any]:
+    """
+    Get details of a specific conversion profile.
+
+    Args:
+        profile_name: Profile name (architectural, mechanical, electrical, etc.)
+
+    Returns:
+        Profile configuration details
+    """
+    try:
+        from .profiles import get_profile_by_name
+
+        profile = get_profile_by_name(profile_name)
+
+        if profile is None:
+            return error_result(
+                ErrorCode.INVALID_PARAMETER,
+                f"Profile not found: {profile_name}"
+            )
+
+        return success_result(
+            data=profile.to_dict(),
+            message=f"Profile: {profile.name} - {profile.description}",
+        )
+
+    except Exception as e:
+        logger.exception("get_profile_failed", error=str(e))
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            f"Failed to get profile: {e}"
+        )
+
+
+@mcp.tool()
+async def auto_detect_drawing_profile(
+    pdf_path: str,
+    page: int = 1,
+) -> dict[str, Any]:
+    """
+    Automatically detect the best conversion profile for a drawing.
+
+    Analyzes the PDF with Gemini to determine the drawing type and
+    recommends the appropriate conversion profile.
+
+    Args:
+        pdf_path: Path to input PDF file
+        page: Page number (1-indexed, default 1)
+
+    Returns:
+        Recommended profile with confidence and reasoning
+    """
+    try:
+        from pathlib import Path
+        from .profiles import auto_detect_profile
+        from .gemini_understanding import analyze_drawing
+        from .pdf_intake import render_pdf_page
+
+        pdf_file = Path(pdf_path)
+        if not pdf_file.exists():
+            return error_result(
+                ErrorCode.FILE_NOT_FOUND,
+                f"PDF file not found: {pdf_path}"
+            )
+
+        # Render and analyze
+        render_result = render_pdf_page(str(pdf_file), page - 1, dpi=150)
+        if not render_result or not render_result.image:
+            return error_result(
+                ErrorCode.INTERNAL_ERROR,
+                "Failed to render PDF page"
+            )
+
+        analysis = await analyze_drawing(render_result.image)
+
+        # Detect profile
+        profile = auto_detect_profile(
+            analysis_result=analysis.to_dict() if analysis else None,
+            filename=pdf_file.name,
+        )
+
+        return success_result(
+            data={
+                "profile": profile.to_dict(),
+                "drawing_type": analysis.drawing_type.value if analysis else "unknown",
+                "filename": pdf_file.name,
+            },
+            message=f"Recommended profile: {profile.name}",
+        )
+
+    except Exception as e:
+        logger.exception("auto_detect_profile_failed", error=str(e))
+        return error_result(
+            ErrorCode.INTERNAL_ERROR,
+            f"Profile detection failed: {e}"
         )

@@ -75,6 +75,10 @@ class EntityType(str, Enum):
     BLOCK = "block"
     DIMENSION = "dimension"
     HATCH = "hatch"
+    # Phase A additions
+    SPLINE = "spline"
+    ELLIPSE = "ellipse"
+    LWPOLYLINE = "lwpolyline"
 
 
 # =============================================================================
@@ -247,6 +251,10 @@ class EntityToCreate:
     confidence: float = 1.0
     source_element: Optional[str] = None  # Original element ID/description
 
+    # Linetype and lineweight (Phase A additions)
+    linetype: str = "Continuous"  # AutoCAD linetype name
+    lineweight: float = 0.0  # Lineweight in mm (0 = default/bylayer)
+
     def to_dict(self) -> dict:
         """Convert to dictionary for serialization."""
         return {
@@ -256,6 +264,8 @@ class EntityToCreate:
             "source": self.source.value if isinstance(self.source, ExtractionSource) else self.source,
             "confidence": self.confidence,
             "source_element": self.source_element,
+            "linetype": self.linetype,
+            "lineweight": self.lineweight,
         }
 
     @classmethod
@@ -272,6 +282,8 @@ class EntityToCreate:
             source=data.get("source", "direct"),
             confidence=data.get("confidence", 1.0),
             source_element=data.get("source_element"),
+            linetype=data.get("linetype", "Continuous"),
+            lineweight=data.get("lineweight", 0.0),
         )
 
 
