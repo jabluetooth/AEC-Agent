@@ -167,8 +167,19 @@ class AutoCADExtractor(BaseExtractor):
                     }
                 )
 
+                # Guard against non-dict responses
+                if not isinstance(entity_response, dict):
+                    logger.warning(
+                        "Entity extraction failed - invalid response type",
+                        handle=handle,
+                        response_type=type(entity_response).__name__,
+                    )
+                    continue
+
                 if entity_response.get("success"):
                     entity_data = entity_response.get("data", {})
+                    if not isinstance(entity_data, dict):
+                        entity_data = {}
                     element = self._entity_to_element(entity_data, project_id)
                     if element:
                         await self._repository.upsert_element(element)
@@ -230,15 +241,27 @@ class AutoCADExtractor(BaseExtractor):
                 try:
                     response = await call_autocad_command("extract_all_entities", params)
 
+                    # Guard against non-dict responses (sidecar may return string on error)
+                    if not isinstance(response, dict):
+                        logger.error(
+                            "Extraction batch failed - invalid response type",
+                            response_type=type(response).__name__,
+                            response=str(response)[:200],
+                        )
+                        break
+
                     if not response.get("success"):
                         error = response.get("error", {})
+                        error_msg = error.get("message", "Unknown error") if isinstance(error, dict) else str(error)
                         logger.error(
                             "Extraction batch failed",
-                            error=error.get("message", "Unknown error")
+                            error=error_msg
                         )
                         break
 
                     data = response.get("data", {})
+                    if not isinstance(data, dict):
+                        data = {}
                     entities = data.get("entities", [])
 
                     if not entities:

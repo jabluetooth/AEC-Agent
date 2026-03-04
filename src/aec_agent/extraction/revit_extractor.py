@@ -239,15 +239,27 @@ class RevitExtractor(BaseExtractor):
                         sidecar_type="revit"
                     )
 
+                    # Guard against non-dict responses (sidecar may return string on error)
+                    if not isinstance(response, dict):
+                        logger.error(
+                            "Extraction batch failed - invalid response type",
+                            response_type=type(response).__name__,
+                            response=str(response)[:200],
+                        )
+                        break
+
                     if not response.get("success"):
                         error = response.get("error", {})
+                        error_msg = error.get("message", "Unknown error") if isinstance(error, dict) else str(error)
                         logger.error(
                             "Extraction batch failed",
-                            error=error.get("message", "Unknown error")
+                            error=error_msg
                         )
                         break
 
                     data = response.get("data", {})
+                    if not isinstance(data, dict):
+                        data = {}
                     elements = data.get("elements", [])
 
                     if not elements:
