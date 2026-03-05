@@ -178,6 +178,8 @@ class PipelineResult:
 
     # Stage outputs
     image_path: Optional[str] = None
+    image_width: Optional[int] = None
+    image_height: Optional[int] = None
     analysis: Optional[Any] = None  # DrawingAnalysis
     calibration: Optional[Any] = None  # ScaleCalibration
     entities: List[Any] = field(default_factory=list)  # EntityToCreate
@@ -587,8 +589,16 @@ class UnifiedPipeline:
                 stage="render",
                 success=True,
                 duration_ms=(time.perf_counter() - start) * 1000,
-                data={"image_path": render_result.image_path},
+                data={
+                    "image_path": render_result.image_path,
+                    "width_px": render_result.width_px,
+                    "height_px": render_result.height_px,
+                },
             ))
+
+            # Store dimensions in result for calibration stage
+            result.image_width = render_result.width_px
+            result.image_height = render_result.height_px
 
             return render_result.image_path
 
@@ -708,8 +718,10 @@ class UnifiedPipeline:
             from .coordinate_calibration import calibrate_from_analysis
 
             calibration = calibrate_from_analysis(
-                analysis,
-                dpi=self.config.dpi,
+                analysis=analysis,
+                image_width=result.image_width,
+                image_height=result.image_height,
+                image_dpi=self.config.dpi,
             )
 
             result.stages.append(StageResult(

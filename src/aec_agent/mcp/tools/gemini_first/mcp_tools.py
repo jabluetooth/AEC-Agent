@@ -2545,6 +2545,15 @@ async def gemini_hybrid_extract(
     create_in_autocad: bool = True,
 ) -> dict:
     """
+    DEPRECATED: Use `vectorize_pdf` instead.
+
+    MIGRATION: Replace with:
+        >>> result = await vectorize_pdf(
+        ...     pdf_path="drawing.pdf",
+        ...     extraction_method="hybrid",
+        ...     create_in_autocad=True,
+        ... )
+
     HYBRID EXTRACTION: Gemini + OpenCV + YOLO + OCR fusion for optimal PDF to vector.
 
     This tool combines the strengths of multiple extraction methods:
@@ -3518,9 +3527,19 @@ async def run_best_practices_vectorization(
     gemini_visual_qa: bool = True,
 ) -> dict[str, Any]:
     """
-    Run the Best Practices PDF to AutoCAD vectorization pipeline.
+    DEPRECATED: Use `vectorize_pdf` instead.
 
-    This is the recommended 7-stage pipeline that combines the optimal algorithms
+    MIGRATION: Replace with:
+        >>> result = await vectorize_pdf(
+        ...     pdf_path="drawing.pdf",
+        ...     extraction_method="best",
+        ...     preprocess=True,
+        ...     use_symbol_rag=True,
+        ...     refine_geometry=True,
+        ...     validate=True,
+        ... )
+
+    Legacy 7-stage pipeline that combines the optimal algorithms
     for each step as documented in docs/BEST_ALGORITHMS_PIPELINE.md:
 
     1. PDF Rendering (PyMuPDF @ 300-600 DPI, Real-ESRGAN super-resolution)
@@ -3692,7 +3711,7 @@ async def vectorize_pdf(
     preprocess: bool = True,
     use_symbol_rag: bool = True,
     refine_geometry: bool = True,
-    create_in_autocad: bool = False,
+    create_in_autocad: bool = True,
     validate: bool = False,
     dpi: int = 300,
     straighten_tolerance_deg: float = 5.0,
@@ -3887,7 +3906,10 @@ async def batch_process_pdfs(
     overwrite_existing: bool = False,
 ) -> dict[str, Any]:
     """
-    Batch process multiple PDF files to vectorize them.
+    Batch helper: Process multiple PDF files using vectorize_pdf internally.
+
+    Use this when you need to vectorize many PDFs at once. For single files,
+    use `vectorize_pdf` directly.
 
     Processes all matching PDFs in a directory with parallel execution,
     error isolation per file, and comprehensive reporting.

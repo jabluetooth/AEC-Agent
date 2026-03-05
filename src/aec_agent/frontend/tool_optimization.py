@@ -70,36 +70,41 @@ MINIMAL_DESCRIPTIONS = {
     "draw_rectangle_around": "Draw rectangle around element. Args: element, padding (0.5m), layer.",
     "get_distance_between": "Get distance between elements. Args: element1, element2.",
 
-    # Raster / Vectorization tools
-    # IMPORTANT: raster_pdf_to_vector_pipeline is THE primary tool for all file-to-CAD conversions.
-    # Other raster_* tools are low-level building blocks — the LLM should NOT call them directly.
+    # Vectorization tools
+    # IMPORTANT: vectorize_pdf is THE primary tool for all PDF-to-CAD conversions.
+    # It uses Gemini Vision + OpenCV for intelligent extraction. Other tools are legacy/low-level.
+    "vectorize_pdf": (
+        "PRIMARY TOOL: Convert PDF to AutoCAD vector entities using Gemini Vision + OpenCV. "
+        "Use this for ALL PDF vectorization requests. Handles the full pipeline automatically. "
+        "Uses AI understanding for semantic extraction + OpenCV for pixel-perfect geometry. "
+        "Args: pdf_path (str, required), page (int), extraction_method ('hybrid'/'direct'/'best'), "
+        "create_in_autocad (bool, default True), validate (bool)."
+    ),
     "raster_pdf_to_vector_pipeline": (
-        "PRIMARY TOOL: Convert any PDF or image (TIFF/PNG/JPG/BMP) to AutoCAD vector entities. "
-        "Use this for ALL vectorization requests. Handles the full pipeline automatically. "
-        "Uses FastLineDetector + HoughLinesP for lines, validated HoughCircles for circles. "
-        "Args: file_path (str, required), page (int), dpi (int), scale (float), mode ('auto'/'raster'/'vector')."
+        "LEGACY — use vectorize_pdf instead. Traditional raster-to-vector conversion. "
+        "Only use if specifically requested for high-fidelity legacy workflows."
     ),
     "raster_auto_vectorize": (
-        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "LOW-LEVEL — do NOT call directly. Use vectorize_pdf instead. "
         "Runs OpenCV detection on an already-processed bitonal TIFF only."
     ),
     "raster_import_pdf": (
-        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "LOW-LEVEL — do NOT call directly. Use vectorize_pdf instead. "
         "Imports vector PDF via PDFIMPORT. The pipeline tool calls this automatically."
     ),
     "raster_convert_pdf": (
-        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "LOW-LEVEL — do NOT call directly. Use vectorize_pdf instead. "
         "Converts PDF page to bitonal TIFF. The pipeline tool calls this automatically."
     ),
     "raster_attach_image": (
-        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "LOW-LEVEL — do NOT call directly. Use vectorize_pdf instead. "
         "Attaches a raster image to AutoCAD. The pipeline tool calls this automatically."
     ),
     "raster_cleanup": (
-        "LOW-LEVEL — do NOT call directly. Use raster_pdf_to_vector_pipeline instead. "
+        "LOW-LEVEL — do NOT call directly. Use vectorize_pdf instead. "
         "Despeckles/deskews raster image. The pipeline tool calls this automatically."
     ),
-    "raster_vectorize": "LOW-LEVEL — use raster_pdf_to_vector_pipeline instead. VTools vectorization.",
+    "raster_vectorize": "LOW-LEVEL — use vectorize_pdf instead. VTools vectorization.",
     "raster_ocr_extract": "Extract text from raster images using Raster Design OCR.",
     "raster_get_status": "Get info about raster images in the current AutoCAD drawing.",
     "raster_get_entity_count": "Count entities in drawing, optionally filtered by layer.",
@@ -299,7 +304,7 @@ TOOL_TIERS = {
         "autocad_get_drawing_info",
         "autocad_get_entities",
         "autocad_delete_entity",
-        "raster_pdf_to_vector_pipeline",
+        "vectorize_pdf",
         "revit_create_level",
         "revit_list_walls",
         "revit_list_rooms",

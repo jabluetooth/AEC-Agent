@@ -1343,13 +1343,22 @@ async def raster_pdf_to_vector_pipeline(
     collinear_merge: bool = True,
 ) -> dict:
     """
-    REQUIRES AutoCAD Raster Design add-on. For standard PDF vectorization,
-    use vectorize_pdf instead (Gemini + OpenCV, no add-ons required).
+    DEPRECATED: Use `vectorize_pdf` instead (Gemini + OpenCV, no add-ons required).
+
+    MIGRATION: Replace with:
+        >>> result = await vectorize_pdf(
+        ...     pdf_path="drawing.pdf",
+        ...     extraction_method="hybrid",
+        ...     create_in_autocad=True,
+        ... )
+
+    REQUIRES AutoCAD Raster Design add-on. Only use this if you specifically
+    need Raster Design features or the user explicitly requests traditional
+    raster-to-vector conversion.
 
     This tool uses AutoCAD's Raster Design toolset to convert PDF or image
     files to AutoCAD vector entities.  Accepts PDF, TIFF, PNG, JPG, and BMP.
-    Only use this if you specifically need Raster Design features or the user
-    explicitly requests it. Do NOT call raster_auto_vectorize, raster_convert_pdf,
+    Do NOT call raster_auto_vectorize, raster_convert_pdf,
     raster_attach_image, or raster_cleanup individually.
 
     Pipeline steps (all automatic, all inside this one call):

@@ -26,11 +26,11 @@ Tools: layers, drawing, levels, walls, rooms, queries, raster/vectorization.
 Rules: Brief explanations. Confirm deletes. Report errors with alternatives.
 Units: meters (Revit), drawing units (AutoCAD). One operation at a time.
 
-File handling: When the user uploads or references a file (PDF, TIFF, PNG, JPG, BMP):
-- For PDF files, ALWAYS start with the Gemini-First pipeline. Use gemini_analyze_pdf for comprehensive analysis and extraction.
-- For images or specific pages, use gemini_render_pdf and gemini_analyze_drawing to understand the drawing before vectorizing.
-- Use raster_pdf_to_vector_pipeline ONLY if traditional raster-to-vector conversion is specifically requested or as a fallback for high-fidelity legacy workflows.
-- NEVER call raster_auto_vectorize, raster_import_pdf, raster_convert_pdf, raster_attach_image, or raster_cleanup directly."""
+File handling: When the user uploads or references a PDF file:
+- ALWAYS use vectorize_pdf as the PRIMARY tool for PDF to AutoCAD conversion.
+- vectorize_pdf uses Gemini Vision + OpenCV for intelligent extraction and creates entities in AutoCAD.
+- Do NOT use raster_pdf_to_vector_pipeline, gemini_vectorize_pdf, gemini_complete_pipeline, or other legacy pipelines.
+- NEVER call low-level tools like raster_auto_vectorize, raster_import_pdf, raster_convert_pdf directly."""
 
 
 @dataclass

@@ -462,10 +462,20 @@ class MCPClient:
             except RuntimeError as e:
                 # AsyncExitStack may fail if closed from different task than entered
                 # This is expected with anyio/trio cancel scopes
-                if "cancel scope" in str(e).lower() or "different task" in str(e).lower():
-                    logger.debug("MCP client cleanup skipped (different task context)")
+                # Also handle "async generator ignored GeneratorExit" from SSE client
+                error_msg = str(e).lower()
+                if any(phrase in error_msg for phrase in [
+                    "cancel scope",
+                    "different task",
+                    "generatorexit",
+                    "async generator",
+                ]):
+                    logger.debug("MCP client cleanup skipped", reason=str(e))
                 else:
                     raise
+            except GeneratorExit:
+                # SSE client async generator cleanup
+                logger.debug("MCP client SSE generator closed")
             finally:
                 self._exit_stack = None
         self._session = None
