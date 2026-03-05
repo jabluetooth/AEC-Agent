@@ -127,10 +127,13 @@ class PipelineConfig:
     # === Stage 6: Geometry Refinement (optional) ===
     refine_geometry: bool = True
     straighten_tolerance_deg: float = 5.0  # Snap to H/V/45° if within tolerance
-    connect_tolerance_px: float = 10.0
+    connect_tolerance_px: float = 25.0  # Increased from 10 for better line continuity
     grid_size_px: float = 5.0
     remove_duplicates: bool = True
-    duplicate_tolerance_px: float = 2.0
+    duplicate_tolerance_px: float = 5.0  # Increased from 2 for better deduplication
+    merge_collinear_lines: bool = True  # Merge collinear line segments
+    collinear_angle_tolerance_deg: float = 3.0  # Angle tolerance for collinear detection
+    collinear_gap_tolerance_px: float = 20.0  # Max gap to merge collinear lines
 
     # === Stage 7: Validation (optional) ===
     validate: bool = True
@@ -235,11 +238,14 @@ class RefinementConfig:
     straighten_lines: bool = True
     straighten_tolerance_deg: float = 5.0
     connect_endpoints: bool = True
-    connect_tolerance_px: float = 10.0
+    connect_tolerance_px: float = 25.0  # Increased for better continuity
     snap_to_grid: bool = True
     grid_size_px: float = 5.0
     remove_duplicates: bool = True
-    duplicate_tolerance_px: float = 2.0
+    duplicate_tolerance_px: float = 5.0  # Increased for better deduplication
+    merge_collinear_lines: bool = True
+    collinear_angle_tolerance_deg: float = 3.0
+    collinear_gap_tolerance_px: float = 20.0
 
 
 class GeometryRefinementPipeline:
@@ -283,6 +289,7 @@ class GeometryRefinementPipeline:
             "input_count": len(entities),
             "lines_straightened": 0,
             "endpoints_connected": 0,
+            "collinear_merged": 0,
             "points_snapped": 0,
             "duplicates_removed": 0,
         }
@@ -305,7 +312,17 @@ class GeometryRefinementPipeline:
             )
             stats["endpoints_connected"] = len(adjustments)
 
-        # 3. Snap to grid
+        # 3. Merge collinear lines (reduces fragmentation)
+        if self.config.merge_collinear_lines:
+            original_count = len(current)
+            current = self._merge_collinear_lines(
+                current,
+                angle_tolerance=self.config.collinear_angle_tolerance_deg,
+                gap_tolerance=self.config.collinear_gap_tolerance_px,
+            )
+            stats["collinear_merged"] = original_count - len(current)
+
+        # 4. Snap to grid
         if self.config.snap_to_grid:
             current, adjustments = snap_to_grid(
                 current,
@@ -313,7 +330,7 @@ class GeometryRefinementPipeline:
             )
             stats["points_snapped"] = len(adjustments)
 
-        # 4. Remove duplicates
+        # 5. Remove duplicates
         if self.config.remove_duplicates:
             original_count = len(current)
             current, adjustments = remove_duplicate_lines(
@@ -325,6 +342,158 @@ class GeometryRefinementPipeline:
         stats["output_count"] = len(current)
 
         return current, stats
+
+    def _merge_collinear_lines(
+        self,
+        entities: List[Any],
+        angle_tolerance: float = 3.0,
+        gap_tolerance: float = 20.0,
+    ) -> List[Any]:
+        """
+        Merge collinear line segments that are close together.
+
+        This reduces fragmentation by combining line segments that:
+        1. Are nearly parallel (within angle_tolerance degrees)
+        2. Are collinear (lie on the same infinite line)
+        3. Have endpoints within gap_tolerance of each other
+
+        Args:
+            entities: List of entities
+            angle_tolerance: Max angle difference in degrees
+            gap_tolerance: Max gap between line endpoints to merge
+
+        Returns:
+            List with collinear lines merged
+        """
+        import math
+        from .adaptive_extraction import EntityType
+
+        # Separate lines from other entities
+        lines = []
+        other = []
+        for e in entities:
+            etype = e.entity_type.value if hasattr(e.entity_type, 'value') else str(e.entity_type)
+            if etype == "line":
+                lines.append(e)
+            else:
+                other.append(e)
+
+        if len(lines) < 2:
+            return entities
+
+        def get_line_angle(line):
+            """Get angle of line in degrees (0-180)."""
+            start = line.properties.get("start", (0, 0))
+            end = line.properties.get("end", (0, 0))
+            dx = end[0] - start[0]
+            dy = end[1] - start[1]
+            angle = math.degrees(math.atan2(dy, dx))
+            # Normalize to 0-180 range
+            if angle < 0:
+                angle += 180
+            return angle
+
+        def point_to_line_distance(px, py, x1, y1, x2, y2):
+            """Calculate perpendicular distance from point to line."""
+            dx = x2 - x1
+            dy = y2 - y1
+            length_sq = dx * dx + dy * dy
+            if length_sq == 0:
+                return math.sqrt((px - x1) ** 2 + (py - y1) ** 2)
+            t = max(0, min(1, ((px - x1) * dx + (py - y1) * dy) / length_sq))
+            proj_x = x1 + t * dx
+            proj_y = y1 + t * dy
+            return math.sqrt((px - proj_x) ** 2 + (py - proj_y) ** 2)
+
+        def can_merge(line1, line2):
+            """Check if two lines can be merged."""
+            # Check angle similarity
+            angle1 = get_line_angle(line1)
+            angle2 = get_line_angle(line2)
+            angle_diff = abs(angle1 - angle2)
+            if angle_diff > 90:
+                angle_diff = 180 - angle_diff
+            if angle_diff > angle_tolerance:
+                return False
+
+            # Get endpoints
+            s1 = line1.properties.get("start", (0, 0))
+            e1 = line1.properties.get("end", (0, 0))
+            s2 = line2.properties.get("start", (0, 0))
+            e2 = line2.properties.get("end", (0, 0))
+
+            # Check collinearity (all points near the infinite line)
+            for px, py in [s2, e2]:
+                dist = point_to_line_distance(px, py, s1[0], s1[1], e1[0], e1[1])
+                if dist > gap_tolerance:
+                    return False
+
+            # Check gap between segments
+            min_gap = min(
+                math.sqrt((s1[0] - s2[0]) ** 2 + (s1[1] - s2[1]) ** 2),
+                math.sqrt((s1[0] - e2[0]) ** 2 + (s1[1] - e2[1]) ** 2),
+                math.sqrt((e1[0] - s2[0]) ** 2 + (e1[1] - s2[1]) ** 2),
+                math.sqrt((e1[0] - e2[0]) ** 2 + (e1[1] - e2[1]) ** 2),
+            )
+            return min_gap <= gap_tolerance
+
+        def merge_two_lines(line1, line2):
+            """Merge two collinear lines into one."""
+            from copy import deepcopy
+
+            # Get all endpoints
+            s1 = line1.properties.get("start", (0, 0))
+            e1 = line1.properties.get("end", (0, 0))
+            s2 = line2.properties.get("start", (0, 0))
+            e2 = line2.properties.get("end", (0, 0))
+
+            all_points = [s1, e1, s2, e2]
+
+            # Find the two points that are furthest apart
+            max_dist = 0
+            best_start, best_end = s1, e1
+            for i, p1 in enumerate(all_points):
+                for j, p2 in enumerate(all_points):
+                    if i < j:
+                        dist = math.sqrt((p1[0] - p2[0]) ** 2 + (p1[1] - p2[1]) ** 2)
+                        if dist > max_dist:
+                            max_dist = dist
+                            best_start, best_end = p1, p2
+
+            # Create merged line
+            merged = deepcopy(line1)
+            merged.properties["start"] = best_start
+            merged.properties["end"] = best_end
+            return merged
+
+        # Iteratively merge collinear lines
+        merged_lines = lines.copy()
+        changed = True
+        while changed:
+            changed = False
+            new_lines = []
+            used = set()
+
+            for i, line1 in enumerate(merged_lines):
+                if i in used:
+                    continue
+
+                merged = line1
+                for j, line2 in enumerate(merged_lines):
+                    if j <= i or j in used:
+                        continue
+
+                    if can_merge(merged, line2):
+                        merged = merge_two_lines(merged, line2)
+                        used.add(j)
+                        changed = True
+
+                new_lines.append(merged)
+                used.add(i)
+
+            merged_lines = new_lines
+
+        return other + merged_lines
 
 
 # =============================================================================
@@ -631,10 +800,11 @@ class UnifiedPipeline:
 
             # Apply preprocessing steps
             if self.config.denoise:
-                img_array = denoise(img_array, h=self.config.denoise_strength)
+                img_array = denoise(img_array, strength=self.config.denoise_strength)
 
             if self.config.deskew:
-                img_array, _ = deskew(img_array)
+                deskew_result = deskew(img_array)
+                img_array = deskew_result.image
 
             if self.config.enhance_contrast:
                 img_array = enhance_contrast(img_array)
@@ -645,13 +815,29 @@ class UnifiedPipeline:
 
             # Save preprocessed image
             output_path = str(Path(image_path).with_suffix(".preprocessed.png"))
-            Image.fromarray(img_array).save(output_path)
+            preprocessed_img = Image.fromarray(img_array)
+            preprocessed_img.save(output_path)
+
+            # Update image dimensions if they changed (e.g., after deskew)
+            new_width, new_height = preprocessed_img.size
+            if new_width != result.image_width or new_height != result.image_height:
+                logger.info(
+                    "preprocess_dimensions_changed",
+                    old_size=(result.image_width, result.image_height),
+                    new_size=(new_width, new_height),
+                )
+                result.image_width = new_width
+                result.image_height = new_height
 
             result.stages.append(StageResult(
                 stage="preprocess",
                 success=True,
                 duration_ms=(time.perf_counter() - start) * 1000,
-                data={"output_path": output_path},
+                data={
+                    "output_path": output_path,
+                    "width": new_width,
+                    "height": new_height,
+                },
             ))
 
             return output_path
@@ -683,13 +869,29 @@ class UnifiedPipeline:
                 model=self.config.gemini_model,
             )
 
+            # Log detailed element counts
+            if analysis:
+                logger.info(
+                    "gemini_analysis_elements",
+                    drawing_type=analysis.drawing_type,
+                    lines=len(analysis.elements.lines),
+                    arcs=len(analysis.elements.arcs),
+                    circles=len(analysis.elements.circles),
+                    text=len(analysis.elements.text),
+                    symbols=len(analysis.elements.symbols),
+                    dimensions=len(analysis.elements.dimensions),
+                )
+
             result.stages.append(StageResult(
                 stage="analyze",
                 success=True,
                 duration_ms=(time.perf_counter() - start) * 1000,
                 data={
                     "drawing_type": analysis.drawing_type if analysis else None,
-                    "element_count": len(analysis.elements.lines) + len(analysis.elements.circles) if analysis else 0,
+                    "lines": len(analysis.elements.lines) if analysis else 0,
+                    "circles": len(analysis.elements.circles) if analysis else 0,
+                    "text": len(analysis.elements.text) if analysis else 0,
+                    "symbols": len(analysis.elements.symbols) if analysis else 0,
                 },
             ))
 
@@ -766,11 +968,26 @@ class UnifiedPipeline:
                 config=self.config,
             )
 
+            # Count entities by type
+            entity_counts = {}
+            for e in entities:
+                etype = e.entity_type.value if hasattr(e.entity_type, 'value') else str(e.entity_type)
+                entity_counts[etype] = entity_counts.get(etype, 0) + 1
+
+            logger.info(
+                "extraction_entity_counts",
+                total=len(entities),
+                by_type=entity_counts,
+            )
+
             result.stages.append(StageResult(
                 stage="extract",
                 success=True,
                 duration_ms=(time.perf_counter() - start) * 1000,
-                data={"entity_count": len(entities)},
+                data={
+                    "entity_count": len(entities),
+                    "by_type": entity_counts,
+                },
             ))
 
             return entities
@@ -855,6 +1072,9 @@ class UnifiedPipeline:
                 grid_size_px=self.config.grid_size_px,
                 remove_duplicates=self.config.remove_duplicates,
                 duplicate_tolerance_px=self.config.duplicate_tolerance_px,
+                merge_collinear_lines=self.config.merge_collinear_lines,
+                collinear_angle_tolerance_deg=self.config.collinear_angle_tolerance_deg,
+                collinear_gap_tolerance_px=self.config.collinear_gap_tolerance_px,
             )
 
             refinement = GeometryRefinementPipeline(refine_config)
@@ -890,11 +1110,19 @@ class UnifiedPipeline:
 
         try:
             from .autocad_creation import create_entities_in_autocad
+            from .adaptive_extraction import ExtractionResult
+
+            # Wrap entities in ExtractionResult for create_entities_in_autocad
+            extraction_result = ExtractionResult(
+                entities=entities,
+                drawing_type=result.analysis.drawing_type if result.analysis else "",
+                calibration_method=calibration.method if calibration else "",
+                calibration_confidence=calibration.confidence if calibration else 0.0,
+            )
 
             creation_result = await create_entities_in_autocad(
-                entities=entities,
-                calibration=calibration,
-                use_ncs_layers=self.config.use_ncs_layers,
+                extraction_result=extraction_result,
+                create_layers=self.config.use_ncs_layers,
             )
 
             result.entities_created = creation_result.statistics.success_count

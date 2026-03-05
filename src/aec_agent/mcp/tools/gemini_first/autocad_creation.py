@@ -561,7 +561,12 @@ async def create_block_entity(
     entity: EntityToCreate,
     call_command: Callable,
 ) -> EntityCreationResult:
-    """Create a block reference entity in AutoCAD."""
+    """Create a block reference entity in AutoCAD.
+
+    If the block doesn't exist in the drawing, creates a fallback:
+    - A point at the block location
+    - An MTEXT label with the block name
+    """
     props = entity.properties
 
     block_name = props.get("block_name", "")
@@ -613,11 +618,53 @@ async def create_block_entity(
                 source_element=entity.source_element,
             )
         else:
-            # Check for missing block definition
+            # Check for missing block definition - create fallback
             error_msg = str(result.get("error", {}).get("message", "Unknown error"))
             if "not found" in error_msg.lower() or "undefined" in error_msg.lower():
-                error_msg = f"Block '{block_name}' not defined in drawing. {error_msg}"
+                # Create fallback: circle + text label instead of block
+                logger.debug(
+                    "block_not_found_using_fallback",
+                    block_name=block_name,
+                    position=(pos_x, pos_y),
+                )
 
+                # Create a small circle as placeholder
+                circle_result = await call_command("draw_circle", {
+                    "center": [float(pos_x), float(pos_y), 0.0],
+                    "radius": 12.0 * float(scale) if scale > 0 else 12.0,
+                    "layer": entity.layer,
+                })
+
+                # Create text label with block name
+                label_text = block_name.replace("-", " ").replace("_", " ")
+                text_result = await call_command("draw_mtext", {
+                    "position": [float(pos_x), float(pos_y) - 15.0, 0.0],
+                    "content": label_text,
+                    "height": 6.0,
+                    "layer": entity.layer,
+                    "attachment_point": "MiddleCenter",
+                })
+
+                if circle_result.get("success") or text_result.get("success"):
+                    return EntityCreationResult(
+                        entity_type="block",
+                        layer=entity.layer,
+                        success=True,
+                        handle=circle_result.get("data", {}).get("handle"),
+                        source_element=entity.source_element,
+                        notes=f"Fallback: circle+text for missing block '{block_name}'",
+                    )
+
+                # Both fallbacks failed
+                return EntityCreationResult(
+                    entity_type="block",
+                    layer=entity.layer,
+                    success=False,
+                    error=f"Block '{block_name}' not found, fallback also failed",
+                    source_element=entity.source_element,
+                )
+
+            # Other error (not "not found")
             return EntityCreationResult(
                 entity_type="block",
                 layer=entity.layer,
