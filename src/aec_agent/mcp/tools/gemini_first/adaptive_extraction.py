@@ -2944,10 +2944,24 @@ async def _extract_text_entities(
 
     # Filter text entities from Gemini for fallback
     def get_gemini_text() -> List[EntityToCreate]:
-        return [
+        text_entities = [
             e for e in gemini_entities
             if e.entity_type in (EntityType.MTEXT, EntityType.TEXT, "mtext", "text")
         ]
+        logger.debug(
+            "gemini_text_entities_found",
+            total_gemini_entities=len(gemini_entities),
+            text_entities=len(text_entities),
+        )
+        return text_entities
+
+    # Log Gemini's raw text count from analysis
+    logger.info(
+        "text_extraction_starting",
+        gemini_text_elements=len(analysis.elements.text),
+        use_ocr=config.use_ocr_for_text_positions,
+        has_image_path=image_path is not None,
+    )
 
     # Try OCR anchoring if enabled and image available
     if config.use_ocr_for_text_positions and image_path:
@@ -2988,6 +3002,13 @@ async def _extract_text_entities(
     gemini_text = get_gemini_text()
     result.entities = gemini_text
     result.ocr_fallback = len(gemini_text)
+
+    logger.info(
+        "text_extraction_fallback_to_gemini",
+        text_entities=len(gemini_text),
+        gemini_analysis_text=len(analysis.elements.text),
+    )
+
     return result
 
 

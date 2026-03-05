@@ -59,7 +59,7 @@ class RefinementConfig:
 
     # Limits
     max_entities_per_batch: int = 50  # Process in batches for large drawings
-    max_refinement_iterations: int = 1  # Usually 1 pass is enough
+    max_refinement_iterations: int = 2  # 2 passes for better quality
 
 
 @dataclass

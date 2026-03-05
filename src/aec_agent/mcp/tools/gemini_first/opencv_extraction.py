@@ -386,8 +386,8 @@ class OpenCVExtractor:
         if cropped.size == 0:
             return []
 
-        # Create LSD detector
-        lsd = cv2.createLineSegmentDetector(cv2.LSD_REFINE_STD)
+        # Create LSD detector with advanced refinement for better quality
+        lsd = cv2.createLineSegmentDetector(cv2.LSD_REFINE_ADV)
 
         # Detect lines
         lines, widths, _, _ = lsd.detect(cropped)
@@ -662,7 +662,7 @@ class OpenCVExtractor:
     def detect_line_type(
         self,
         line: ExtractedLine,
-        sample_width: int = 3,
+        sample_width: int = 5,
     ) -> LineType:
         """
         Analyze a line to determine if it's dashed, dotted, center, etc.
@@ -676,34 +676,49 @@ class OpenCVExtractor:
 
         Args:
             line: The line to analyze
-            sample_width: Width of sampling corridor
+            sample_width: Width of sampling corridor (perpendicular to line)
 
         Returns:
             LineType enum
         """
-        # Sample pixels along the line
         x1, y1 = line.start
         x2, y2 = line.end
         length = line.length
 
-        if length < 20:
+        # Short lines can't have patterns
+        if length < 30:
             return LineType.CONTINUOUS
 
-        num_samples = int(length / 2)
-        if num_samples < 10:
-            num_samples = int(length)
+        # Sample every pixel for better accuracy
+        num_samples = max(int(length), 30)
+
+        # Calculate line direction and perpendicular
+        dx = (x2 - x1) / length if length > 0 else 0
+        dy = (y2 - y1) / length if length > 0 else 0
+        # Perpendicular direction
+        px, py = -dy, dx
 
         samples = []
 
         for i in range(num_samples):
             t = i / num_samples
-            x = int(x1 + t * (x2 - x1))
-            y = int(y1 + t * (y2 - y1))
+            cx = x1 + t * (x2 - x1)
+            cy = y1 + t * (y2 - y1)
 
-            if 0 <= x < self.width and 0 <= y < self.height:
-                samples.append(self.binary[y, x] > 127)
+            # Sample across line width (perpendicular)
+            ink_found = False
+            for w in range(-sample_width // 2, sample_width // 2 + 1):
+                x = int(cx + w * px)
+                y = int(cy + w * py)
 
-        if not samples or len(samples) < 5:
+                if 0 <= x < self.width and 0 <= y < self.height:
+                    if self.binary[y, x] > 127:
+                        ink_found = True
+                        break
+
+            samples.append(ink_found)
+
+        if not samples or len(samples) < 10:
             return LineType.UNKNOWN
 
         # Count transitions (ink to no-ink)
@@ -726,13 +741,28 @@ class OpenCVExtractor:
                 current_run = 1
         runs.append((samples[-1], current_run))
 
-        # Analyze run pattern for line type
-        if transitions < 2:
-            return LineType.CONTINUOUS
-
         # Get ink runs and gap runs
         ink_runs = [r[1] for r in runs if r[0]]
         gap_runs = [r[1] for r in runs if not r[0]]
+
+        # Log detection details for debugging (only for longer lines with patterns)
+        if transitions >= 2 and len(ink_runs) > 0 and len(gap_runs) > 0:
+            avg_ink = sum(ink_runs) / len(ink_runs)
+            avg_gap = sum(gap_runs) / len(gap_runs)
+            logger.debug(
+                "line_type_analysis",
+                length=length,
+                transitions=transitions,
+                ink_ratio=round(ink_ratio, 2),
+                avg_ink=round(avg_ink, 1),
+                avg_gap=round(avg_gap, 1),
+                num_ink_runs=len(ink_runs),
+                num_gap_runs=len(gap_runs),
+            )
+
+        # Continuous: few or no transitions
+        if transitions < 2:
+            return LineType.CONTINUOUS
 
         if not ink_runs or not gap_runs:
             return LineType.CONTINUOUS
@@ -740,23 +770,31 @@ class OpenCVExtractor:
         avg_ink = sum(ink_runs) / len(ink_runs)
         avg_gap = sum(gap_runs) / len(gap_runs)
 
-        # Dotted: short ink, regular gaps
-        if avg_ink < 4 and transitions > 8:
+        # Dotted: very short ink runs with gaps
+        # Typical dots are 1-3 pixels with similar gaps
+        if avg_ink <= 5 and transitions >= 6:
+            logger.debug("line_type_detected", line_type="DOTTED", avg_ink=avg_ink, transitions=transitions)
             return LineType.DOTTED
 
         # Center line: alternating long-short pattern (dash-dot-dash)
-        # Look for variation in ink run lengths
+        # Check for significant variation in ink run lengths
         if len(ink_runs) >= 3:
             ink_variance = max(ink_runs) / (min(ink_runs) + 0.1)
-            if ink_variance > 2.5 and transitions > 4:
+            if ink_variance > 2.0 and transitions >= 4:
+                logger.debug("line_type_detected", line_type="CENTER", ink_variance=ink_variance, transitions=transitions)
                 return LineType.CENTER
 
-        # Dashed: regular dashes with gaps
-        if transitions > 3 and avg_ink > avg_gap:
-            return LineType.DASHED
+        # Dashed/Hidden: regular dashes with gaps
+        # At least 2 complete dash-gap cycles (4+ transitions)
+        if transitions >= 4:
+            # Check for regular pattern (ink and gap sizes relatively similar)
+            if 0.2 < ink_ratio < 0.8:
+                logger.debug("line_type_detected", line_type="DASHED", ink_ratio=ink_ratio, transitions=transitions)
+                return LineType.DASHED
 
-        # Hidden line (shorter dashes)
-        if transitions > 4 and 0.3 < ink_ratio < 0.7:
+        # More lenient dashed detection for fewer transitions
+        if transitions >= 2 and 0.3 < ink_ratio < 0.7:
+            logger.debug("line_type_detected", line_type="DASHED", ink_ratio=ink_ratio, transitions=transitions)
             return LineType.DASHED
 
         return LineType.CONTINUOUS

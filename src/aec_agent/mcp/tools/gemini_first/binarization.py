@@ -73,6 +73,11 @@ class BinarizationConfig:
     # Output inversion (True = black foreground on white background)
     invert_output: bool = True
 
+    # Morphological post-processing (reduces noise, fills gaps)
+    apply_morphology: bool = True
+    morphology_kernel_size: int = 3  # 3x3 kernel for closing/opening
+    morphology_iterations: int = 1
+
     def __post_init__(self):
         if self.methods is None:
             # Default: use all methods
@@ -465,11 +470,32 @@ def ensemble_binarize(
     if config.invert_output:
         binary = 255 - binary
 
+    # Apply morphological operations to reduce noise and fill gaps
+    if config.apply_morphology:
+        kernel = cv2.getStructuringElement(
+            cv2.MORPH_RECT,
+            (config.morphology_kernel_size, config.morphology_kernel_size)
+        )
+        # Closing: fills small holes in foreground (text/lines)
+        binary = cv2.morphologyEx(
+            binary, cv2.MORPH_CLOSE, kernel, iterations=config.morphology_iterations
+        )
+        # Opening: removes small isolated noise
+        binary = cv2.morphologyEx(
+            binary, cv2.MORPH_OPEN, kernel, iterations=config.morphology_iterations
+        )
+        logger.debug(
+            "morphological_operations_applied",
+            kernel_size=config.morphology_kernel_size,
+            iterations=config.morphology_iterations,
+        )
+
     logger.info(
         "ensemble_binarization_complete",
         methods_used=len(method_results),
         voting_threshold=config.voting_threshold,
         foreground_ratio=float(np.mean(binary < 128)),
+        morphology_applied=config.apply_morphology,
     )
 
     return BinarizationResult(
