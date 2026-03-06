@@ -3,14 +3,24 @@
 
 ## Current Focus
 **Objective:** Phase 3 — Knowledge Base Query Tools
-**Status:** Best Practices Pipeline COMPLETE ✅
+**Status:** Knowledge Base MCP Tools COMPLETE ✅
 
 ## Next Steps
-1. Run database migration: `alembic upgrade head` (adds symbol_library table)
-2. Seed symbol library: `python -m aec_agent.mcp.tools.gemini_first.symbol_library_seed`
-3. Build `query_knowledge_base` MCP tool for codes/standards/formulas
-4. End-to-end test with real PDF + running sidecar
-5. Phase 4: Element placement tools (`place_revit_family`, `place_autocad_block`)
+1. End-to-end test with real PDF + running sidecar
+2. Phase 4: Element placement tools (`place_revit_family`, `place_autocad_block`)
+3. Phase 4: Engineering calculations (`calculate_hvac_load`, `calculate_circuit`)
+
+## Recently Completed (2026-03-06)
+- ✅ Database migration: `alembic upgrade head` (symbol_library table verified)
+- ✅ Symbol library seeded: 77 CAD symbols with CLIP embeddings
+  - 24 electrical, 14 mechanical, 14 plumbing, 12 fire, 13 architectural
+- ✅ Knowledge Base MCP Tools added (6 new tools):
+  - `query_cad_standards` - Query NCS layer/block/color for element types
+  - `query_knowledge_base` - LLM-powered natural language query
+  - `get_code_reference` - Building code references (CFC, NFPA, CEC, etc.)
+  - `classify_element` - Classify MEP element from text description
+  - `get_mep_rules` - Get MEP design rules (clearance, sizing, routing)
+  - `get_system_priorities` - MEP coordination priorities for clash detection
 
 ## Quick Reference
 | Area | Key File/Directory |
@@ -35,7 +45,7 @@
 | Metric | Value |
 |--------|-------|
 | Python LOC | ~25,000 |
-| MCP Tools | 51 (7 categories) |
+| MCP Tools | 57 (8 categories) |
 | Tests | 780+ passing |
 | DB Tables | 15 |
 
@@ -79,6 +89,14 @@
   - Stage 7: Output (scaled entities ready for AutoCAD)
   - MCP tool: `run_best_practices_vectorization`
   - 30 unit tests passing
+- [x] **Knowledge Base MCP Tools** (Phase 3 - Query codes/standards/formulas)
+  - `query_cad_standards`: Query NCS layer/block/color for element types
+  - `query_knowledge_base`: LLM-powered natural language query
+  - `get_code_reference`: Building code references (CA: CFC/CEC/CPC/CMC, NFPA 72)
+  - `classify_element`: Classify MEP element from text description
+  - `get_mep_rules`: MEP design rules (clearance, sizing, routing)
+  - `get_system_priorities`: MEP coordination priorities for clash detection
+  - 132 unit tests (127 passing)
 
 ## Key Patterns
 - **Tool results:** Return `{"success": False, "error": {...}}` — never raise exceptions
