@@ -71,7 +71,7 @@ def upgrade() -> None:
         ON symbol_library USING hnsw (embedding vector_cosine_ops)
         WITH (m = 16, ef_construction = 64);
     """)
-
+~
     # Indexes for filtering
     op.execute("""
         CREATE INDEX IF NOT EXISTS idx_symbol_library_domain

@@ -2574,9 +2574,9 @@ def _remove_lines_through_text(
 
             # Convert DWG coordinates back to pixels
             # This is approximate - we use inverse transform
-            if hasattr(calibration, 'from_dwg'):
-                start_px = calibration.from_dwg(*start_dwg)
-                end_px = calibration.from_dwg(*end_dwg)
+            if hasattr(calibration, 'to_pixels'):
+                start_px = calibration.to_pixels(*start_dwg)
+                end_px = calibration.to_pixels(*end_dwg)
             else:
                 # Fallback: assume 1:1 if no inverse available
                 start_px = start_dwg
@@ -2704,9 +2704,9 @@ def _remove_edge_artifacts(
             end = props.get("end", (0, 0))
 
             # Convert to pixels
-            if hasattr(calibration, 'from_dwg'):
-                start_px = calibration.from_dwg(*start)
-                end_px = calibration.from_dwg(*end)
+            if hasattr(calibration, 'to_pixels'):
+                start_px = calibration.to_pixels(*start)
+                end_px = calibration.to_pixels(*end)
             else:
                 start_px, end_px = start, end
 
@@ -2727,8 +2727,8 @@ def _remove_edge_artifacts(
             center = props.get("center", (0, 0))
             radius = props.get("radius", 0)
 
-            if hasattr(calibration, 'from_dwg'):
-                center_px = calibration.from_dwg(*center)
+            if hasattr(calibration, 'to_pixels'):
+                center_px = calibration.to_pixels(*center)
             else:
                 center_px = center
 

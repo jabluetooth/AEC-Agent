@@ -639,20 +639,24 @@ async def create_block_entity(
                 label_text = block_name.replace("-", " ").replace("_", " ")
                 text_result = await call_command("draw_mtext", {
                     "position": [float(pos_x), float(pos_y) - 15.0, 0.0],
-                    "content": label_text,
+                    "text": label_text,  # C# sidecar expects "text", not "content"
                     "height": 6.0,
                     "layer": entity.layer,
                     "attachment_point": "MiddleCenter",
                 })
 
                 if circle_result.get("success") or text_result.get("success"):
+                    logger.info(
+                        "block_fallback_created",
+                        block_name=block_name,
+                        position=(pos_x, pos_y),
+                    )
                     return EntityCreationResult(
                         entity_type="block",
                         layer=entity.layer,
                         success=True,
                         handle=circle_result.get("data", {}).get("handle"),
                         source_element=entity.source_element,
-                        notes=f"Fallback: circle+text for missing block '{block_name}'",
                     )
 
                 # Both fallbacks failed

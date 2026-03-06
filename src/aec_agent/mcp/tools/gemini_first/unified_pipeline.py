@@ -97,9 +97,9 @@ class PipelineConfig:
     # === Stage 2: Preprocessing (optional) ===
     preprocess: bool = True
     denoise: bool = True
-    denoise_strength: int = 10
+    denoise_strength: int = 5  # Reduced from 10 to preserve fine details (dashed lines)
     deskew: bool = True
-    binarize: bool = True
+    binarize: bool = False  # DISABLED - destroys grayscale info for lineweight detection
     enhance_contrast: bool = True
     super_resolution: bool = False  # Enable for low-DPI scans
     super_resolution_scale: int = 4
@@ -118,6 +118,13 @@ class PipelineConfig:
     extract_symbols: bool = True
     extract_dimensions: bool = True
     use_hawp_junctions: bool = True  # Neural junction detection (improves output by 15-25%)
+
+    # === Stage 4b: Curve Detection (ellipses, arcs, bezier) ===
+    detect_curves: bool = True  # Enable ellipse/arc/spline detection
+    detect_ellipses: bool = True  # Detect ellipses (not circles)
+    detect_splines: bool = True  # Fit bezier curves to curved contours
+    min_curve_length: int = 20  # Minimum contour length for curve fitting
+    curve_fit_tolerance: float = 2.0  # Max deviation for bezier fit (pixels)
 
     # === Stage 5: Symbol Recognition (optional) ===
     symbol_method: SymbolMethod = SymbolMethod.RAG
@@ -875,31 +882,35 @@ class UnifiedPipeline:
                 return result
             result.image_path = image_path
 
+            # IMPORTANT: Keep original image path for text/linetype/lineweight detection
+            original_image_path = image_path
+
             # Debug: Save rendered image
             if self.debug.enabled:
                 img = cv2.imread(image_path)
                 if img is not None:
                     self.debug.save_image(img, "01_rendered_pdf")
 
-            # Stage 2: Preprocessing (optional)
+            # Stage 2: Preprocessing (optional) - only for geometry extraction
+            processed_image_path = image_path
             if self.config.preprocess:
-                image_path = await self._stage_preprocess(image_path, result)
+                processed_image_path = await self._stage_preprocess(image_path, result)
 
                 # Debug: Save preprocessed image
                 if self.debug.enabled:
-                    img = cv2.imread(image_path)
+                    img = cv2.imread(processed_image_path)
                     if img is not None:
                         self.debug.save_image(img, "02_preprocessed")
 
-            # Stage 3: Gemini Analysis
-            analysis = await self._stage_analyze(image_path, result)
+            # Stage 3: Gemini Analysis - USE ORIGINAL IMAGE for better text detection
+            analysis = await self._stage_analyze(original_image_path, result)
             if not analysis:
                 return result
             result.analysis = analysis
 
             # Debug: Save analysis regions overlay
             if self.debug.enabled and analysis:
-                img = cv2.imread(image_path)
+                img = cv2.imread(original_image_path)
                 if img is not None:
                     text_regions = [{"bounds": [t.position[0]-10, t.position[1]-10, t.position[0]+100, t.position[1]+20]} for t in analysis.elements.text]
                     self.debug.save_with_overlay(img, "03_gemini_analysis", text_regions=text_regions)
@@ -910,14 +921,28 @@ class UnifiedPipeline:
                 return result
             result.calibration = calibration
 
-            # Stage 5: Extraction
-            entities = await self._stage_extract(image_path, analysis, calibration, result)
+            # Stage 5: Extraction - use preprocessed for geometry, original for details
+            entities = await self._stage_extract(processed_image_path, analysis, calibration, result)
+
+            # Stage 5b: Linetype & Lineweight Detection on ORIGINAL image
+            if entities:
+                entities = await self._stage_detect_line_properties(
+                    original_image_path, entities, calibration, result
+                )
             if entities is None:
                 return result
 
-            # Debug: Save extraction results overlay
+            # Stage 5c: Curve Detection (ellipses, arcs, bezier splines)
+            if self.config.detect_curves:
+                curve_entities = await self._stage_detect_curves(
+                    original_image_path, calibration, result
+                )
+                if curve_entities:
+                    entities.extend(curve_entities)
+
+            # Debug: Save extraction results overlay (use original for cleaner viz)
             if self.debug.enabled:
-                img = cv2.imread(image_path)
+                img = cv2.imread(original_image_path)
                 if img is not None:
                     # Convert entities to drawable format
                     from .adaptive_extraction import EntityType
@@ -935,8 +960,8 @@ class UnifiedPipeline:
                             # Convert DWG back to pixels for visualization
                             start = props.get("start", [0,0])
                             end = props.get("end", [0,0])
-                            lv.start = calibration.from_dwg(start[0], start[1]) if calibration else (start[0], start[1])
-                            lv.end = calibration.from_dwg(end[0], end[1]) if calibration else (end[0], end[1])
+                            lv.start = calibration.to_pixels(start[0], start[1]) if calibration else (start[0], start[1])
+                            lv.end = calibration.to_pixels(end[0], end[1]) if calibration else (end[0], end[1])
                             lv.line_type = type('obj', (object,), {'value': props.get('linetype', 'continuous').lower()})()
                             lines.append(lv)
                         elif etype == "circle":
@@ -944,12 +969,12 @@ class UnifiedPipeline:
                                 pass
                             cv = CircleVis()
                             center = props.get("center", [0,0])
-                            cv.center = calibration.from_dwg(center[0], center[1]) if calibration else (center[0], center[1])
-                            cv.radius = props.get("radius", 10) / calibration.scale if calibration and calibration.scale > 0 else props.get("radius", 10)
+                            cv.center = calibration.to_pixels(center[0], center[1]) if calibration else (center[0], center[1])
+                            cv.radius = props.get("radius", 10) / calibration.scale_factor if calibration and calibration.scale_factor > 0 else props.get("radius", 10)
                             circles.append(cv)
                         elif etype in ("mtext", "text"):
                             pos = props.get("position", [0,0])
-                            px_pos = calibration.from_dwg(pos[0], pos[1]) if calibration else (pos[0], pos[1])
+                            px_pos = calibration.to_pixels(pos[0], pos[1]) if calibration else (pos[0], pos[1])
                             text_regions.append({"bounds": [px_pos[0]-10, px_pos[1]-10, px_pos[0]+100, px_pos[1]+20]})
 
                     self.debug.save_with_overlay(img, "04_extraction", lines=lines, circles=circles, text_regions=text_regions)
@@ -969,11 +994,11 @@ class UnifiedPipeline:
 
             # Stage 7: Geometry Refinement (optional)
             if self.config.refine_geometry:
-                entities = await self._stage_refine(entities, result, image_path)
+                entities = await self._stage_refine(entities, result, processed_image_path)
 
-            # Debug: Save final refined entities
+            # Debug: Save final refined entities (use original for cleaner viz)
             if self.debug.enabled:
-                img = cv2.imread(image_path)
+                img = cv2.imread(original_image_path)
                 if img is not None:
                     lines = []
                     circles = []
@@ -987,8 +1012,8 @@ class UnifiedPipeline:
                             lv = LineVis()
                             start = props.get("start", [0,0])
                             end = props.get("end", [0,0])
-                            lv.start = calibration.from_dwg(start[0], start[1]) if calibration else (start[0], start[1])
-                            lv.end = calibration.from_dwg(end[0], end[1]) if calibration else (end[0], end[1])
+                            lv.start = calibration.to_pixels(start[0], start[1]) if calibration else (start[0], start[1])
+                            lv.end = calibration.to_pixels(end[0], end[1]) if calibration else (end[0], end[1])
                             lv.line_type = type('obj', (object,), {'value': props.get('linetype', 'continuous').lower()})()
                             lines.append(lv)
                         elif etype == "circle":
@@ -996,12 +1021,12 @@ class UnifiedPipeline:
                                 pass
                             cv = CircleVis()
                             center = props.get("center", [0,0])
-                            cv.center = calibration.from_dwg(center[0], center[1]) if calibration else (center[0], center[1])
-                            cv.radius = props.get("radius", 10) / calibration.scale if calibration and calibration.scale > 0 else props.get("radius", 10)
+                            cv.center = calibration.to_pixels(center[0], center[1]) if calibration else (center[0], center[1])
+                            cv.radius = props.get("radius", 10) / calibration.scale_factor if calibration and calibration.scale_factor > 0 else props.get("radius", 10)
                             circles.append(cv)
                         elif etype in ("mtext", "text"):
                             pos = props.get("position", [0,0])
-                            px_pos = calibration.from_dwg(pos[0], pos[1]) if calibration else (pos[0], pos[1])
+                            px_pos = calibration.to_pixels(pos[0], pos[1]) if calibration else (pos[0], pos[1])
                             text_regions.append({"bounds": [px_pos[0]-10, px_pos[1]-10, px_pos[0]+100, px_pos[1]+20]})
 
                     self.debug.save_with_overlay(img, "05_refined", lines=lines, circles=circles, text_regions=text_regions)
@@ -1119,16 +1144,17 @@ class UnifiedPipeline:
             preprocessed_img = Image.fromarray(img_array)
             preprocessed_img.save(output_path)
 
-            # Update image dimensions if they changed (e.g., after deskew)
+            # Log if dimensions changed but DO NOT update result.image_width/height
+            # because Gemini analyzes the ORIGINAL image, so calibration must use original dimensions
             new_width, new_height = preprocessed_img.size
             if new_width != result.image_width or new_height != result.image_height:
                 logger.info(
                     "preprocess_dimensions_changed",
-                    old_size=(result.image_width, result.image_height),
-                    new_size=(new_width, new_height),
+                    original_size=(result.image_width, result.image_height),
+                    preprocessed_size=(new_width, new_height),
+                    note="Keeping original dimensions for calibration (Gemini uses original)",
                 )
-                result.image_width = new_width
-                result.image_height = new_height
+                # DO NOT UPDATE: result.image_width/height must match original for correct coordinate transform
 
             result.stages.append(StageResult(
                 stage="preprocess",
@@ -1302,6 +1328,325 @@ class UnifiedPipeline:
             ))
             result.error = f"Extraction failed: {e}"
             return None
+
+    async def _stage_detect_line_properties(
+        self,
+        original_image_path: str,
+        entities: List[Any],
+        calibration: Any,
+        result: PipelineResult,
+    ) -> List[Any]:
+        """
+        Stage 5b: Detect linetype and lineweight on ORIGINAL image.
+
+        This must run on the original (non-preprocessed) image because:
+        - Binarization destroys grayscale info needed for lineweight
+        - Denoising blurs dashed patterns needed for linetype detection
+        """
+        import time
+        start = time.perf_counter()
+
+        try:
+            import cv2
+            from .linetype_detection import detect_linetype, LinetypeName
+            from .thickness_detection import detect_line_thickness, mm_to_lineweight
+
+            # Load original image
+            img = cv2.imread(original_image_path)
+            if img is None:
+                logger.warning("Could not load original image for line properties")
+                return entities
+
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+            height, width = gray.shape[:2]
+
+            # Calculate DPI from calibration (needed for lineweight in mm)
+            dpi = 300  # Default
+            if calibration and calibration.scale_factor > 0:
+                # scale_factor is DWG units per pixel
+                # For inches: 1 inch = scale_factor * pixels
+                if calibration.units == "inches":
+                    dpi = int(1.0 / calibration.scale_factor)
+                elif calibration.units == "feet":
+                    dpi = int(12.0 / calibration.scale_factor)
+                elif calibration.units == "mm":
+                    dpi = int(25.4 / calibration.scale_factor)
+                dpi = max(72, min(1200, dpi))  # Clamp to reasonable range
+
+            linetype_count = 0
+            lineweight_count = 0
+
+            for entity in entities:
+                etype = entity.entity_type.value if hasattr(entity.entity_type, 'value') else str(entity.entity_type)
+
+                if etype == "line":
+                    props = entity.properties
+                    start_dwg = props.get("start", (0, 0))
+                    end_dwg = props.get("end", (0, 0))
+
+                    # Convert to pixels
+                    if calibration and hasattr(calibration, 'to_pixels'):
+                        start_px = calibration.to_pixels(start_dwg[0], start_dwg[1])
+                        end_px = calibration.to_pixels(end_dwg[0], end_dwg[1])
+                    else:
+                        start_px = start_dwg
+                        end_px = end_dwg
+
+                    # Clamp to image bounds
+                    x1 = max(0, min(width-1, int(start_px[0])))
+                    y1 = max(0, min(height-1, int(start_px[1])))
+                    x2 = max(0, min(width-1, int(end_px[0])))
+                    y2 = max(0, min(height-1, int(end_px[1])))
+
+                    # Calculate line length in pixels
+                    line_length = ((x2-x1)**2 + (y2-y1)**2)**0.5
+
+                    # Only process lines of reasonable length
+                    if line_length > 20:
+                        # Detect linetype
+                        try:
+                            linetype_result = detect_linetype(
+                                gray, (x1, y1), (x2, y2),
+                                sample_width=3,
+                            )
+                            if linetype_result and linetype_result.linetype != LinetypeName.CONTINUOUS:
+                                props["linetype"] = linetype_result.linetype.value
+                                props["linetype_confidence"] = linetype_result.confidence
+                                linetype_count += 1
+                        except Exception as e:
+                            logger.debug("linetype_detection_failed", error=str(e))
+
+                        # Detect lineweight (thickness)
+                        try:
+                            thickness_result = detect_line_thickness(
+                                gray, (x1, y1), (x2, y2),
+                                dpi=dpi,
+                            )
+                            if thickness_result:
+                                # Convert to AutoCAD lineweight
+                                lw = mm_to_lineweight(thickness_result.thickness_mm)
+                                if lw > 0:
+                                    props["lineweight"] = lw
+                                    props["thickness_mm"] = thickness_result.thickness_mm
+                                    lineweight_count += 1
+                        except Exception as e:
+                            logger.debug("lineweight_detection_failed", error=str(e))
+
+            logger.info(
+                "line_properties_detected",
+                linetypes=linetype_count,
+                lineweights=lineweight_count,
+                total_lines=sum(1 for e in entities if (e.entity_type.value if hasattr(e.entity_type, 'value') else str(e.entity_type)) == "line"),
+            )
+
+            result.stages.append(StageResult(
+                stage="line_properties",
+                success=True,
+                duration_ms=(time.perf_counter() - start) * 1000,
+                data={
+                    "linetypes_detected": linetype_count,
+                    "lineweights_detected": lineweight_count,
+                },
+            ))
+
+            return entities
+
+        except Exception as e:
+            logger.warning("Line properties detection failed", error=str(e))
+            result.stages.append(StageResult(
+                stage="line_properties",
+                success=False,
+                duration_ms=(time.perf_counter() - start) * 1000,
+                error=str(e),
+            ))
+            return entities  # Return entities unchanged on failure
+
+    async def _stage_detect_curves(
+        self,
+        image_path: str,
+        calibration: Any,
+        result: PipelineResult,
+    ) -> List[Any]:
+        """
+        Stage 5c: Detect curved elements (ellipses, arcs, bezier splines).
+
+        Finds curved geometry that line/circle detection misses:
+        - Ellipses (not circles)
+        - Partial arcs
+        - Bezier/spline curves from contours
+        """
+        import time
+        import cv2
+        start = time.perf_counter()
+
+        try:
+            from .adaptive_extraction import EntityToCreate, EntityType, ExtractionSource
+
+            # Load image
+            img = cv2.imread(image_path)
+            if img is None:
+                logger.warning("Could not load image for curve detection")
+                return []
+
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+
+            # Threshold for contour detection
+            _, binary = cv2.threshold(gray, 127, 255, cv2.THRESH_BINARY_INV)
+
+            entities = []
+            circle_count = 0
+            ellipse_count = 0
+            spline_count = 0
+
+            # Detect ellipses and circles from contours
+            if self.config.detect_ellipses:
+                try:
+                    # Find contours for ellipse/circle fitting
+                    contours, _ = cv2.findContours(
+                        binary, cv2.RETR_LIST, cv2.CHAIN_APPROX_NONE
+                    )
+
+                    for contour in contours:
+                        if len(contour) < self.config.min_curve_length:
+                            continue
+
+                        # Need at least 5 points for ellipse fitting
+                        if len(contour) < 5:
+                            continue
+
+                        # Fit ellipse to contour
+                        try:
+                            ellipse_params = cv2.fitEllipse(contour)
+                            (cx, cy), (width, height), angle = ellipse_params
+
+                            # Semi-axes (cv2 returns full width/height)
+                            semi_major = max(width, height) / 2
+                            semi_minor = min(width, height) / 2
+
+                            if semi_minor < 3:  # Too small
+                                continue
+
+                            # Calculate aspect ratio
+                            aspect_ratio = semi_major / semi_minor if semi_minor > 0 else float('inf')
+
+                            # Convert center to DWG coordinates
+                            center_dwg = calibration.to_dwg(cx, cy)
+
+                            # If aspect ratio < 1.15, it's effectively a CIRCLE
+                            if aspect_ratio < 1.15:
+                                radius_dwg = calibration.scale_length((semi_major + semi_minor) / 2)
+
+                                entities.append(EntityToCreate(
+                                    entity_type=EntityType.CIRCLE,
+                                    layer="0",
+                                    properties={
+                                        "center": center_dwg,
+                                        "radius": radius_dwg,
+                                    },
+                                    source=ExtractionSource.OPENCV,
+                                    source_element="contour_circle",
+                                ))
+                                circle_count += 1
+                            else:
+                                # It's an ellipse
+                                major_axis_dwg = calibration.scale_length(semi_major)
+                                minor_axis_dwg = calibration.scale_length(semi_minor)
+
+                                entities.append(EntityToCreate(
+                                    entity_type=EntityType.ELLIPSE,
+                                    layer="0",
+                                    properties={
+                                        "center": center_dwg,
+                                        "major_axis": major_axis_dwg,
+                                        "minor_axis": minor_axis_dwg,
+                                        "rotation": angle,
+                                        "start_angle": 0.0,
+                                        "end_angle": 360.0,
+                                    },
+                                    source=ExtractionSource.OPENCV,
+                                    source_element="contour_ellipse",
+                                ))
+                                ellipse_count += 1
+
+                        except cv2.error:
+                            # fitEllipse can fail on some contours
+                            continue
+
+                except Exception as e:
+                    logger.debug("ellipse_detection_error", error=str(e))
+
+            # Detect curved contours and fit bezier splines
+            if self.config.detect_splines:
+                try:
+                    from .bezier_fitting import detect_curves, fit_bezier_to_points, BezierFitConfig
+
+                    curve_segments = detect_curves(
+                        binary,
+                        min_curvature=0.05,  # Lower threshold to catch more curves
+                        min_length=self.config.min_curve_length,
+                    )
+
+                    fit_config = BezierFitConfig(
+                        error_tolerance=self.config.curve_fit_tolerance,
+                    )
+
+                    for segment in curve_segments:
+                        # Fit bezier curves to the segment
+                        curves = fit_bezier_to_points(segment.points, fit_config)
+
+                        for curve in curves:
+                            # Convert control points to DWG coordinates
+                            control_points_dwg = [
+                                calibration.to_dwg(p[0], p[1])
+                                for p in curve.control_points
+                            ]
+
+                            entities.append(EntityToCreate(
+                                entity_type=EntityType.SPLINE,
+                                layer="0",
+                                properties={
+                                    "control_points": control_points_dwg,
+                                    "degree": 3,  # Cubic bezier
+                                    "is_closed": segment.is_closed,
+                                    "fit_error": curve.fit_error,
+                                },
+                                source=ExtractionSource.OPENCV,
+                                source_element="bezier_fitting",
+                            ))
+                            spline_count += 1
+
+                except Exception as e:
+                    logger.debug("spline_detection_error", error=str(e))
+
+            logger.info(
+                "curve_detection_complete",
+                circles=circle_count,
+                ellipses=ellipse_count,
+                splines=spline_count,
+            )
+
+            result.stages.append(StageResult(
+                stage="curve_detection",
+                success=True,
+                duration_ms=(time.perf_counter() - start) * 1000,
+                data={
+                    "circles": circle_count,
+                    "ellipses": ellipse_count,
+                    "splines": spline_count,
+                },
+            ))
+
+            return entities
+
+        except Exception as e:
+            logger.warning("Curve detection failed", error=str(e))
+            result.stages.append(StageResult(
+                stage="curve_detection",
+                success=False,
+                duration_ms=(time.perf_counter() - start) * 1000,
+                error=str(e),
+            ))
+            return []
 
     async def _stage_symbols(
         self,
