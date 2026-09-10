@@ -144,6 +144,39 @@ def cmd_version(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_seed_rules(args: argparse.Namespace) -> int:
+    """Load default HVAC domain rules into the database."""
+    import asyncio
+
+    async def run() -> int:
+        from aec_agent.db.connection import DatabasePoolError, initialize_database_pool
+        from aec_agent.domain.knowledge import get_knowledge_base
+        from aec_agent.domain.seed_data import get_default_hvac_rules
+
+        settings = get_settings()
+        if not settings.database_url:
+            print("DATABASE_URL is not configured — cannot seed rules.")
+            return 1
+
+        try:
+            pool = await initialize_database_pool(settings.database_url)
+        except DatabasePoolError as e:
+            print(f"Failed to connect to database: {e}")
+            return 1
+
+        try:
+            kb = await get_knowledge_base(db_pool=pool)
+            rules = get_default_hvac_rules()
+            for rule in rules:
+                await kb.add_rule(rule)
+            print(f"Loaded {len(rules)} HVAC rules into the database")
+            return 0
+        finally:
+            await pool.close()
+
+    return asyncio.run(run())
+
+
 def cmd_init(args: argparse.Namespace) -> int:
     """Initialize the AEC Agent environment."""
     from pathlib import Path
@@ -244,6 +277,13 @@ def main(argv: list[str] | None = None) -> int:
         help="Initialize AEC Agent environment"
     )
     init_parser.set_defaults(func=cmd_init)
+
+    # Seed rules command
+    seed_rules_parser = subparsers.add_parser(
+        "seed-rules",
+        help="Load default HVAC domain rules into the database"
+    )
+    seed_rules_parser.set_defaults(func=cmd_seed_rules)
 
     # Launch command (full system)
     launch_parser = subparsers.add_parser(

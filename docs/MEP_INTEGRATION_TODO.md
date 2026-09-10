@@ -4,6 +4,25 @@
 
 All 6 phases of the MEP enhancement are **built** but not yet **integrated** into the main agent. This document tracks the remaining integration work.
 
+> **2026-09-10 correction:** This plan assumed `frontend/agent.py` (the Chainlit UI
+> process) could hold a `db_pool` directly and instantiate `ProjectMemory`/
+> `RulesEngine`/etc. in-process. It cannot — only the separate FastMCP server
+> process (`mcp/server.py`) ever calls `initialize_database_pool()`; the frontend
+> only reaches the system via `MCPClient.call_tool(...)` over SSE. **Tasks 4, 5,
+> 10, 12 are done** (see below) exactly as originally documented, since they're
+> server-side and use the existing `get_database_pool()`/`get_embedding_service()`
+> pattern from `mcp/server.py`. **Tasks 1, 2, 3, 6, 7, 8, 9, 11 are NOT done** and
+> need redesigning around a new imperative MCP tool call from `agent.py`/`app.py`
+> (e.g. a `get_session_context` tool) rather than direct object instantiation in
+> the frontend process — not yet implemented.
+
+### Done (2026-09-10)
+- ✅ Task 4 — `src/aec_agent/mcp/tools/workflow_tools.py`: `list_workflows`, `start_workflow`
+- ✅ Task 5 — `src/aec_agent/mcp/tools/validation_tools.py`: `validate_elements`, `get_suggestions`
+- ✅ Task 12 — `src/aec_agent/mcp/tools/memory_tools.py`: `store_fact`, `recall_facts`
+- ✅ Task 10 — `aec-agent seed-rules` CLI command (`cmd_seed_rules` in `cli.py`), using the actual seed function name `get_default_hvac_rules` (the doc's original `get_hvac_seed_rules` doesn't exist)
+- All three new tool files pass `get_database_pool()`/`get_embedding_service()` from `mcp/server.py` into the factory functions, so semantic search (Task 9's intent) works for these tools without any frontend changes.
+
 ---
 
 ## Current State

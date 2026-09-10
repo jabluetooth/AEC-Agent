@@ -524,10 +524,11 @@ from .unified_pipeline import (
     SymbolMethod,
     OutputFormat,
     RefinementConfig,
-    GeometryRefinementPipeline,
-    ExtractionFactory,
     vectorize_pdf,
 )
+# Extracted from unified_pipeline.py into focused sibling files (pure structural move)
+from .unified_pipeline_refinement import GeometryRefinementPipeline
+from .unified_pipeline_factory import ExtractionFactory
 
 # Phase A (Scan2CAD Parity): Linetype Detection
 from .linetype_detection import (
@@ -648,7 +649,18 @@ from .ellipse_detection import (
 )
 
 # Import MCP tools to register them with the server
-from . import mcp_tools
+# (split from the former monolithic mcp_tools.py into focused sibling modules)
+from . import mcp_tools_helpers
+from . import mcp_tools_rendering
+from . import mcp_tools_analysis
+from . import mcp_tools_calibration
+from . import mcp_tools_extraction
+from . import mcp_tools_creation
+from . import mcp_tools_hybrid
+from . import mcp_tools_symbol
+from . import mcp_tools_pipeline
+from . import mcp_tools_export
+from . import mcp_tools_knowledge
 
 __all__ = [
     # Phase 1: Data classes
@@ -1030,6 +1042,16 @@ __all__ = [
     "detect_ellipses_in_regions",
     "fit_ellipse_to_arcs",
     "is_ellipse_detection_available",
-    # MCP tools module
-    "mcp_tools",
+    # MCP tools modules (split from the former monolithic mcp_tools.py)
+    "mcp_tools_helpers",
+    "mcp_tools_rendering",
+    "mcp_tools_analysis",
+    "mcp_tools_calibration",
+    "mcp_tools_extraction",
+    "mcp_tools_creation",
+    "mcp_tools_hybrid",
+    "mcp_tools_symbol",
+    "mcp_tools_pipeline",
+    "mcp_tools_export",
+    "mcp_tools_knowledge",
 ]

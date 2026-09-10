@@ -444,11 +444,12 @@ async def _call_llm(prompt: str, provider: str = "groq") -> str:
 
 async def _call_groq(prompt: str) -> str:
     """Call Groq API."""
-    import os
-
     import httpx
 
-    api_key = os.environ.get("GROQ_API_KEY")
+    from aec_agent.config.settings import get_settings
+
+    settings = get_settings()
+    api_key = settings.groq_api_key
     if not api_key:
         raise ValueError("GROQ_API_KEY environment variable not set")
 
@@ -460,7 +461,7 @@ async def _call_groq(prompt: str) -> str:
                 "Content-Type": "application/json",
             },
             json={
-                "model": "llama-3.3-70b-versatile",
+                "model": settings.groq_model,
                 "messages": [{"role": "user", "content": prompt}],
                 "temperature": 0.1,
                 "max_tokens": 500,
@@ -477,13 +478,18 @@ async def _call_gemini(prompt: str) -> str:
 
     import httpx
 
-    api_key = os.environ.get("GOOGLE_API_KEY") or os.environ.get("GEMINI_API_KEY")
+    from aec_agent.config.settings import get_settings
+
+    settings = get_settings()
+    # Preserve original fallback order: GOOGLE_API_KEY env var takes precedence
+    # over the settings-backed GEMINI_API_KEY.
+    api_key = os.environ.get("GOOGLE_API_KEY") or settings.gemini_api_key
     if not api_key:
         raise ValueError("GOOGLE_API_KEY or GEMINI_API_KEY environment variable not set")
 
     async with httpx.AsyncClient(timeout=30.0) as client:
         response = await client.post(
-            f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={api_key}",
+            f"https://generativelanguage.googleapis.com/v1beta/models/{settings.gemini_model}:generateContent?key={api_key}",
             headers={"Content-Type": "application/json"},
             json={
                 "contents": [{"parts": [{"text": prompt}]}],
@@ -497,11 +503,12 @@ async def _call_gemini(prompt: str) -> str:
 
 async def _call_openai(prompt: str) -> str:
     """Call OpenAI API."""
-    import os
-
     import httpx
 
-    api_key = os.environ.get("OPENAI_API_KEY")
+    from aec_agent.config.settings import get_settings
+
+    settings = get_settings()
+    api_key = settings.openai_api_key
     if not api_key:
         raise ValueError("OPENAI_API_KEY environment variable not set")
 

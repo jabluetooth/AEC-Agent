@@ -23,10 +23,19 @@ from aec_agent.mcp.server import mcp, trigger_background_sync
 from aec_agent.mcp.tools import (  # noqa: F401
     autocad,
     common,
+    memory_tools,
     mep_tools,
     metadata,
-    raster_design,
+    raster_design_cleanup,
+    raster_design_entities,
+    raster_design_import,
+    raster_design_ocr,
+    raster_design_pipeline,
+    raster_design_status,
+    raster_design_vectorize,
     revit,
+    validation_tools,
+    workflow_tools,
 )
 from aec_agent.utils.logging import setup_logging
 

@@ -48,7 +48,7 @@ Vision: **AI that autonomously designs MEP, LV, and Fire Alarm systems** in Auto
 |-------|-------|--------|
 | 1 | Foundation (cache, Groq/Gemini) | **Complete** |
 | 2 | Raster Design (PDF to DWG) | **Complete** |
-| 3 | Knowledge Base (LA codes, catalogs, formulas) | Pending |
+| 3 | Knowledge Base (LA codes, catalogs, formulas) | **Complete** |
 | 4 | HVAC Design (CMC + ASHRAE) | Pending |
 | 5 | Fire Alarm Design (CFC + NFPA 72) | Pending |
 | 6 | Low Voltage Design (TIA/EIA + BICSI) | Pending |
@@ -57,4 +57,4 @@ Vision: **AI that autonomously designs MEP, LV, and Fire Alarm systems** in Auto
 | 9 | Multi-System Coordination | Pending |
 | 10 | Intelligence & Learning | Ongoing |
 
-**Currently 40% ready.** Missing: element placement, engineering calcs, routing, code validation, knowledge base query. Build order: `query_knowledge_base` → `place_revit_family` → `calculate_*` → `find_route`.
+**Currently 40% ready.** Missing: element placement, engineering calcs, routing, code validation. `query_knowledge_base` is built (Phase 3). Build order: `place_revit_family` → `calculate_*` → `find_route`.
