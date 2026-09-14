@@ -1,4 +1,4 @@
-# BDG-MCP (AEC Agent)
+# AEC Agent
 
 AI-powered automation that bridges Large Language Models with AutoCAD and Revit via the [Model Context Protocol](https://modelcontextprotocol.io) (MCP). It acts as an intelligent sidecar, letting an LLM drive native geometric operations in AutoCAD and Revit for MEP (Mechanical, Electrical, Plumbing), HVAC, Fire Alarm, and Low Voltage design workflows — with semantic search and spatial awareness backed by PostgreSQL.
 
